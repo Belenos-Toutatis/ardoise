@@ -5,7 +5,7 @@ use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 use ardoise_core::library::{FileStamp, Library, LoadedNote, NoteEntry};
-use ardoise_core::note::{Note, PageSize};
+use ardoise_core::note::{Note, PageObject, PageSize, TextBody};
 use ardoise_hwr::Bounds;
 use ardoise_ink::Rgba;
 use chrono::{
@@ -229,6 +229,52 @@ pub fn version_of(stamp: &FileStamp) -> String {
 /// Reads the whole note of `entry`.
 pub fn read_note(library: &Library, entry: &NoteEntry) -> Result<LoadedNote, ToolError> {
     Ok(library.read(&entry.path)?)
+}
+
+/// A text frame as the assistant reads it: its text and style, and its box on the page in
+/// millimetres (turned and scaled like the page shows it). Typed on the keyboard, so exact.
+pub fn text_frame_json(note: &Note, object: &PageObject, body: &TextBody) -> serde_json::Value {
+    let [left, top, right, bottom] = object.page_bounds();
+    serde_json::json!({
+        "id": object.id,
+        "layer": object.layer,
+        "visible": note.layer_visible(object.layer),
+        "text": body.text,
+        "font": serde_json::to_value(body.font).unwrap_or_default(),
+        "bold": body.bold,
+        "size_mm": mm(body.size * object.scale),
+        "color": hex(body.color),
+        "bounds_mm": RectMm {
+            x: mm(left),
+            y: mm(top),
+            width: mm(right - left),
+            height: mm(bottom - top),
+        },
+        "quarter_turns": object.quarter_turns % 4,
+        "t_ms": object.t,
+    })
+}
+
+/// The page objects this version cannot read (a kind of a later version): how many, and their
+/// kinds. `None` when there is none.
+pub fn other_objects_json(note: &Note) -> Option<serde_json::Value> {
+    let mut kinds: Vec<&str> = note
+        .objects
+        .iter()
+        .filter(|object| object.as_text().is_none())
+        .map(|object| object.body.kind())
+        .collect();
+    if kinds.is_empty() {
+        return None;
+    }
+    let count = kinds.len();
+    kinds.sort_unstable();
+    kinds.dedup();
+    Some(serde_json::json!({
+        "count": count,
+        "kinds": kinds,
+        "note": "objects of kinds this version of Ardoise does not know: they are kept as they are and drawn nowhere here, so `render_note` does not show them",
+    }))
 }
 
 /// A note in a listing, or the identity of a note in another result.

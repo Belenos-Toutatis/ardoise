@@ -20,7 +20,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::create::uuid_v4;
-use super::revision::{edit_in_place, make_copy, make_part, previous_version};
+use super::revision::{Page, edit_in_place, make_copy, make_part, previous_version};
 use super::update::{check_title, now_ms, summary_at, summary_of};
 use crate::error::{ToolError, ToolResult, json_result};
 use crate::host::Host;
@@ -300,7 +300,7 @@ pub fn split_note(host: &Host, args: SplitNoteArgs) -> ToolResult {
             &library,
             &entry,
             &source,
-            parts.kept.strokes,
+            Page::of(parts.kept),
             stays_account,
             words.before_splitting,
         );
@@ -323,7 +323,7 @@ pub fn split_note(host: &Host, args: SplitNoteArgs) -> ToolResult {
         &library,
         &entry,
         &source,
-        parts.kept.strokes,
+        Page::of(parts.kept),
         stays_account,
         Some(&format!("{base} ({stays})")),
     )?;
@@ -655,7 +655,7 @@ pub fn straighten_shapes(host: &Host, args: StraightenArgs) -> ToolResult {
             &library,
             &entry,
             &loaded,
-            strokes,
+            Page::restroked(note, strokes),
             &account,
             word.before_straightening,
         )?;
@@ -666,7 +666,15 @@ pub fn straighten_shapes(host: &Host, args: StraightenArgs) -> ToolResult {
         result["previous_version"] = previous_version(&kept);
     } else {
         // The original is only read; the copy is a new note next to it.
-        let copy = make_copy(host, &library, &entry, &loaded, strokes, &account, None)?;
+        let copy = make_copy(
+            host,
+            &library,
+            &entry,
+            &loaded,
+            Page::restroked(note, strokes),
+            &account,
+            None,
+        )?;
         result["made_a_copy"] = true.into();
         result["modified"] = iso(copy.file.note.modified).into();
         result["note"] = serde_json::to_value(summary_of(&library, &copy))

@@ -26,7 +26,9 @@ pub struct ServerOptions {
 const INSTRUCTIONS: &str = "Ardoise is a notebook app for handwritten notes (Wacom Bamboo Slate). \
 These tools read the user's library: list and search notes, read a note's data, its recognised \
 text with positions, and render it as an image so you can see drawings, diagrams and layout \
-that the text recognition misses. Notes are named by `id` or by their path relative to the \
+that the text recognition misses. A page holds handwriting (strokes) and may also hold text \
+frames typed on the keyboard: their text is exact (not recognised) and comes with its position, \
+font, size and colour (`get_note`, `get_note_text`); the search reads it. Notes are named by `id` or by their path relative to the \
 library. Coordinates are millimetres from the top-left corner of the page. What you read is \
 sent to your provider: the notes may hold names of people. Unless the server is read-only, \
 other tools create, rename, tag, move, merge, split, straighten and export notes and store a \
@@ -36,7 +38,8 @@ added to its name). The ink of a note is never changed in the note itself: `prev
 tries a list of orders in memory (`revision_orders` gives every order and its fields), \
 `create_revision` writes them on a copy next to the note (straightening and splitting do the \
 same), and only a copy made that way can be edited again, with `edit_revision` (its version \
-before goes to the trash). Prompts (clean up a note, title and tag \
+before goes to the trash). Orders act on strokes only: a note's text frames always stay as \
+they are, and go with the part of a split that holds them. Prompts (clean up a note, title and tag \
 untitled notes, summarise a lesson, improve a note on a copy) say which tools to call and in \
 which order.";
 

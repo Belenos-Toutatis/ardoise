@@ -18,7 +18,7 @@
 use ardoise_core::format::NoteFile;
 use ardoise_core::format::revision::MAX_ENTRY_CHARS;
 use ardoise_core::library::{Library, LoadedNote, NoteEntry, TrashItem};
-use ardoise_core::note::Note;
+use ardoise_core::note::{Note, PageObject};
 use ardoise_ink::Stroke;
 use ardoise_revise::{Input, Order, Revised, apply};
 use base64::Engine as _;
@@ -148,16 +148,49 @@ pub(super) fn copy_title(words: &Words, title: &str) -> String {
     format!("{base} ({})", words.clean)
 }
 
-/// A new note next to `entry`'s note, with `strokes` in place of its strokes and the account
-/// `account`: everything else of the source is kept (paper, layers, background image, tags,
-/// narration, text), with a new id, the same `created`, `favorite` off. The source's file is only
-/// read. Returns the copy as written.
+/// What a page holds after an operation that rewrites a note: its ink and its page objects (text
+/// frames). Both always travel together, so that a note's objects are never lost, nor copied to
+/// two notes, by a path that rebuilds it.
+pub(super) struct Page {
+    pub strokes: Vec<Stroke>,
+    pub objects: Vec<PageObject>,
+}
+
+impl Page {
+    /// `strokes` on the page of `note`, whose objects stay as they are: orders and straightening
+    /// act on strokes only.
+    pub(super) fn restroked(note: &Note, strokes: Vec<Stroke>) -> Page {
+        Page {
+            strokes,
+            objects: note.objects.clone(),
+        }
+    }
+
+    /// The page of `note` as it is (what a split keeps: its strokes and the objects that stayed).
+    pub(super) fn of(note: Note) -> Page {
+        Page {
+            strokes: note.strokes,
+            objects: note.objects,
+        }
+    }
+
+    /// `note` with this page's ink and objects.
+    fn put_in(self, note: &mut Note) {
+        note.strokes = self.strokes;
+        note.objects = self.objects;
+    }
+}
+
+/// A new note next to `entry`'s note, with `page` (its strokes and objects) in place of the
+/// source's and the account `account`: everything else of the source is kept (paper, layers,
+/// background image, tags, narration, text), with a new id, the same `created`, `favorite` off.
+/// The source's file is only read. Returns the copy as written.
 pub(super) fn make_copy(
     host: &Host,
     library: &Library,
     entry: &NoteEntry,
     source: &LoadedNote,
-    strokes: Vec<Stroke>,
+    page: Page,
     account: &str,
     title: Option<&str>,
 ) -> Result<LoadedNote, ToolError> {
@@ -178,7 +211,7 @@ pub(super) fn make_copy(
     file.thumbnail = None;
     file.mark_as_revision_of(source_note, now, account);
     let mut revised = file.note.clone();
-    revised.strokes = strokes;
+    page.put_in(&mut revised);
     let saved = host
         .write
         .create_revision(library, &entry.binder, file, revised)?;
@@ -209,17 +242,17 @@ pub(super) fn make_part(
     Ok(library.read(&saved.path)?)
 }
 
-/// The revision just read, with `strokes` in place of its strokes and `account` added to its
-/// account, saved over its file with the stamp it was read at (`noteConflict` when it changed
-/// meanwhile). The version before goes first to the library's trash as a note of its own,
-/// titled "<title> (<before>)" (taken back when the save fails). `notARevision` for any other
-/// note, before anything is done.
+/// The revision just read, with `page` (its strokes and objects) in place of its own and
+/// `account` added to its account, saved over its file with the stamp it was read at
+/// (`noteConflict` when it changed meanwhile). The version before goes first to the library's
+/// trash as a note of its own, titled "<title> (<before>)" (taken back when the save fails).
+/// `notARevision` for any other note, before anything is done.
 pub(super) fn edit_in_place(
     host: &Host,
     library: &Library,
     entry: &NoteEntry,
     revision: &LoadedNote,
-    strokes: Vec<Stroke>,
+    page: Page,
     account: &str,
     before: &str,
 ) -> Result<(LoadedNote, TrashItem), ToolError> {
@@ -227,7 +260,7 @@ pub(super) fn edit_in_place(
         return Err(not_a_revision());
     }
     let mut note = revision.file.note.clone();
-    note.strokes = strokes;
+    page.put_in(&mut note);
     let kept = keep_previous(host, library, revision, before)?;
     if let Err(error) =
         host.write
@@ -305,12 +338,13 @@ pub fn create_revision(host: &Host, args: CreateRevisionArgs) -> ToolResult {
     check_version(&source, &args.expected_version)?;
     let revised = revise(&source, &args.orders)?;
     let stroke_count = revised.strokes.len();
+    // Orders act on strokes only: the page's objects (text frames) stay as they are.
     let copy = make_copy(
         host,
         &library,
         &entry,
         &source,
-        revised.strokes,
+        Page::restroked(&source.file.note, revised.strokes),
         account,
         args.title.as_deref(),
     )?;
@@ -343,7 +377,7 @@ pub fn edit_revision(host: &Host, args: EditRevisionArgs) -> ToolResult {
         &library,
         &entry,
         &loaded,
-        revised.strokes,
+        Page::restroked(&loaded.file.note, revised.strokes),
         account,
         words.before_retouching,
     )?;
