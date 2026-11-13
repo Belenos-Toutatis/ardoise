@@ -326,6 +326,9 @@ pub struct NoteEntry {
     pub modified: i64,
     pub tags: Vec<String>,
     pub favorite: bool,
+    /// The text of the page's text frames on visible layers ([`Note::typed_text`]), for the
+    /// search: `note.json` holds the frames, so listing reads nothing more. Empty without any.
+    pub typed_text: String,
     /// To pass back to [`Library::save`].
     pub stamp: FileStamp,
     /// Set when the file is a sync client's conflict copy.
@@ -902,6 +905,7 @@ fn read_entry(path: &Path, binder: PathBuf) -> Result<NoteEntry, LibraryError> {
         .unwrap_or_default()
         .to_owned();
     let note = header.note;
+    let typed_text = note.typed_text();
     Ok(NoteEntry {
         path: path.to_path_buf(),
         binder,
@@ -913,6 +917,7 @@ fn read_entry(path: &Path, binder: PathBuf) -> Result<NoteEntry, LibraryError> {
         modified: note.modified,
         tags: note.tags,
         favorite: note.favorite,
+        typed_text,
         stamp,
     })
 }

@@ -111,6 +111,19 @@ fn crop(image: &Image, left: u32, top: u32, right: u32, bottom: u32) -> Image {
     }
 }
 
+/// `source` reduced to the strokes `strokes` (indices into its strokes, sorted): what a drawing's
+/// image is cropped from. The page's objects (text frames) are taken off: the text next to a
+/// drawing does not creep into it, typed text no more than handwriting.
+fn drawings_only(source: &Note, strokes: &[usize]) -> Note {
+    let mut note: Note = source.clone();
+    note.strokes = strokes
+        .iter()
+        .filter_map(|&index| source.strokes.get(index).cloned())
+        .collect();
+    note.objects.clear();
+    note
+}
+
 /// The images of `areas`, cropped from one rendering of the note that holds only their strokes
 /// (the text next to a drawing does not creep into it). Ink on white, except on a dark paper,
 /// where the paper stays so that light ink remains visible.
@@ -124,11 +137,7 @@ fn render_drawings(source: &LoadedSource, areas: &[&DrawingArea]) -> CommandResu
         .collect();
     strokes.sort_unstable();
     strokes.dedup();
-    let mut note: Note = source.note.clone();
-    note.strokes = strokes
-        .iter()
-        .filter_map(|&index| source.note.strokes.get(index).cloned())
-        .collect();
+    let note = drawings_only(&source.note, &strokes);
     let paper = paper_color(note.background.paper);
     let luminance =
         0.299 * f32::from(paper.r) + 0.587 * f32::from(paper.g) + 0.114 * f32::from(paper.b);
@@ -803,6 +812,44 @@ mod tests {
                 .iter()
                 .any(|p| p[..3] == [255, 255, 255])
         );
+    }
+
+    #[test]
+    fn a_drawing_is_cropped_without_the_text_frames_of_the_page() {
+        use ardoise_core::note::{FontFamily, PageObject, TextBody};
+
+        let plain = source();
+        let mut typed = source();
+        // A frame right on the drawing (stroke 2 is at 6 000, 4 000).
+        typed.note.objects = vec![PageObject::text(
+            "titre",
+            0,
+            0,
+            6_000.0,
+            4_000.0,
+            TextBody {
+                text: "Légende".into(),
+                font: FontFamily::Andika,
+                bold: true,
+                size: 900.0,
+                color: Rgba::BLACK,
+            },
+        )];
+        // What the crop is taken from: the strokes asked for, no object.
+        let only = drawings_only(&typed.note, &[2]);
+        assert_eq!(only.strokes, [typed.note.strokes[2].clone()]);
+        assert!(only.objects.is_empty());
+        assert_eq!(typed.note.objects.len(), 1, "the note itself is untouched");
+
+        let drawing_of = |source: &LoadedSource| {
+            let fake = Fake::new(true);
+            let structure = structure_for(&source.note, &reading(None), &fake, None);
+            match document_of(source, &structure, true).unwrap().blocks.pop() {
+                Some(Block::Drawing(drawing)) => drawing,
+                other => panic!("a drawing, got {other:?}"),
+            }
+        };
+        assert_eq!(drawing_of(&typed), drawing_of(&plain));
     }
 
     #[test]

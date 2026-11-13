@@ -1301,7 +1301,7 @@ fn revision_is_written_only_when_set_and_round_trips() {
         note_json_value(&file)["format"]["minor"],
         FormatVersion::CURRENT.minor
     );
-    assert!(FormatVersion::CURRENT.minor >= 3);
+    const { assert!(FormatVersion::CURRENT.minor >= 3) };
 
     let reread = read_from_bytes(&bytes).unwrap();
     assert_eq!(reread, file);

@@ -30,8 +30,8 @@ use serde_json::json;
 use crate::error::{ToolError, ToolResult, content_result, json_result};
 use crate::host::Host;
 use crate::notes::{
-    NoteSummary, PageMm, RectMm, binder_text, find_note, hex, iso, mm, parse_date, read_note,
-    relative_path, version_of,
+    NoteSummary, PageMm, RectMm, binder_text, find_note, hex, iso, mm, other_objects_json,
+    parse_date, read_note, relative_path, text_frame_json, version_of,
 };
 use crate::server::ArdoiseServer;
 use crate::strokes::{DEFAULT_MAX_POINTS, MAX_POINTS, StrokeInfo, polylines};
@@ -247,7 +247,7 @@ impl ArdoiseServer {
         self.blocking(list_tags).await
     }
 
-    /// Search the notes like the app does: titles, tags, binders and the recognised handwriting, accents and case ignored. Each result says where it matched and shows a snippet of the text. Notes whose handwriting has not been read yet are not searched by text; the result counts them (`get_note_text` reads one).
+    /// Search the notes like the app does: titles, tags, binders, the text typed in the page's text frames and the recognised handwriting, accents and case ignored (a match in typed text says `typed_text` in `matched_in`). Each result says where it matched and shows a snippet of the text. Notes whose handwriting has not been read yet are not searched by text; the result counts them (`get_note_text` reads one).
     #[tool(
         name = "search_notes",
         annotations(
@@ -265,7 +265,7 @@ impl ArdoiseServer {
         self.blocking(move |host| search_notes(host, args)).await
     }
 
-    /// Read a note's data: metadata, `version` (changes whenever the note's file changes), page, layers, `revision` (only on a retouched copy: whose copy it is and its account of changes), paper and template (`background.ruling` gives the first rule's distance from the top and the distance between two rules, in mm, for the templates with horizontal rules to write on), background image, duration and, on request, its strokes (a summary of each, or simplified polylines in millimetres). Use `render_note` to see it and `get_note_text` to read its handwriting.
+    /// Read a note's data: metadata, `version` (changes whenever the note's file changes), page, layers, `revision` (only on a retouched copy: whose copy it is and its account of changes), paper and template (`background.ruling` gives the first rule's distance from the top and the distance between two rules, in mm, for the templates with horizontal rules to write on), background image, duration, the page's text frames (`text_frames`: text typed on the keyboard, exact, with `font`, `bold`, `size_mm`, `color` and `bounds_mm` on the page, in reading order; `other_objects` says when the page holds objects of a kind this version does not know, which `render_note` does not show) and, on request, its strokes (a summary of each, or simplified polylines in millimetres). Use `render_note` to see it and `get_note_text` to read its handwriting.
     #[tool(
         name = "get_note",
         annotations(
@@ -283,7 +283,7 @@ impl ArdoiseServer {
         self.blocking(move |host| get_note(host, args)).await
     }
 
-    /// The handwriting of a note as text: the recognised lines with their bounding boxes in millimetres, and its structure (paragraphs, list items, drawings with their bounds and stroke indices) when it can be found. Reads the note now if it was not read yet, which can take a few seconds. The recognition makes mistakes, especially on formulas and diagrams: compare with `render_note`. If a corrected transcription is stored for the ink as it is now, `text` is that one, `is_correction` is true and `recognised_text` is the recogniser's.
+    /// The handwriting of a note as text: the recognised lines with their bounding boxes in millimetres, and its structure (paragraphs, list items, drawings with their bounds and stroke indices) when it can be found. Reads the note now if it was not read yet, which can take a few seconds. The recognition makes mistakes, especially on formulas and diagrams: compare with `render_note`. If a corrected transcription is stored for the ink as it is now, `text` is that one, `is_correction` is true and `recognised_text` is the recogniser's. Text typed in the page's text frames is not recognised: `typed_frames` gives each frame's exact text with its box in millimetres (`source: "typed"`, every layer, with `visible`) and `typed_text` the text of the visible ones in reading order, joined by line breaks; read them with the lines, as the page's text.
     #[tool(
         name = "get_note_text",
         annotations(
@@ -521,6 +521,22 @@ fn query_words(query: &str) -> Vec<String> {
     words
 }
 
+/// Words of context on each side of a snippet.
+const SNIPPET_WORDS: usize = 6;
+
+/// Where `word` (folded) is in `text`: the first white-space separated word whose folded form
+/// contains it, with up to [`SNIPPET_WORDS`] words before and after, as the handwriting
+/// search's snippets.
+fn typed_snippet(text: &str, word: &str) -> Option<(String, String, String)> {
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    let at = tokens.iter().position(|token| fold(token).contains(word))?;
+    Some((
+        tokens[at.saturating_sub(SNIPPET_WORDS)..at].join(" "),
+        tokens[at].to_owned(),
+        tokens[at + 1..(at + 1 + SNIPPET_WORDS).min(tokens.len())].join(" "),
+    ))
+}
+
 pub fn search_notes(host: &Host, args: SearchNotesArgs) -> ToolResult {
     let words = query_words(&args.query);
     if words.is_empty() {
@@ -544,12 +560,19 @@ pub fn search_notes(host: &Host, args: SearchNotesArgs) -> ToolResult {
         let title = fold(&note.title);
         let tags = fold(&note.tags.join("\n"));
         let binder = fold(&binder_text(&note.binder));
+        // The text frames the listing already holds (`note.json`): typed, so exact.
+        let typed = fold(&note.typed_text);
         let hit = hits.get(&note.path);
         let mut places: Vec<&str> = Vec::new();
         let mut all = true;
         for word in &words {
             let mut seen = false;
-            for (place, haystack) in [("title", &title), ("tags", &tags), ("binder", &binder)] {
+            for (place, haystack) in [
+                ("title", &title),
+                ("tags", &tags),
+                ("binder", &binder),
+                ("typed_text", &typed),
+            ] {
                 if haystack.contains(word.as_str()) {
                     seen = true;
                     if !places.contains(&place) {
@@ -570,10 +593,18 @@ pub fn search_notes(host: &Host, args: SearchNotesArgs) -> ToolResult {
         }
         let mut entry = serde_json::to_value(NoteSummary::of_entry(&library, note))
             .map_err(|e| ToolError::new("unexpected", e))?;
+        let in_typed_text = places.contains(&"typed_text");
         entry["matched_in"] = places.into();
         if let Some(hit) = hit.filter(|h| !h.word.is_empty()) {
             entry["snippet"] =
                 json!({ "before": hit.before, "word": hit.word, "after": hit.after });
+        } else if in_typed_text
+            && let Some((before, word, after)) = words
+                .iter()
+                .find_map(|word| typed_snippet(&note.typed_text, word))
+        {
+            // No handwriting snippet: show where the typed text matched.
+            entry["snippet"] = json!({ "before": before, "word": word, "after": after });
         }
         found.push((note, entry));
     }
@@ -631,8 +662,7 @@ pub fn get_note(host: &Host, args: GetNoteArgs) -> ToolResult {
                 "index": index,
                 "name": layer.name,
                 "visible": layer.visible,
-                "stroke_count": note.strokes.iter().filter(|s| s.layer as usize == index).count(),
-            })
+                "stroke_count": note.strokes.iter().filter(|s| s.layer as usize == index).count(),            })
         })
         .collect();
     let image = note.background_image.as_ref().map(|image| {
@@ -668,7 +698,17 @@ pub fn get_note(host: &Host, args: GetNoteArgs) -> ToolResult {
         },
         "duration_ms": duration_ms,
         "has_narration": file.audio.is_some(),
+        // The text frames of the page, typed on the keyboard (exact text, unlike the recognised
+        // handwriting), in reading order, whatever their layer's visibility.
+        "text_frames": note
+            .text_frames()
+            .into_iter()
+            .map(|(object, body)| text_frame_json(note, object, body))
+            .collect::<Vec<_>>(),
     });
+    if let Some(others) = other_objects_json(note) {
+        result["other_objects"] = others;
+    }
     // A retouched copy says whose copy it is and what was changed: it is the only kind of note
     // `edit_revision` accepts.
     if let Some(revision) = &file.revision {
@@ -770,6 +810,20 @@ pub fn get_note_text(host: &Host, args: GetNoteTextArgs) -> ToolResult {
     if correction.is_some() {
         result["recognised_text"] = recognised.into();
     }
+    // Text typed on the keyboard is not recognised: it is exact, and a correction of the
+    // handwriting does not concern it. Its frames come apart from the lines, flagged `typed`,
+    // with their place on the page like the lines have.
+    result["typed_text"] = note.typed_text().into();
+    result["typed_frames"] = note
+        .text_frames()
+        .into_iter()
+        .map(|(object, body)| {
+            let mut frame = text_frame_json(note, object, body);
+            frame["source"] = "typed".into();
+            frame
+        })
+        .collect::<Vec<_>>()
+        .into();
     json_result(result)
 }
 

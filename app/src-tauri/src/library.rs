@@ -93,6 +93,10 @@ pub struct NoteSummary {
     pub modified: i64,
     pub tags: Vec<String>,
     pub favorite: bool,
+    /// The text of the note's text frames on visible layers, "\n"-joined, for the interface's
+    /// search; empty without any (`Note::typed_text`). `note.json` holds it: listing reads nothing
+    /// more.
+    pub typed_text: String,
     pub stamp: FileStamp,
     pub conflict: Option<ConflictInfo>,
 }
@@ -109,6 +113,7 @@ impl From<NoteEntry> for NoteSummary {
             modified: entry.modified,
             tags: entry.tags,
             favorite: entry.favorite,
+            typed_text: entry.typed_text,
             stamp: entry.stamp,
             conflict: entry.conflict.map(|c| ConflictInfo {
                 original_name: c.original_name,
@@ -146,6 +151,7 @@ pub(crate) fn summary_of(
         modified: note.modified,
         tags: note.tags.clone(),
         favorite: note.favorite,
+        typed_text: note.typed_text(),
         stamp,
     }
 }
@@ -657,6 +663,57 @@ pub(crate) mod tests {
         let problems = list(&library).problems;
         assert_eq!(problems.len(), 1);
         assert_eq!(problems[0].code, "noteDamaged");
+    }
+
+    #[test]
+    fn a_listed_note_gives_the_typed_text_of_its_frames() {
+        use ardoise_core::note::{FontFamily, PageObject, TextBody};
+
+        let (_dir, library) = library();
+        let frame = |id: &str, layer: u32, y: f32, text: &str| {
+            PageObject::text(
+                id,
+                layer,
+                0,
+                1_000.0,
+                y,
+                TextBody {
+                    text: text.to_owned(),
+                    font: FontFamily::LatinModern,
+                    bold: false,
+                    size: 600.0,
+                    color: Rgba::BLACK,
+                },
+            )
+        };
+        let mut note = sample_note("Avec texte");
+        note.layers.push(ardoise_core::note::Layer {
+            name: "Cachée".into(),
+            visible: false,
+        });
+        note.objects = vec![
+            frame("b", 0, 3_000.0, "Deuxième\nligne"),
+            frame("a", 0, 1_000.0, "Première"),
+            frame("h", 1, 2_000.0, "Masquée"),
+        ];
+        let saved = library
+            .create(&binder_path(""), &NoteFile::new(note.clone()))
+            .unwrap();
+        write_sample(&library, "", "Sans texte");
+
+        let listing = list(&library);
+        let json = serde_json::to_value(&listing).unwrap();
+        let notes = json["notes"].as_array().unwrap();
+        let typed = |title: &str| {
+            let note = notes.iter().find(|n| n["title"] == title).unwrap();
+            note["typedText"].clone()
+        };
+        // Reading order, visible layers only; a note without frames has an empty string.
+        assert_eq!(typed("Avec texte"), "Première\nDeuxième\nligne");
+        assert_eq!(typed("Sans texte"), "");
+        // The summary of a note just written says the same.
+        let summary = summary_of(&library, &saved.path, &note, saved.stamp);
+        assert_eq!(summary.typed_text, "Première\nDeuxième\nligne");
     }
 
     #[test]

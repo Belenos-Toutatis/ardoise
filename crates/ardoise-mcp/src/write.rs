@@ -262,7 +262,7 @@ impl ArdoiseServer {
             .await
     }
 
-    /// Merge two or more notes into a new note, in the given order: `overlay` puts their ink on one page, `endToEnd` lays the pages one after the other. The source notes are not changed. The new note is in the binder of the first one.
+    /// Merge two or more notes into a new note, in the given order: `overlay` puts their ink on one page, `endToEnd` lays the pages one after the other. The text frames of the notes go with their ink. The source notes are not changed. The new note is in the binder of the first one.
     #[tool(
         name = "merge_notes",
         annotations(
@@ -281,7 +281,7 @@ impl ArdoiseServer {
             .await
     }
 
-    /// Split a note in two. Give `at_ms` (what is written from that instant on is the second part; milliseconds on the clock of the strokes' `start_ms` and `end_ms` in `get_note`) or `polygon` (the strokes mostly inside this polygon of the page, in millimetres, are the second part). The ink of a note that is not a revision is never changed: its file is not written, and both parts are new notes next to it, each a revision of it (titled "<title> (start)" or "(rest)" for the first, "(continued)" or "(excerpt)" for the second, or `title`); the result names both, `kept` and `created`, and says `original_unchanged`. On a note that already is a revision the first part is saved over it, its version before goes to the library's trash as a note of its own that the user can restore, and the second is a new note, a revision of it.
+    /// Split a note in two. Give `at_ms` (what is written from that instant on is the second part; milliseconds on the clock of the strokes' `start_ms` and `end_ms` in `get_note`) or `polygon` (the strokes mostly inside this polygon of the page, in millimetres, are the second part). Text frames go with the part they belong to: those written from `at_ms` on (their `t_ms` in `get_note`), or whose centre is inside the polygon, are on the second part. The ink of a note that is not a revision is never changed: its file is not written, and both parts are new notes next to it, each a revision of it (titled "<title> (start)" or "(rest)" for the first, "(continued)" or "(excerpt)" for the second, or `title`); the result names both, `kept` and `created`, and says `original_unchanged`. On a note that already is a revision the first part is saved over it, its version before goes to the library's trash as a note of its own that the user can restore, and the second is a new note, a revision of it.
     #[tool(
         name = "split_note",
         annotations(
@@ -391,7 +391,7 @@ impl ArdoiseServer {
             .await
     }
 
-    /// Carry out a list of orders on a copy of a note: a new note next to it, a revision, with the retouched strokes and `summary` as the first line of its account, which the editor shows ("Copie retouchée de ...", "What changed", compare, open the original). The original is never written, whatever the orders. Everything else of the note is kept (paper, layers, background image, tags, narration), `favorite` is off, the creation date is the original's. Preview the orders first with `preview_revision`, and give the `version` it answers as `expected_version`: a note changed since is refused with `noteConflict`. Letters of a word that has to be corrected only come from the same handwriting in this same note: never from another note, whose points are not to be retyped either.
+    /// Carry out a list of orders on a copy of a note: a new note next to it, a revision, with the retouched strokes and `summary` as the first line of its account, which the editor shows ("Copie retouchée de ...", "What changed", compare, open the original). The original is never written, whatever the orders. Everything else of the note is kept (paper, layers, background image, tags, narration, text frames: orders act on strokes only), `favorite` is off, the creation date is the original's. Preview the orders first with `preview_revision`, and give the `version` it answers as `expected_version`: a note changed since is refused with `noteConflict`. Letters of a word that has to be corrected only come from the same handwriting in this same note: never from another note, whose points are not to be retyped either.
     #[tool(
         name = "create_revision",
         annotations(

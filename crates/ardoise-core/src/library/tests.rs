@@ -1345,6 +1345,61 @@ fn a_cached_listing_reopens_only_the_notes_that_changed() {
 }
 
 #[test]
+fn the_listing_gives_the_typed_text_of_a_note_without_opening_its_ink() {
+    use crate::note::{PageObject, TextBody};
+
+    let (_dir, library) = new_library();
+    let frame = |id: &str, text: &str| {
+        PageObject::text(
+            id,
+            0,
+            0,
+            100.0,
+            100.0,
+            TextBody {
+                text: text.to_owned(),
+                font: ardoise_text::FontFamily::Andika,
+                bold: false,
+                size: 600.0,
+                color: ardoise_ink::Rgba::BLACK,
+            },
+        )
+    };
+    let mut typed = note_file("t", "Avec texte");
+    typed.note.objects = vec![
+        frame("a", "Théorème de Thalès"),
+        frame("b", "énoncé\nsuite"),
+    ];
+    let typed = library.create(Path::new(""), &typed).unwrap();
+    library
+        .create(Path::new(""), &note_file("p", "Sans texte"))
+        .unwrap();
+
+    let mut cache = HeaderCache::default();
+    let listing = library.list_with(&mut cache);
+    let text_of = |id: &str| {
+        listing
+            .notes
+            .iter()
+            .find(|n| n.id == id)
+            .map(|n| n.typed_text.clone())
+            .unwrap()
+    };
+    assert_eq!(text_of("t"), "Théorème de Thalès\nénoncé\nsuite");
+    assert_eq!(text_of("p"), "");
+
+    // An edit changes the stamp: the cached entry is read again and has the new text.
+    let loaded = library.read(&typed.path).unwrap();
+    let mut file = loaded.file;
+    file.note.objects.truncate(1);
+    file.note.objects[0] = frame("a", "Seul");
+    library.save(&typed.path, &file, &loaded.stamp).unwrap();
+    let listing = library.list_with(&mut cache);
+    let entry = listing.notes.iter().find(|n| n.id == "t").unwrap();
+    assert_eq!(entry.typed_text, "Seul");
+}
+
+#[test]
 fn a_note_that_just_arrived_in_the_trash_is_kept_whatever_its_record_says() {
     let (_dir, library) = new_library();
     let saved = library
