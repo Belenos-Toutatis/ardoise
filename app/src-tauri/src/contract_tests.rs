@@ -238,40 +238,123 @@ fn a_refused_resume_is_an_event_with_a_code() {
     );
 }
 
+/// The string literals right after each `marker` in `source` (blanks and line breaks skipped): the codes a call site
+/// names. A marker followed by anything else (a variable, a call) is skipped.
+fn literals_after<'a>(source: &'a str, marker: &str) -> Vec<&'a str> {
+    let mut found = Vec::new();
+    let mut rest = source;
+    while let Some(at) = rest.find(marker) {
+        rest = &rest[at + marker.len()..];
+        if let Some(literal) = rest.trim_start().strip_prefix('"')
+            && let Some(end) = literal.find('"')
+        {
+            found.push(&literal[..end]);
+        }
+    }
+    found
+}
+
+/// `source` up to its tests.
+fn without_tests(source: &str) -> &str {
+    source.split("#[cfg(test)]").next().unwrap_or(source)
+}
+
+/// Every code the tablet paths can return, read from the code itself: each arm of `error_code` and `sync_error`
+/// (`ardoise-device::service`, every `DeviceError` the service shows), the codes the worker and the service write
+/// themselves (`StatusError::new`), those of the tablet commands (`tablet.rs`: `CommandError::new`, `StatusError::new`)
+/// and of the live hub's refusal (`code: "…"`).
+fn tablet_error_codes() -> std::collections::BTreeSet<&'static str> {
+    let service = include_str!("../../../crates/ardoise-device/src/service.rs");
+    let mapping = service
+        .split("pub fn sync_error")
+        .nth(1)
+        .and_then(|rest| rest.split("impl From<&DeviceError> for StatusError").next())
+        .expect("`sync_error` and `error_code` in ardoise-device/src/service.rs");
+    let mut codes: std::collections::BTreeSet<&'static str> =
+        literals_after(mapping, "=>").into_iter().collect();
+    for source in [
+        without_tests(service),
+        without_tests(include_str!(
+            "../../../crates/ardoise-device/src/service/worker.rs"
+        )),
+        without_tests(include_str!(
+            "../../../crates/ardoise-device/src/service/worker/board.rs"
+        )),
+        without_tests(include_str!("tablet.rs")),
+    ] {
+        codes.extend(literals_after(source, "StatusError::new("));
+        codes.extend(literals_after(source, "CommandError::new("));
+    }
+    codes.extend(literals_after(
+        without_tests(include_str!("live/hub.rs")),
+        "code: ",
+    ));
+    codes
+}
+
 /// Every code the tablet paths can return (the Xiaomi's included) has its sentence in both languages: a code without
-/// one would show its technical detail alone.
+/// one would show its technical detail alone. The list is read from the code, so a new code cannot be forgotten here.
 #[test]
 fn every_error_code_of_the_tablet_paths_has_a_text_in_both_languages() {
-    const CODES: [&str; 17] = [
-        "blackboardNotFound",
-        "transferIncomplete",
-        "pageNotDeleted",
-        "notSupported",
-        "pageUnreadable",
-        "blackboardConfirmDelete",
-        "sheetOtherTablet",
-        "tabletTimeout",
-        "tabletNotConnected",
-        "tabletBusy",
-        "tabletNotRegistered",
-        "noLibrary",
-        "libraryAccess",
-        "bluetoothOff",
+    let codes = tablet_error_codes();
+    // The reading still finds what it must (a change of shape of `error_code` would leave it empty).
+    for code in [
         "bluetoothMissing",
         "tablet",
+        "transferIncomplete",
+        "blackboardConfirmDelete",
+        "sheetOtherTablet",
         "simulationOnly",
-    ];
+        "syncRefused",
+    ] {
+        assert!(codes.contains(code), "{code} not found in {codes:?}");
+    }
+    assert!(codes.len() >= 20, "{codes:?}");
     for (language, file) in [
         ("fr", include_str!("../../ui/src/locales/fr.json")),
         ("en", include_str!("../../ui/src/locales/en.json")),
     ] {
         let texts: serde_json::Value = serde_json::from_str(file).unwrap();
-        for code in CODES {
+        for code in &codes {
             let text = texts["errorCodes"][code].as_str();
             assert!(
                 text.is_some_and(|text| !text.is_empty()),
                 "{language}: no text for the error code {code}"
             );
         }
+    }
+}
+
+/// The live snapshot names the tablet its session writes with (`lib/live.ts`: `tablet: 'slate' | 'blackboard' | null`):
+/// `null` until a tablet streams, then that tablet (docs/design/blackboard.md §5.5).
+#[test]
+fn the_live_snapshot_names_its_tablet() {
+    use crate::live::session::LiveSession;
+    use crate::live::{LiveStyle, LiveViewState};
+    let session = || {
+        let page = ardoise_core::note::A4_LANDSCAPE;
+        LiveSession::new(
+            1,
+            page,
+            LiveStyle::default(),
+            LiveViewState::whole(page),
+            false,
+            0,
+        )
+    };
+    assert_eq!(
+        serde_json::to_value(session().snapshot()).unwrap()["tablet"],
+        json!(null)
+    );
+    for (kind, word) in [
+        (TabletKind::Slate, "slate"),
+        (TabletKind::Blackboard, "blackboard"),
+    ] {
+        let mut session = session();
+        session.set_tablet(kind);
+        assert_eq!(
+            serde_json::to_value(session.snapshot()).unwrap()["tablet"],
+            word
+        );
     }
 }

@@ -453,6 +453,7 @@ fn snapshot_of(note: Note) -> LiveSnapshot {
         can_redo: true,
         page_paper: ardoise_core::note::Paper::White,
         image_pixels: None,
+        tablet: Some(TabletKind::Blackboard),
     }
 }
 
@@ -500,6 +501,8 @@ fn a_viewer_never_gets_library_paths_titles_tags_nor_the_screen() {
         "imagePixels",
         "pagePaper",
         "kraft",
+        "\"tablet\":",
+        "blackboard",
     ] {
         assert!(!text.contains(secret), "{secret} in {text}");
     }

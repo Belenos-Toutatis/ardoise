@@ -13,7 +13,9 @@ use ardoise_core::format::NoteFile;
 use ardoise_core::library::LoadedNote;
 use ardoise_core::note::{Note, PageSize};
 use ardoise_core::settings::Orientation;
-use ardoise_device::pages::{BLACKBOARD_PAGE, turn_point};
+#[cfg(doc)]
+use ardoise_device::pages::BLACKBOARD_PAGE;
+use ardoise_device::pages::{is_blackboard_page, turn_point};
 use ardoise_device::transport::TabletKind;
 use ardoise_media::replay::{ReplayOptions, Timeline};
 use ardoise_media::{Narration, NarrationHeader, narration_header};
@@ -126,13 +128,14 @@ pub fn hold_for(sheet: PageSize, setting: Orientation) -> Orientation {
 }
 
 /// Whether a tablet of `kind` may write on a resumed sheet of size `sheet`, without its ink being
-/// shrunk, turned or lost: the blackboard only on its own page ([`BLACKBOARD_PAGE`]), which it
-/// covers exactly at its own scale (it is never turned, nor are its records); the Slate on every
-/// other sheet, as before the blackboard (turned to how the sheet is held and fitted in it), never
-/// on the blackboard's page (its ink would be shrunk to the narrower portrait page). Any other pair
-/// ends the resumed run (`sheetOtherTablet`), nothing written on the sheet.
+/// shrunk, turned or lost: the blackboard only on its own page ([`BLACKBOARD_PAGE`], or a size it
+/// wrote with before a calibration: [`is_blackboard_page`]), which it covers at its own scale (it
+/// is never turned, nor are its records); the Slate on every other sheet, as before the blackboard
+/// (turned to how the sheet is held and fitted in it), never on a blackboard page (its ink would
+/// be shrunk to the narrower portrait page). Any other pair ends the resumed run
+/// (`sheetOtherTablet`), nothing written on the sheet.
 pub fn tablet_fits(kind: TabletKind, sheet: PageSize) -> bool {
-    let board_page = sheet == BLACKBOARD_PAGE;
+    let board_page = is_blackboard_page(sheet);
     match kind {
         TabletKind::Blackboard => board_page,
         TabletKind::Slate => !board_page,

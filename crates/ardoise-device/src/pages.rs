@@ -29,11 +29,22 @@ use ardoise_proto::stroke::{self, INTUOS_PRO_MAGIC, SLATE_MAGIC, StrokeError, St
 use crate::session::DownloadedPage;
 use crate::transport::TabletKind;
 
-/// The blackboard's page, portrait, in the notes' units (10 µm, taken 1:1 from its units).
+/// The blackboard's page, portrait, in the notes' units (10 µm, taken 1:1 from its units): the
+/// size of the notes it writes now.
 pub const BLACKBOARD_PAGE: PageSize = PageSize {
     width: BOARD_WIDTH,
     height: BOARD_HEIGHT,
 };
+/// Every page size the blackboard has ever written with, [`BLACKBOARD_PAGE`] first. A
+/// calibration of `BOARD_WIDTH` and `BOARD_HEIGHT` (docs/design/blackboard.md §3) adds the new
+/// size here and keeps the old ones: the notes written before stay blackboard pages (resumed
+/// with the blackboard, never with the Slate).
+pub const BLACKBOARD_PAGES: [PageSize; 1] = [BLACKBOARD_PAGE];
+
+/// Whether `size` is a page the blackboard wrote ([`BLACKBOARD_PAGES`]).
+pub fn is_blackboard_page(size: PageSize) -> bool {
+    BLACKBOARD_PAGES.contains(&size)
+}
 /// A blackboard page dated before this (2020-01-01 00:00:00 UTC, Unix seconds) has a clock that
 /// was never set: its note is dated by the import ([`blackboard_note`]). The tablet was sold from
 /// December 2021 (research note §1).

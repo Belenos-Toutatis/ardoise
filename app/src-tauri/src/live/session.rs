@@ -807,6 +807,8 @@ pub struct LiveSession {
     /// The tablet that streams (the Slate until one says otherwise): the blackboard cannot be
     /// turned to follow a sheet held fixed.
     kind: TabletKind,
+    /// The tablet that said it streams, once one did ([`LiveSnapshot::tablet`]).
+    tablet: Option<TabletKind>,
     style: LiveStyle,
     /// Style before the blackboard was turned on, given back when it is turned off.
     style_before_board: Option<LiveStyle>,
@@ -847,6 +849,7 @@ impl LiveSession {
             size,
             orientation: Orientation::Landscape,
             kind: TabletKind::Slate,
+            tablet: None,
             style: style.sanitized(),
             style_before_board: None,
             board_imposed: false,
@@ -1117,6 +1120,7 @@ impl LiveSession {
             can_redo: self.current_page().history.can_redo(),
             page_paper: shown.own_paper(self.view.board),
             image_pixels: shown.image.as_ref().map(|image| image.pixels()),
+            tablet: self.tablet,
         }
     }
 
@@ -1224,9 +1228,10 @@ impl LiveSession {
             .all(|page| tablet_fits(kind, page.note.page))
     }
 
-    /// The tablet that streams is of `kind` (said before [`started`](Self::started)): the pages
-    /// held fixed are held as that tablet can be.
+    /// The tablet that streams is of `kind` (said before [`started`](Self::started), which sends
+    /// the snapshot that carries it): the pages held fixed are held as that tablet can be.
     pub fn set_tablet(&mut self, kind: TabletKind) {
+        self.tablet = Some(kind);
         if kind == self.kind {
             return;
         }

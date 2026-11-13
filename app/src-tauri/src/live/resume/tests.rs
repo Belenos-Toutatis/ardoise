@@ -2994,6 +2994,13 @@ fn the_blackboard_writes_on_its_own_page_as_it_comes_and_only_there() {
         assert!(tablet_fits(TabletKind::Slate, sheet), "{sheet:?}");
     }
     assert!(!tablet_fits(TabletKind::Slate, BLACKBOARD_PAGE));
+    // Every size the blackboard ever wrote with counts (a calibration adds one, keeps the old).
+    use ardoise_device::pages::BLACKBOARD_PAGES;
+    assert_eq!(BLACKBOARD_PAGES[0], BLACKBOARD_PAGE);
+    for page in BLACKBOARD_PAGES {
+        assert!(tablet_fits(TabletKind::Blackboard, page), "{page:?}");
+        assert!(!tablet_fits(TabletKind::Slate, page), "{page:?}");
+    }
     // A turned blackboard note is a sheet like any other.
     let turned = PageSize {
         width: BLACKBOARD_PAGE.height,

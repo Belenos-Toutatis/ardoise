@@ -218,6 +218,45 @@ fn every_window_gets_the_same_batches_and_a_closed_one_is_dropped() {
     hub.stop().unwrap();
 }
 
+/// `LiveSnapshot.tablet` (M18): `null` until the service says which tablet streams, then that
+/// tablet, kept while it reconnects; a new session starts again from `null`.
+#[test]
+fn the_snapshot_names_the_tablet_the_session_writes_with() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(config());
+    let Start::New { mut sink, snapshot } = hub
+        .start(options(&library, fixed(LiveButton::NewPage)))
+        .unwrap()
+    else {
+        panic!("a session is already running");
+    };
+    assert_eq!(snapshot.tablet, None);
+    sink.input(LiveInput::Started {
+        width: 20_500,
+        height: 27_200,
+        orientation: Orientation::Landscape,
+        kind: TabletKind::Blackboard,
+    });
+    assert_eq!(hub.snapshot().tablet, Some(TabletKind::Blackboard));
+    sink.input(LiveInput::State(LiveState::Reconnecting));
+    let reconnecting = hub.snapshot();
+    assert_eq!(reconnecting.state, LiveSessionState::Reconnecting);
+    assert_eq!(reconnecting.tablet, Some(TabletKind::Blackboard));
+    assert_eq!(
+        serde_json::to_value(&reconnecting).unwrap()["tablet"],
+        "blackboard"
+    );
+    hub.stop().unwrap();
+    let Start::New { snapshot, .. } = hub
+        .start(options(&library, fixed(LiveButton::NewPage)))
+        .unwrap()
+    else {
+        panic!("the session was stopped");
+    };
+    assert_eq!(snapshot.tablet, None);
+    hub.stop().unwrap();
+}
+
 #[test]
 fn a_portrait_session_has_portrait_pages_and_switching_turns_the_page_in_progress() {
     let (_dir, library) = library();
@@ -1257,10 +1296,13 @@ fn the_json_has_the_shapes_of_live_ts() {
             "saved",
             "state",
             "style",
+            "tablet",
             "view"
         ]
     );
     assert_eq!(snapshot["state"], "live");
+    // No tablet said yet (a session the service has not started): `null`.
+    assert_eq!(snapshot["tablet"], Value::Null);
     assert_eq!(
         (snapshot["pageIndex"].clone(), snapshot["pageCount"].clone()),
         (json!(0), json!(1))
