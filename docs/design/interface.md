@@ -393,13 +393,27 @@ The editor's side panel and the live control window's are one rail of tabs (Laye
 
 Live's Page and Fond tabs, the editor's Projection tab (projector, projected area, share) and the Son tab's « Pendant que j'écris » mode are described in `docs/design/paper-projection-narration.md`.
 
+## Escape in the editor, in steps
+
+SPEC §4.4 « Échap dans l'éditeur » (Q20). `lib/editor/escape.ts` is the order, pure (`escapeStep`); `Editor.svelte` (`onescape`) gathers the state and does what the step says. One press does one step, a key held down (`repeat`) none after the first, and `Ctrl`, `Alt` or `Meta` + Esc is not this (`Shift` + Esc is). The steps, the smallest first:
+
+1. **The unsaved-changes question** is open: « Rester » (`stay`), as before.
+2. **A dialog** the editor does not own (`modalOpen()`, the export, print, video and share dialogs, the revision dialogs, the draft offer) answers Esc itself: the editor does nothing.
+3. **A gesture under way** (`Canvas.dragging()`): `Canvas.cancelGesture()` drops it without touching the note (a stroke, a shape, a lasso, an erasing, a move or resize, a crop or zone rectangle; a pan stays where it is). Esc used to be swallowed here, so as not to change the document under the gesture.
+4. **A panel**: the cutting panel (`cancelSplit`, even from its own title field, as before), then the setting of « Redresser les formes » (`closeShapes(true)`, the focus back on its small button), then, once the focus is not in a text field, a select or an editable element (those keep their Esc: the title field gives the title back, a layer's name too), **a question inside the editor**: the deletion of the narration (`confirmDelete`) and the choice of the page of a PDF or the orientation of an image in the Fond tab (`BackgroundImageSection.cancelQuestion()`, nothing while its import runs).
+5. **A tool mode**: the replay (`leaveReplay`, which refuses while a narration is recorded: a notice says so instead of doing nothing), then the manual crop (back to the selection tool). The drawing tools are no mode to close: choosing the line tool is not opening anything.
+6. **The selection** is cleared.
+7. **Back to the library**: `leaveSaving`, which is the back button's path (`leaveRefused`: nothing during a narration recording or a video export, each with its notice) without the question: unsaved changes (or a title typed and not committed) go through `saveAndLeave`, so the writes queued are waited for, a failed save or rename keeps the editor open with its banner (`saveError`, `conflict`, `titleError`), and a conflict leaves « Enregistrer comme copie ». A second press while it saves does nothing (`escapeLeaving`).
+
+What the table in `lib/editor/shortcuts.ts` calls `escape` is this key (the entry was `deselect`). In a replay the key is the replay's own (`leaveReplay`, in `lib/editor/keys.ts`), handled by the same function.
+
 ## Closing and quitting
 
 `Ctrl + W` and `Ctrl + F4` close what is open, `Ctrl + Q` quits (`lib/close-keys.ts`). They work from a text field too.
 
 - **A modal** closes as with Esc, if it may (`dismissible`), so a screen under it leaves those keys alone (`modalOpen()`).
 - **The library**: Esc and those keys close the side panel, except a tablet test under way, which only stops by its button. With nothing open they do nothing: closing the app by a key meant for a dialog is the accident to avoid.
-- **The editor**: they cancel a split, leave the replay, then go back to the library by the back button's rules. Esc stays what it was (deselect), as it is often pressed for that.
+- **The editor**: they cancel a split, leave the replay, then go back to the library by the back button's rules. Esc has its own steps, below.
 - **Live mode**: they act as Esc does, without deselecting first (`liveKeyAction`); in the presentation window, `Ctrl + Q` closes the window, since the question about quitting belongs to the control window.
 - **`Ctrl + Q`** is handled once, in `App.svelte`, so that it also works on the first-run wizard. It goes through the same guards as `Alt + F4`, except that live mode asks first (`askBeforeQuitting`): `Alt + F4` there still ends without a question, and loses nothing.
 

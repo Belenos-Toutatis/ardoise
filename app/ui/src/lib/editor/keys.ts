@@ -28,7 +28,7 @@ export type EditorKeyKind =
   | 'fit'
   | 'fitWidth'
   | 'delete'
-  | 'deselect'
+  | 'escape'
   | 'panHold'
   | 'select'
   | 'pen'
@@ -90,7 +90,8 @@ export function editorKeyAction(e: KeyInput, context: EditorKeyContext): EditorK
     case 'Backspace':
       return { kind: 'delete' };
     case 'Escape':
-      return { kind: 'deselect' };
+      // By steps, the smallest first (`lib/editor/escape.ts`): the editor decides which.
+      return { kind: 'escape' };
     case ' ':
       return { kind: 'panHold' };
     case 'v':

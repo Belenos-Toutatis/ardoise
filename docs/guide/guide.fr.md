@@ -1076,6 +1076,16 @@ Cliquez sur une carte pour ouvrir la note. En haut : **Bibliothèque** (retour),
 modifications, Ardoise demande : **Enregistrer et revenir**, **Revenir sans enregistrer** ou **Rester**. Annuler et
 rétablir n'ont pas de limite pendant que la note est ouverte.
 
+**La touche `Échap`, par étapes.** Chaque appui fait la plus petite chose qui s'applique : d'abord il abandonne le geste en
+cours (un trait, une forme, un lasso, un déplacement, la question qu'Ardoise pose à l'écran) ; sinon il ferme le panneau ou
+l'outil ouvert (la découpe, la relecture, le recadrage à la main, le réglage de **Redresser les formes**) ; sinon il enlève
+la sélection ; sinon il **enregistre la note et revient à la bibliothèque**, comme le bouton **Bibliothèque** mais sans poser
+la question des modifications : l'enregistrement est la réponse. Si l'enregistrement échoue (note modifiée ailleurs entre-temps,
+disque plein), la note reste ouverte et le message dit pourquoi. Pendant l'enregistrement d'une narration, `Échap` ne
+quitte jamais la note : un message demande d'arrêter l'enregistrement d'abord. Dans un champ de saisie (le titre, le nom d'un
+calque, une liste de choix) et dans une fenêtre ouverte (export, impression…), `Échap` reste celui du champ ou de la fenêtre ;
+une touche maintenue ne compte que pour un appui.
+
 Pour passer à une autre note sans revenir à la bibliothèque, utilisez **Page précédente** et **Page suivante** : les
 flèches `‹` et `›` à côté du titre, ou `Alt + ←` et `Alt + →`. Elles suivent la liste que la bibliothèque montre : même
 classeur, mêmes étiquettes, même recherche, même ordre. Entre les deux flèches, Ardoise écrit la place de la note, par
@@ -1790,7 +1800,7 @@ comparent aux touches que la fenêtre traite vraiment.
 | `Ctrl + A` | Tout sélectionner (les traits du calque choisi) |
 | `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copier, couper, coller des traits |
 | `Suppr` ou `Retour arrière` | Supprimer la sélection |
-| `Échap` | Désélectionner |
+| `Échap` | Par étapes, un appui par étape : abandonner le geste en cours ; fermer la découpe, la relecture, le recadrage ou le réglage de **Redresser les formes** ; désélectionner ; enregistrer la note et revenir à la bibliothèque (jamais pendant l'enregistrement d'une narration) |
 | `Alt + ←`, `Alt + →` | **Page précédente**, **Page suivante** (la note d'avant, la note d'après dans la bibliothèque) |
 | `V`, `P`, `E`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Déplacer la page** |
 | `Espace` (maintenu) | Déplacer la page (sauf si un bouton a le focus : `Espace` agit alors sur ce bouton, y compris une icône du rail) |

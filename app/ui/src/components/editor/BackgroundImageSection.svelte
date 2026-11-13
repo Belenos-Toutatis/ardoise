@@ -112,6 +112,18 @@
     }
   }
 
+  /** A question waits for its answer here: the page of a PDF to choose, or the orientation of the image. */
+  export function questionOpen(): boolean {
+    return pending !== null || offer !== null;
+  }
+
+  /** Escape: the question is dropped (nothing is imported), unless the import is under way. */
+  export function cancelQuestion(): void {
+    if (busy) return;
+    pending = null;
+    offer = null;
+  }
+
   /** The user's answer to the offer: the note takes the image's orientation, or keeps its own. */
   function answer(switchOrientation: boolean) {
     if (!offer) return;

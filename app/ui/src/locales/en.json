@@ -842,6 +842,7 @@
   },
   "editor": {
     "back": "Library",
+    "backTitle": "Back to the library (Esc when nothing else is open or selected)",
     "loading": "Opening the note…",
     "loadError": "Cannot open this note: {message}",
     "title": "Title of the note",
@@ -1197,7 +1198,7 @@
         "selectAll": "Select all (the strokes of the chosen layer)",
         "clipboard": "Copy, cut, paste strokes",
         "delete": "Delete the selection",
-        "deselect": "Deselect (first closes the split or the setting of “Straighten shapes” when open)",
+        "escape": "Esc, in steps: cancels the gesture under way; else closes the open split, replay, crop or “Straighten shapes” setting; else deselects; else saves the note and goes back to the library (not while a sound is being recorded)",
         "fit": "Fit: the whole page",
         "fitWidth": "Width: the page across the window",
         "pages": "Previous page, next page (the note before, the note after)",

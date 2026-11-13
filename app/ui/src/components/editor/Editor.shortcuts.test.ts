@@ -228,9 +228,9 @@ const PROBES: Record<string, (v: View) => Promise<void>> = {
     await v.press('delete');
     expect(v.paths()).toBe(0);
   },
-  deselect: async (v) => {
+  escape: async (v) => {
     await v.selectAll();
-    await v.press('deselect');
+    await v.press('escape');
     expect(v.q('[data-section="selection"]')).toBeNull();
   },
   fit: async (v) => {

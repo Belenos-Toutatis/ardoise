@@ -1013,6 +1013,15 @@ Click a card to open the note. At the top: **Library** (back), the **Title of th
 Save*; when you leave with changes, Ardoise asks: **Save and go back**, **Go back without saving** or **Stay**. Undo
 and redo have no limit while the note is open.
 
+**The `Esc` key, in steps.** Each press does the smallest thing that applies: first it drops the gesture under way (a
+stroke, a shape, a lasso, a move, a question Ardoise is asking on screen); otherwise it closes the panel or the tool that is
+open (the split, the replay, the manual crop, the setting of **Straighten shapes**); otherwise it clears the selection;
+otherwise it **saves the note and goes back to the library**, like the **Library** button but without asking about the
+changes: the save is the answer. If saving fails (the note was changed elsewhere meanwhile, a full disk), the note stays
+open and the message says why. While a narration is being recorded, `Esc` never leaves the note: a message asks you to stop
+the recording first. In a text field (the title, a layer's name, a list of choices) and in an open window (export, print…),
+`Esc` stays that of the field or the window; a key held down counts as one press.
+
 To go to another note without going back to the library, use **Previous page** and **Next page**: the arrows `‹` and
 `›` beside the title, or `Alt + ←` and `Alt + →`. They follow the list the library shows: same binder, same tags, same
 search, same order. Between the two arrows, Ardoise writes the place of the note, for example **3 / 12**. The arrows
@@ -1691,7 +1700,7 @@ These shortcuts do nothing while you are typing in a text field, except those of
 | `Ctrl + A` | Select everything (the chosen layer's strokes) |
 | `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copy, cut, paste strokes |
 | `Delete` or `Backspace` | Delete the selection |
-| `Esc` | Deselect |
+| `Esc` | In steps, one press per step: drop the gesture under way; close the split, the replay, the crop or the **Straighten shapes** setting; deselect; save the note and go back to the library (never while a narration is being recorded) |
 | `Alt + ←`, `Alt + →` | **Previous page**, **Next page** (the note before, the note after in the library) |
 | `V`, `P`, `E`, `H` | Tools **Select**, **Pen**, **Eraser**, **Move the page** |
 | `Space` (held) | Move the page (unless a button has the focus: `Space` then works that button, a rail icon included) |

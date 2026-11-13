@@ -265,6 +265,11 @@
     return drag !== null;
   }
 
+  /** Escape: the gesture under way is dropped, the note is not changed (a view moved by a pan stays moved). */
+  export function cancelGesture() {
+    dropDrag();
+  }
+
   /** The page as wide as the stage (its top shown when it is taller). */
   export function fitWidth() {
     measure();

@@ -842,6 +842,7 @@
   },
   "editor": {
     "back": "Bibliothèque",
+    "backTitle": "Revenir à la bibliothèque (Échap quand rien d'autre n'est ouvert ni sélectionné)",
     "loading": "Ouverture de la note…",
     "loadError": "Impossible d'ouvrir cette note : {message}",
     "title": "Titre de la note",
@@ -1197,7 +1198,7 @@
         "selectAll": "Tout sélectionner (les traits du calque choisi)",
         "clipboard": "Copier, couper, coller des traits",
         "delete": "Supprimer la sélection",
-        "deselect": "Désélectionner (ferme d'abord la découpe ou le réglage de « Redresser les formes » s'ils sont ouverts)",
+        "escape": "Échap, par étapes : annule le geste en cours ; sinon ferme la découpe, la relecture, le recadrage ou le réglage de « Redresser les formes » ouverts ; sinon désélectionne ; sinon enregistre la note et revient à la bibliothèque (pas pendant un enregistrement sonore)",
         "fit": "Ajuster : la page entière",
         "fitWidth": "Largeur : la page sur toute la largeur",
         "pages": "Page précédente, page suivante (la note d'avant, celle d'après)",

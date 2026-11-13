@@ -138,7 +138,7 @@ describe('the sweep catches a table that lies about the editor', () => {
   });
 
   it('a hidden variant missing from the table fails', () => {
-    for (const id of ['select', 'delete', 'redo', 'selectAll', 'save', 'deselect']) {
+    for (const id of ['select', 'delete', 'redo', 'selectAll', 'save', 'escape']) {
       const table = copy();
       const e = entry(table, id);
       const index = e.keys.findIndex((key) => key.shown === false);

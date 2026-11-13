@@ -80,9 +80,9 @@ export const EDITOR_SHORTCUTS: readonly Shortcut<EditorKeyContext>[] = [
     ],
   },
   {
-    id: 'deselect',
-    label: label('deselect'),
-    keys: [key({ key: 'Escape' }, 'deselect', editing), variant({ key: 'Escape', shift: true }, 'deselect', editing)],
+    id: 'escape',
+    label: label('escape'),
+    keys: [key({ key: 'Escape' }, 'escape', editing), variant({ key: 'Escape', shift: true }, 'escape', editing)],
   },
   {
     id: 'fit',

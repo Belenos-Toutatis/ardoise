@@ -2,6 +2,10 @@
 
 ## Non publié
 
+### Ajouté (demandes de l'utilisateur du 2026-11-13, Q20)
+
+- **Échap dans l'éditeur, par étapes** (SPEC §4.4). Chaque appui fait la plus petite chose qui s'applique : il abandonne le geste en cours (un trait, une forme, un lasso, un déplacement, la question sur la narration ou sur la page d'un PDF de fond) ; sinon il ferme la découpe, la relecture, le recadrage à la main ou le réglage de « Redresser les formes » ; sinon il désélectionne ; sinon il **enregistre la note et revient à la bibliothèque**, par le chemin du bouton **Bibliothèque** (un enregistrement qui échoue ou une note modifiée ailleurs la laisse ouverte, avec le message), sans la question des modifications. Jamais pendant l'enregistrement d'une narration (un message demande de l'arrêter d'abord) ni pendant un export vidéo. Dans un champ de saisie, une liste de choix ou une fenêtre, `Échap` reste celui du champ ou de la fenêtre ; une touche maintenue compte pour un appui. L'aide des raccourcis et l'infobulle du bouton **Bibliothèque** le disent.
+
 ### Corrigé (sélection de plusieurs notes ; retour de l'utilisateur du 2026-11-13)
 
 - **Ctrl+A sélectionne toutes les notes affichées** où que soit le dernier clic (il sélectionnait le texte de la fenêtre quand aucune carte n'avait le focus), et **Échap désélectionne tout** de la même façon ; dans un champ de saisie, ces touches restent celles du champ.
