@@ -31,7 +31,7 @@ async function shows(app, path, what) {
 
 /** Draws one stroke across the page with the mouse. */
 async function draw(app) {
-  const box = await app.evaluate(`(() => { const r = document.querySelector('.editor svg').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })()`);
+  const box = await app.evaluate(`(() => { const r = document.querySelector('.editor svg.canvas').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })()`);
   const points = Array.from({ length: 25 }, (_, i) => ({
     x: box.x + box.w * (0.3 + 0.4 * (i / 24)),
     y: box.y + box.h * (0.5 + 0.08 * Math.sin(i / 3)),

@@ -430,7 +430,9 @@ export const q20Journeys = [
         await dragEvent('drop', to);
         await app.mouse('mouseReleased', to.x, to.y);
         await waitForTitles(app, ['Gamma', 'Alpha', 'Beta'], 'the order after the drop');
-        const order = orderFile(app);
+        // The cards move at once; the file is written just after.
+        let order = null;
+        for (let i = 0; i < 50 && !(order = orderFile(app)); i++) await sleep(100);
         if (!order || order.notes.length !== 3) throw new Error(`unexpected order file ${j(order)}`);
         await app.waitFor(`document.querySelectorAll('.note-card.insert-before, .note-card.insert-after').length === 0`, 'the mark gone');
       });

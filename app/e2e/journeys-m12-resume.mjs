@@ -673,7 +673,7 @@ export const resumeJourneys = [
 
       await check('éditeur : un trait tracé à la souris (modification non enregistrée)', async () => {
         await openInEditor(app, file, 3);
-        const box = await app.evaluate(`(() => { const r = document.querySelector('.editor svg').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })()`);
+        const box = await app.evaluate(`(() => { const r = document.querySelector('.editor svg.canvas').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })()`);
         const points = Array.from({ length: 25 }, (_, i) => ({ x: box.x + box.w * (0.3 + 0.4 * (i / 24)), y: box.y + box.h * (0.6 + 0.05 * Math.sin(i / 3)) }));
         await app.drag(points);
         await app.waitFor(`document.querySelectorAll(${j(EDITOR_STROKES)}).length === 4`, 'the new stroke');

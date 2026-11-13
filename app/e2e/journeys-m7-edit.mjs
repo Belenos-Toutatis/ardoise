@@ -34,7 +34,7 @@ export const editJourneys = [
 
       await check('tracer un cercle à main levée', async () => {
         const box = await app.evaluate(
-          `(() => { const r = document.querySelector('.editor svg').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })()`,
+          `(() => { const r = document.querySelector('.editor svg.canvas').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })()`,
         );
         const r = Math.min(box.w, box.h) * 0.15;
         const points = Array.from({ length: 70 }, (_, i) => {

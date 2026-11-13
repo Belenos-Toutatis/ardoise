@@ -184,8 +184,9 @@ export const straightenSettingJourneys = [
       });
 
       await check('un clic ailleurs ferme aussi le panneau', async () => {
-        // The open tab's title, outside the shapes panel (M16: the side panel's `h2`; there is no `h3` to hit any more).
-        await app.click('.editor-side [data-slot="side-title"]');
+        // The note's place among the pages, in the top bar: outside the shapes panel, which now reaches over the side panel's
+        // title (the shape tools moved its button to the right).
+        await app.click('.editor [data-slot="page-position"]');
         await app.waitFor(`document.querySelector(${JSON.stringify(PANEL)}) === null`, 'the closed panel');
         if ((await app.evaluate(`document.querySelectorAll('g.straighten-preview').length`)) !== 0) throw new Error('the preview stays');
         if ((await app.evaluate(paths)) !== hand) throw new Error('a click outside straightened');
@@ -401,9 +402,8 @@ export const straightenSettingJourneys = [
 
       await check('Échap par étapes : désélectionne, puis enregistre et revient à la bibliothèque', async () => {
         await app.click(tool('select'));
-        const a = at(0.02, 0.02);
-        const b = at(0.98, 0.98);
-        await app.drag([a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }, a, { x: a.x + 2, y: a.y + 2 }]);
+        // Ctrl+A rather than a lasso: the landscape sheet is taller than the window.
+        await app.key('a', { ctrl: true });
         await app.waitFor(`${selectedCount(l)} === 3`, 'the three shapes selected');
         await app.key('Escape');
         await app.waitFor(`${selectedCount(l)} === 0`, 'the selection dropped');
