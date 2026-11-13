@@ -96,6 +96,7 @@ alphabetical order; **key order and whitespace are not significant**.
 | `layers` | array of `{"name": string, "visible": boolean}` | at least one; strokes refer to layers by index (0 = first). |
 | `timing` | `"recorded"` or `"synthesized"` | whether point times were measured or made up (imported notes without timing). |
 | `origin` | `{"kind": "tablet"}`, `{"kind": "live"}`, `{"kind": "ardoise"}` or `{"kind": "inkspace", "id": string}` | where the note comes from (`id` = Inkspace's note UUID). |
+| `boardPosition` | `"buttonsBottom"`, `"buttonsTop"`, `"buttonsRight"` or `"buttonsLeft"`, optional | for a note made from a page of the Xiaomi blackboard (its `original.bin`): how the blackboard was held, i.e. how the page's points were turned to make the note (docs/design/blackboard.md, « Positions, the Rust side »). Absent: `buttonsBottom` (notes made before 2026-11). Not a key of the format's model: `ardoise-device` writes and reads it, and every reader, of any 1.x version, keeps it verbatim as an unknown key; it describes `original.bin`, which no edit changes, so it stays true after an older version edited the note. |
 
 `backgroundImage` (1.2):
 
