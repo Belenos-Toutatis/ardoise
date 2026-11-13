@@ -8,13 +8,15 @@
 //!    texture, then the note's background image ([`picture`]) when the renderer is given its
 //!    pixels ([`NoteView`]); or plain white (transparent for [`render_note_transparent`], SVG
 //!    and PDF) when the background is off;
-//! 2. the strokes of visible layers, bottom layer first and in note order within a layer
-//!    ([`drawing_order`]), each filled from [`ardoise_ink::outline`] with its tool's look
-//!    ([`look`]): with tiny-skia and anti-aliasing for images ([`render_note`], [`ink`]), as
-//!    paths for [`note_to_svg`] and [`notes_to_pdf`].
+//! 2. the strokes and page objects of visible layers ([`draw_items`]): bottom layer first;
+//!    within a layer its strokes in note order, then its objects in note order. Each stroke is
+//!    filled from [`ardoise_ink::outline`] with its tool's look ([`look`]), each text frame
+//!    with the glyph outlines of `ardoise-text` in its colour ([`text`]): with tiny-skia and
+//!    anti-aliasing for images ([`render_note`], [`ink`]), as paths for [`note_to_svg`] and
+//!    [`notes_to_pdf`].
 //!
-//! [`PageCanvas`] is the raster drawing itself, one stroke at a time: [`render_note`] is built
-//! on it, and the replay frames (`ardoise-media`) draw a page incrementally with it.
+//! [`PageCanvas`] is the raster drawing itself, one stroke or object at a time: [`render_note`]
+//! is built on it, and the replay frames (`ardoise-media`) draw a page incrementally with it.
 //!
 //! Rendering is deterministic: every texture comes from a fixed or content-derived seed, so
 //! the same note and options always give the same bytes (the reference images rely on it).
@@ -30,15 +32,15 @@ mod noise;
 mod pdf;
 pub mod picture;
 mod svg;
+mod text;
 mod vector;
 mod webp;
 
 use ardoise_core::note::{Note, PageSize};
-use ardoise_ink::Stroke;
 use tiny_skia::Pixmap;
 
 pub use background::{Lattice, Ruling, SnapGrid, paper_color, ruling, snap_grid};
-pub use canvas::{Backdrop, PageCanvas, PixelRect, PreparedStroke, image_size};
+pub use canvas::{Backdrop, PageCanvas, PixelRect, PreparedObject, PreparedStroke, image_size};
 pub use clipboard::{ClipboardImage, clipboard_image, clipboard_image_at};
 pub use labels::{LABEL_HEIGHT_PX, LabelSpot, draw_labels};
 pub use look::{Blend, Fill, Grain, Look};
@@ -132,9 +134,9 @@ pub enum RenderError {
 }
 
 /// Renders a note (`&Note`, or a [`NoteView`] with its background image's pixels) to an image
-/// of `page × scale` pixels (each side rounded, at most 16 384 px). Strokes on hidden layers
-/// are not drawn; a stroke whose layer index has no layer entry is drawn (above the others)
-/// rather than lost.
+/// of `page × scale` pixels (each side rounded, at most 16 384 px). Strokes and objects on
+/// hidden layers are not drawn; one whose layer index has no layer entry is drawn (above the
+/// others) rather than lost ([`draw_items`]).
 pub fn render_note<'a>(
     view: impl Into<NoteView<'a>>,
     options: &RenderOptions,
@@ -155,37 +157,62 @@ pub fn render_note_transparent(note: &Note, scale: f32) -> Result<Image, RenderE
 
 fn render(view: NoteView<'_>, scale: f32, backdrop: Backdrop) -> Result<Image, RenderError> {
     let mut canvas = PageCanvas::new(view, scale, backdrop)?;
-    for stroke in visible_strokes(view.note) {
-        canvas.draw_stroke(stroke);
+    for item in draw_items(view.note) {
+        canvas.draw_item(view.note, item);
     }
     Ok(canvas.to_image())
 }
 
-/// Indices into `note.strokes` of the strokes every format draws, in drawing order: visible
-/// layers only (a stroke whose layer index has no layer entry counts as visible), bottom
-/// layer first, in note order within a layer.
-pub fn drawing_order(note: &Note) -> Vec<usize> {
-    let mut order: Vec<(u32, usize)> = note
+/// One thing a page draws: a stroke (an index into `note.strokes`) or a page object (an index
+/// into `note.objects`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DrawItem {
+    Stroke(usize),
+    Object(usize),
+}
+
+/// True when the strokes and objects of layer `layer` are drawn: a visible layer, or an index
+/// without a layer entry (drawn rather than lost).
+fn layer_shown(note: &Note, layer: u32) -> bool {
+    note.layers
+        .get(layer as usize)
+        .is_none_or(|entry| entry.visible)
+}
+
+/// What every format draws, in drawing order: the strokes and the page objects of visible
+/// layers (an index without a layer entry counts as visible, and so is drawn above the layers
+/// that exist), bottom layer first; within a layer, its strokes in note order, then its objects
+/// in note order. Objects of a kind this version does not draw
+/// ([`ObjectBody::Unknown`](ardoise_core::note::ObjectBody)) are left out.
+pub fn draw_items(note: &Note) -> Vec<DrawItem> {
+    let strokes = note
         .strokes
         .iter()
         .enumerate()
-        .filter(|(_, s)| {
-            note.layers
-                .get(s.layer as usize)
-                .is_none_or(|layer| layer.visible)
-        })
-        .map(|(i, s)| (s.layer, i))
-        .collect();
-    // Stable: note order within a layer.
-    order.sort_by_key(|&(layer, _)| layer);
-    order.into_iter().map(|(_, i)| i).collect()
+        .filter(|(_, s)| layer_shown(note, s.layer))
+        .map(|(i, s)| (s.layer, DrawItem::Stroke(i)));
+    let objects = note
+        .objects
+        .iter()
+        .enumerate()
+        .filter(|(_, o)| layer_shown(note, o.layer) && text::is_drawn(o))
+        .map(|(i, o)| (o.layer, DrawItem::Object(i)));
+    let mut items: Vec<(u32, DrawItem)> = strokes.chain(objects).collect();
+    // Stable: strokes before objects within a layer, each in note order.
+    items.sort_by_key(|&(layer, item)| (layer, matches!(item, DrawItem::Object(_))));
+    items.into_iter().map(|(_, item)| item).collect()
 }
 
-/// Strokes to draw, in [`drawing_order`].
-fn visible_strokes(note: &Note) -> Vec<&Stroke> {
-    drawing_order(note)
+/// Indices into `note.strokes` of the strokes every format draws, in drawing order: the strokes
+/// of [`draw_items`] (visible layers only, a stroke whose layer index has no layer entry
+/// counting as visible; bottom layer first, in note order within a layer).
+pub fn drawing_order(note: &Note) -> Vec<usize> {
+    draw_items(note)
         .into_iter()
-        .filter_map(|i| note.strokes.get(i))
+        .filter_map(|item| match item {
+            DrawItem::Stroke(i) => Some(i),
+            DrawItem::Object(_) => None,
+        })
         .collect()
 }
 
@@ -363,7 +390,7 @@ pub fn decode_png(bytes: &[u8]) -> Result<Image, RenderError> {
 pub(crate) mod tests {
     use super::*;
     use ardoise_core::note::{A4_LANDSCAPE, Background, Layer, Origin, Paper, Template, Timing};
-    use ardoise_ink::{Point, Rgba, Tool};
+    use ardoise_ink::{Point, Rgba, Stroke, Tool};
 
     /// An empty note on a small white page.
     pub(crate) fn blank_note() -> Note {

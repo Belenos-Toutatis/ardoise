@@ -323,6 +323,7 @@ version = "0.1.0"
 dependencies = [
  "ardoise-core",
  "ardoise-ink",
+ "ardoise-text",
  "image-webp",
  "jpeg-decoder",
  "libwebp-sys2 0.2.0",

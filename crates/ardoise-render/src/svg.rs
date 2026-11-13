@@ -1,7 +1,11 @@
 //! SVG export (SPEC §4.6): the page in millimetres, coordinates in device units (10 µm), one
-//! `<path>` per fill of each visible stroke ([`crate::look`]), each note layer as an Inkscape
-//! layer (or, merged, all of them in one); the background image as an `<image>` holding its file (PNG or JPEG) in a data URI,
-//! placed by a matrix and clipped to the page. Opens in Inkscape and in browsers.
+//! `<path>` per fill of each visible stroke ([`crate::look`]), then one `<path>` per text frame
+//! of the layer: its glyph outlines with their curves (`Q` and `C`), its colour and opacity, and
+//! its text in a `<title>` so that the file carries the words (screen readers, Inkscape's object
+//! properties; the outlines alone are not text). Each note layer is an Inkscape layer (or,
+//! merged, all of them in one, each layer's strokes then its text frames, as on screen); the
+//! background image is an `<image>` holding its file (PNG or JPEG) in a data URI, placed by a
+//! matrix and clipped to the page. Opens in Inkscape and in browsers.
 
 use std::fmt::Write;
 
@@ -9,6 +13,7 @@ use crate::LayerMode;
 use crate::background::{Mark, Shape, VectorBackground};
 use crate::look::{Blend, Fill};
 use crate::picture::{NoteView, PlacedPicture};
+use crate::text::TextFill;
 use crate::vector::{LayerFills, Scene};
 
 /// JPEG quality of the embedded paper texture (a faint grain).
@@ -39,7 +44,7 @@ pub fn note_to_svg<'a>(view: impl Into<NoteView<'a>>, options: &SvgOptions) -> S
     let note = view.note;
     let scene = Scene::of(view, options.background);
     let image_len = scene.picture.map_or(0, |p| p.picture.bytes().len() * 4 / 3);
-    let mut out = String::with_capacity(4096 + scene.fills().count() * 512 + image_len);
+    let mut out = String::with_capacity(4096 + scene.len() * 512 + image_len);
     let (w, h) = (scene.width, scene.height);
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n");
     out.push_str(
@@ -72,9 +77,7 @@ pub fn note_to_svg<'a>(view: impl Into<NoteView<'a>>, options: &SvgOptions) -> S
                     layer.index + 1,
                     layer_label(layer)
                 );
-                for fill in &layer.fills {
-                    write_fill(&mut out, fill);
-                }
+                write_layer(&mut out, layer);
                 out.push_str("</g>\n");
             }
         }
@@ -90,8 +93,8 @@ pub fn note_to_svg<'a>(view: impl Into<NoteView<'a>>, options: &SvgOptions) -> S
                 out,
                 "<g id=\"ink\" inkscape:groupmode=\"layer\" inkscape:label=\"{label}\">"
             );
-            for fill in scene.fills() {
-                write_fill(&mut out, fill);
+            for layer in &scene.layers {
+                write_layer(&mut out, layer);
             }
             out.push_str("</g>\n");
         }
@@ -242,6 +245,30 @@ fn write_mark(out: &mut String, mark: &Mark) {
     };
 }
 
+/// A layer's strokes, then its text frames.
+fn write_layer(out: &mut String, layer: &LayerFills) {
+    for fill in &layer.fills {
+        write_fill(out, fill);
+    }
+    for text in &layer.texts {
+        write_text(out, text);
+    }
+}
+
+/// A text frame: its glyphs as one path filled with the non-zero rule, its text as the path's
+/// `<title>`.
+fn write_text(out: &mut String, text: &TextFill) {
+    let [r, g, b] = text.rgb;
+    let _ = write!(
+        out,
+        "<path d=\"{}\" fill=\"{}\" fill-rule=\"nonzero\"",
+        text.path.to_svg(),
+        hex(r, g, b)
+    );
+    write_opacity(out, "fill-opacity", text.opacity);
+    let _ = writeln!(out, "><title>{}</title></path>", escape_lines(&text.text));
+}
+
 fn write_fill(out: &mut String, fill: &Fill) {
     let [r, g, b] = fill.rgb;
     let _ = write!(
@@ -315,6 +342,17 @@ fn escape(text: &str) -> String {
         }
     }
     out
+}
+
+/// Text for XML content keeping its lines: [`escape`], except that a line break (`\n`, `\r\n`
+/// or a lone `\r`) stays a line break.
+fn escape_lines(text: &str) -> String {
+    let unified = text.replace("\r\n", "\n").replace('\r', "\n");
+    unified
+        .split('\n')
+        .map(escape)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Standard base64 (RFC 4648, with padding).

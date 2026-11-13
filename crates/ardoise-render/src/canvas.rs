@@ -1,7 +1,7 @@
-//! A page drawn stroke by stroke: the drawing primitive of animations (the replay frames of
-//! `ardoise-media`). [`render_note`](crate::render_note) is built on it, so a canvas given
-//! the strokes `render_note` draws ([`drawing_order`](crate::drawing_order)), in the same
-//! order, holds exactly the same pixels (SPEC §6.2, "un seul dessin des traits").
+//! A page drawn stroke by stroke (and page object by page object): the drawing primitive of
+//! animations (the replay frames of `ardoise-media`). [`render_note`](crate::render_note) is
+//! built on it, so a canvas given what `render_note` draws ([`draw_items`](crate::draw_items)),
+//! in the same order, holds exactly the same pixels (SPEC §6.2, "un seul dessin des traits").
 //!
 //! An animation keeps one canvas with what no longer changes (the background and the finished
 //! strokes) and a second one with the current picture. Drawing a stroke only touches the
@@ -9,15 +9,18 @@
 //! the picture from the first canvas ([`PageCanvas::copy_rect_from`]), draw again the strokes
 //! that reach into it ([`PageCanvas::draw_prepared`], a stroke in progress with
 //! [`PageCanvas::prepare_stroke`]) and send only that region on
-//! ([`PageCanvas::write_rgba_rect`]).
+//! ([`PageCanvas::write_rgba_rect`]). Page objects work the same way, all at once
+//! ([`PageCanvas::prepare_object`], [`PreparedObject::bounds`],
+//! [`PageCanvas::draw_prepared_object`]).
 
-use ardoise_core::note::PageSize;
+use ardoise_core::note::{Note, PageObject, PageSize};
 use ardoise_ink::Stroke;
-use tiny_skia::{Color, Pixmap, Rect};
+use tiny_skia::{Color, Path, Pixmap, Rect};
 
-use crate::ink::{InkPainter, Prepared};
+use crate::ink::{InkPainter, Prepared, fill_solid};
+use crate::look::Blend;
 use crate::picture::{self, NoteView};
-use crate::{Image, MAX_SIDE, RenderError, background, image_from};
+use crate::{DrawItem, Image, MAX_SIDE, RenderError, background, image_from, text};
 
 /// A rectangle of pixels: columns `x .. x + width`, rows `y .. y + height`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -106,6 +109,25 @@ impl PreparedStroke {
     }
 }
 
+/// A page object ready to be drawn on a [`PageCanvas`] ([`PageCanvas::prepare_object`]): a
+/// text frame's glyphs as a path in pixels with its colour, computed once to be drawn as often
+/// as needed, on that canvas or on any canvas of the same scale and backdrop.
+#[derive(Debug, Clone)]
+pub struct PreparedObject {
+    /// The glyphs in pixels, their colour and opacity; `None` when nothing is drawn (a kind this
+    /// version does not draw, blank text, off the page).
+    fill: Option<(Path, [u8; 3], f32)>,
+    bounds: Option<PixelRect>,
+}
+
+impl PreparedObject {
+    /// The pixels drawing it can change (anti-aliasing included, clipped to the page); `None`
+    /// when nothing of it is drawn.
+    pub fn bounds(&self) -> Option<PixelRect> {
+        self.bounds
+    }
+}
+
 /// What is under the strokes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Backdrop {
@@ -129,8 +151,9 @@ pub fn image_size(page: PageSize, scale: f32) -> (u32, u32) {
     )
 }
 
-/// A page at a fixed scale onto which strokes are drawn one at a time, each over what is
-/// already there. Layers are not looked at: the caller chooses the strokes and their order.
+/// A page at a fixed scale onto which strokes and page objects are drawn one at a time, each
+/// over what is already there. Layers are not looked at: the caller chooses what is drawn and in
+/// which order ([`draw_items`](crate::draw_items) for what the exports draw).
 #[derive(Clone)]
 pub struct PageCanvas {
     pixmap: Pixmap,
@@ -228,6 +251,49 @@ impl PageCanvas {
         let prepared = self.prepare_stroke(stroke, points);
         self.draw_prepared(&prepared);
         prepared.bounds
+    }
+
+    /// `object` ready to draw: a text frame's glyphs ([`crate::text`]); nothing for a kind this
+    /// version does not draw.
+    pub fn prepare_object(&self, object: &PageObject) -> PreparedObject {
+        let fill = text::page_outline(object).and_then(|(glyphs, color)| {
+            let path = self.painter.glyph_path(&glyphs)?;
+            Some((
+                path,
+                [color.r, color.g, color.b],
+                f32::from(color.a) / 255.0,
+            ))
+        });
+        let bounds = fill
+            .as_ref()
+            .and_then(|(path, ..)| self.pixel_bounds(path.bounds()));
+        PreparedObject { fill, bounds }
+    }
+
+    /// Draws a prepared object over what is there: normal blending, no grain. Only pixels within
+    /// its bounds change.
+    pub fn draw_prepared_object(&mut self, object: &PreparedObject) {
+        if let Some((path, rgb, alpha)) = &object.fill {
+            fill_solid(&mut self.pixmap, path, *rgb, *alpha, Blend::Normal);
+        }
+    }
+
+    /// Draws `object` over what is there, as [`render_note`](crate::render_note) draws it;
+    /// returns the pixels it can have changed ([`PreparedObject::bounds`]).
+    pub fn draw_object(&mut self, object: &PageObject) -> Option<PixelRect> {
+        let prepared = self.prepare_object(object);
+        self.draw_prepared_object(&prepared);
+        prepared.bounds
+    }
+
+    /// Draws one item of `note` (a stroke or a page object, [`draw_items`](crate::draw_items))
+    /// over what is there; returns the pixels it can have changed. An index that is not in the
+    /// note draws nothing.
+    pub fn draw_item(&mut self, note: &Note, item: DrawItem) -> Option<PixelRect> {
+        match item {
+            DrawItem::Stroke(i) => self.draw_stroke(note.strokes.get(i)?),
+            DrawItem::Object(i) => self.draw_object(note.objects.get(i)?),
+        }
     }
 
     /// Pixels a path with these bounds can touch: one more pixel all around for the

@@ -14,16 +14,29 @@
 //!
 //! Outline (bookmarks): [`notes_to_pdf_with_outline`] writes the document outline of the viewer's
 //! bookmarks panel from a flat list of [`OutlineEntry`] (title, depth, page), all entries open.
+//!
+//! Text frames: each layer's frames are painted over its strokes as filled paths, the glyph
+//! outlines with their curves (quadratic curves written as the cubic curves they are), so the
+//! page stays vector and looks the same in every viewer, with no font to embed. So that the
+//! words can still be searched, selected and copied, each line of a frame is also written as
+//! invisible text (rendering mode 3, as OCR layers are) over its glyphs: a standard font
+//! (Times for Latin Modern, Helvetica for Andika; never drawn, so never embedded) in
+//! WinAnsiEncoding, given the advance widths of our own glyphs (`/Widths`), so that each
+//! character falls on the glyph it stands for; a tab or a character left out is a positioning
+//! step of the `TJ` array. Characters outside WinAnsiEncoding (Greek, mathematical symbols)
+//! are left out of that layer: they are drawn, not searchable.
 
 use std::collections::HashMap;
 
-use pdf_writer::types::{BlendMode, PageMode};
-use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, TextStr};
+use ardoise_text::{FontFamily, TextStyle, layout};
+use pdf_writer::types::{BlendMode, PageMode, TextRenderingMode};
+use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str, TextStr};
 
 use crate::background::{Shape, VectorBackground};
 use crate::look::{Blend, UNITS_PER_INCH};
 use crate::picture::{DctColor, NoteView, PlacedPicture};
 use crate::svg::TEXTURE_QUALITY;
+use crate::text::TextFill;
 use crate::vector::{LayerFills, Scene};
 use crate::{LayerMode, RenderError};
 
@@ -125,18 +138,17 @@ where
     }
     pdf.pages(tree).kids(pages.iter().copied()).count(count);
     let mut groups = Groups::default();
+    let mut fonts = TextFonts::default();
     for (&view, &page) in notes.iter().zip(&pages) {
         let groups = separate.then_some(&mut groups);
-        write_page(
-            &mut pdf,
-            &mut next,
+        let ids = Ids {
             tree,
             page,
-            view.into(),
-            options,
-            groups,
-        )?;
+            next: &mut next,
+        };
+        write_page(&mut pdf, ids, view.into(), options, groups, &mut fonts)?;
     }
+    write_fonts(&mut pdf, &fonts);
     if separate {
         // The groups are known once every page is written, so the catalog comes last.
         write_groups(&mut pdf, &groups);
@@ -308,6 +320,190 @@ fn write_groups(pdf: &mut Pdf, groups: &Groups) {
     }
 }
 
+/// First character code of the invisible text's fonts (the space): the codes below are control
+/// codes, never written.
+const FIRST_CODE: u8 = 32;
+/// Smallest positioning step written in a `TJ` array, in thousandths of the text's size: below
+/// it the characters stay where the widths put them (the error never builds up).
+const MIN_ADJUSTMENT: f32 = 0.5;
+
+/// The fonts of the invisible text of a document: one per family and weight used, over all its
+/// pages, with the advance widths of our glyphs.
+#[derive(Default)]
+struct TextFonts {
+    keys: Vec<(FontFamily, bool)>,
+    ids: Vec<Ref>,
+    /// Per font: the advance of each code from [`FIRST_CODE`] to 255, in thousandths of the size.
+    widths: Vec<Vec<f32>>,
+}
+
+impl TextFonts {
+    /// The number of the font of `family` and `bold`, made when there is none yet.
+    fn number(&mut self, family: FontFamily, bold: bool, next: &mut Ref) -> usize {
+        if let Some(k) = self.keys.iter().position(|&key| key == (family, bold)) {
+            return k;
+        }
+        self.keys.push((family, bold));
+        self.ids.push(next.bump());
+        self.widths.push(code_widths(family, bold));
+        self.keys.len() - 1
+    }
+}
+
+/// The name of font `k` in the page resources.
+fn font_name(k: usize) -> String {
+    format!("T{k}")
+}
+
+/// The advance of each WinAnsiEncoding code from [`FIRST_CODE`] to 255 in our glyphs of
+/// `family` (a character it lacks taken from the other family, as the layout does), in
+/// thousandths of the size; 0 for the codes the encoding leaves unused.
+fn code_widths(family: FontFamily, bold: bool) -> Vec<f32> {
+    let style = TextStyle {
+        family,
+        bold,
+        size: 1000.0,
+    };
+    (FIRST_CODE..=255)
+        .map(|code| win_ansi_char(code).map_or(0.0, |c| layout(&c.to_string(), style).width))
+        .collect()
+}
+
+/// The standard font a family's invisible text names (never drawn: only its name shows, in a
+/// viewer's list of the document's fonts).
+fn base_font(family: FontFamily, bold: bool) -> &'static [u8] {
+    match (family, bold) {
+        (FontFamily::LatinModern, false) => b"Times-Roman",
+        (FontFamily::LatinModern, true) => b"Times-Bold",
+        (FontFamily::Andika, false) => b"Helvetica",
+        (FontFamily::Andika, true) => b"Helvetica-Bold",
+    }
+}
+
+fn write_fonts(pdf: &mut Pdf, fonts: &TextFonts) {
+    for ((&(family, bold), &id), widths) in fonts.keys.iter().zip(&fonts.ids).zip(&fonts.widths) {
+        let mut font = pdf.type1_font(id);
+        font.base_font(Name(base_font(family, bold)));
+        font.encoding_predefined(Name(b"WinAnsiEncoding"));
+        font.first_char(FIRST_CODE);
+        font.last_char(255);
+        font.widths(widths.iter().copied());
+        font.finish();
+    }
+}
+
+/// The characters of the codes 0x80 to 0x9F of WinAnsiEncoding (PDF 32000-1, annex D.2; the
+/// codes of Windows code page 1252), `'\0'` for the five it leaves unused. The other codes from
+/// 0x20 are those of Unicode (Latin-1): 0x20 to 0x7E and 0xA0 to 0xFF.
+const WIN_ANSI_80: [char; 32] = [
+    '\u{20ac}', '\0', '\u{201a}', '\u{0192}', '\u{201e}', '\u{2026}', '\u{2020}', '\u{2021}',
+    '\u{02c6}', '\u{2030}', '\u{0160}', '\u{2039}', '\u{0152}', '\0', '\u{017d}', '\0', '\0',
+    '\u{2018}', '\u{2019}', '\u{201c}', '\u{201d}', '\u{2022}', '\u{2013}', '\u{2014}', '\u{02dc}',
+    '\u{2122}', '\u{0161}', '\u{203a}', '\u{0153}', '\0', '\u{017e}', '\u{0178}',
+];
+
+/// The WinAnsiEncoding code of `c`; `None` for a character the encoding lacks.
+fn win_ansi(c: char) -> Option<u8> {
+    match u32::from(c) {
+        code @ (0x20..=0x7e | 0xa0..=0xff) => u8::try_from(code).ok(),
+        _ if c == '\0' => None,
+        _ => WIN_ANSI_80
+            .iter()
+            .position(|&high| high == c)
+            .and_then(|i| u8::try_from(0x80 + i).ok()),
+    }
+}
+
+/// The character of WinAnsiEncoding code `code`; `None` for a control code or an unused one.
+fn win_ansi_char(code: u8) -> Option<char> {
+    match code {
+        0x20..=0x7e | 0xa0..=0xff => Some(char::from(code)),
+        0x80..=0x9f => WIN_ANSI_80
+            .get(usize::from(code - 0x80))
+            .copied()
+            .filter(|&c| c != '\0'),
+        _ => None,
+    }
+}
+
+/// A piece of a `TJ` array.
+#[derive(Debug, Clone, PartialEq)]
+enum Shown {
+    Bytes(Vec<u8>),
+    /// Thousandths of the size, subtracted from the position (negative moves on).
+    Adjust(f32),
+}
+
+/// Writes the lines of `text` as invisible text in font `font` (whose code widths are
+/// `widths`), each over its glyphs: one text object per line, so that extractors end each line.
+fn invisible_text(content: &mut Content, text: &TextFill, font: usize, widths: &[f32]) {
+    let size = text.size();
+    if !(size.is_finite() && size > 0.0) {
+        return;
+    }
+    // The character at each UTF-16 offset of the text (the glyphs' `index`).
+    let mut chars: Vec<Option<char>> = Vec::with_capacity(text.text.len());
+    for c in text.text.chars() {
+        chars.push(Some(c));
+        chars.extend(std::iter::repeat_n(None, c.len_utf16() - 1));
+    }
+    let name = font_name(font);
+    let [a, b, c, d, _, _] = text.placement;
+    for line in &text.layout.lines {
+        let mut shown: Vec<Shown> = Vec::new();
+        // Where the first character shown starts on the line, and where the next one will go.
+        let mut start: Option<f32> = None;
+        let mut pen = 0.0_f32;
+        for glyph in &line.glyphs {
+            let Some(code) = chars.get(glyph.index).copied().flatten().and_then(win_ansi) else {
+                continue;
+            };
+            if start.is_none() {
+                start = Some(glyph.x);
+                pen = glyph.x;
+            }
+            let adjust = -(glyph.x - pen) / size * 1000.0;
+            if adjust.abs() >= MIN_ADJUSTMENT {
+                shown.push(Shown::Adjust(adjust));
+                pen = glyph.x;
+            }
+            match shown.last_mut() {
+                Some(Shown::Bytes(bytes)) => bytes.push(code),
+                _ => shown.push(Shown::Bytes(vec![code])),
+            }
+            let width = widths
+                .get(usize::from(code.saturating_sub(FIRST_CODE)))
+                .copied()
+                .unwrap_or(0.0);
+            pen += width * size / 1000.0;
+        }
+        let Some(x0) = start else {
+            continue;
+        };
+        // Text space: x along the line, y up the glyphs (the page is y down), one unit = the size.
+        let [e, f] = text.page_point([x0, line.baseline]);
+        content.begin_text();
+        content.set_font(Name(name.as_bytes()), 1.0);
+        content.set_text_rendering_mode(TextRenderingMode::Invisible);
+        content.set_text_matrix([a * size, b * size, -c * size, -d * size, round(e), round(f)]);
+        {
+            let mut positioned = content.show_positioned();
+            let mut items = positioned.items();
+            for piece in &shown {
+                match piece {
+                    Shown::Bytes(bytes) => {
+                        items.show(Str(bytes));
+                    }
+                    Shown::Adjust(amount) => {
+                        items.adjust(*amount);
+                    }
+                }
+            }
+        }
+        content.end_text();
+    }
+}
+
 /// Where the note goes on its page.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Placement {
@@ -472,6 +668,41 @@ impl Painter {
         self.content.fill_nonzero();
     }
 
+    /// A text frame's glyphs: one path of cubic curves, filled with the non-zero rule.
+    fn text(&mut self, text: &TextFill) {
+        use ardoise_text::Segment;
+        self.style(text.rgb, text.opacity, Blend::Normal);
+        let c = &mut self.content;
+        for segment in &text.path.to_cubic().segments {
+            match *segment {
+                Segment::MoveTo([x, y]) => {
+                    c.move_to(round(x), round(y));
+                }
+                Segment::LineTo([x, y]) => {
+                    c.line_to(round(x), round(y));
+                }
+                Segment::CubicTo([ax, ay], [bx, by], [x, y]) => {
+                    c.cubic_to(
+                        round(ax),
+                        round(ay),
+                        round(bx),
+                        round(by),
+                        round(x),
+                        round(y),
+                    );
+                }
+                // `to_cubic` leaves none.
+                Segment::QuadTo(_, [x, y]) => {
+                    c.line_to(round(x), round(y));
+                }
+                Segment::Close => {
+                    c.close_path();
+                }
+            }
+        }
+        c.fill_nonzero();
+    }
+
     fn background(&mut self, background: &VectorBackground, width: f32, height: f32) {
         let paper = background.paper;
         self.style([paper.r, paper.g, paper.b], 1.0, Blend::Normal);
@@ -496,15 +727,29 @@ impl Painter {
     }
 }
 
+/// The object numbers a page is written with.
+struct Ids<'a> {
+    /// The page tree.
+    tree: Ref,
+    /// The page itself.
+    page: Ref,
+    /// The next free object number.
+    next: &'a mut Ref,
+}
+
 fn write_page(
     pdf: &mut Pdf,
-    next: &mut Ref,
-    tree: Ref,
-    page_id: Ref,
+    ids: Ids<'_>,
     view: NoteView<'_>,
     options: &PdfOptions,
     mut groups: Option<&mut Groups>,
+    fonts: &mut TextFonts,
 ) -> Result<(), RenderError> {
+    let Ids {
+        tree,
+        page: page_id,
+        next,
+    } = ids;
     let (width, height) = (view.note.page.width, view.note.page.height);
     if width == 0 || height == 0 {
         return Err(RenderError::Size { width, height });
@@ -535,6 +780,8 @@ fn write_page(
     // The group of each layer of the page (separate layers). Numbered top layer first, the order
     // a viewer lists them in; the fills are still painted bottom first.
     let mut layer_groups: Vec<Option<usize>> = vec![None; scene.layers.len()];
+    // The fonts of the invisible text on this page.
+    let mut used_fonts: Vec<usize> = Vec::new();
     if let Some(groups) = groups.as_deref_mut() {
         for (layer, slot) in scene.layers.iter().zip(&mut layer_groups).rev() {
             *slot = group_name(layer).map(|name| groups.number(&name, next));
@@ -563,6 +810,15 @@ fn write_page(
                 painter.content.close_path();
             }
             painter.content.fill_nonzero();
+        }
+        for text in &layer.texts {
+            painter.text(text);
+            let style = text.layout.style;
+            let font = fonts.number(style.family, style.bold, next);
+            if !used_fonts.contains(&font) {
+                used_fonts.push(font);
+            }
+            invisible_text(&mut painter.content, text, font, &fonts.widths[font]);
         }
         if tag.is_some() {
             painter.content.end_marked_content();
@@ -632,6 +888,14 @@ fn write_page(
         let mut dict = resources.ext_g_states();
         for (name, id) in &state_ids {
             dict.pair(Name(name.as_bytes()), *id);
+        }
+        dict.finish();
+    }
+    if !used_fonts.is_empty() {
+        used_fonts.sort_unstable();
+        let mut dict = resources.fonts();
+        for k in used_fonts {
+            dict.pair(Name(font_name(k).as_bytes()), fonts.ids[k]);
         }
         dict.finish();
     }
@@ -805,6 +1069,49 @@ mod tests {
     }
 
     #[test]
+    fn win_ansi_codes_round_trip_and_other_characters_have_none() {
+        let mut defined = 0;
+        for code in 0..=255u8 {
+            if let Some(c) = win_ansi_char(code) {
+                defined += 1;
+                assert_eq!(win_ansi(c), Some(code), "{code:#x} {c:?}");
+            }
+        }
+        // 0x20 to 0xFF but DEL and the five unused codes of 0x80 to 0x9F.
+        assert_eq!(defined, 224 - 1 - 5);
+        assert_eq!(win_ansi('é'), Some(0xe9));
+        assert_eq!(win_ansi('€'), Some(0x80));
+        assert_eq!(win_ansi('œ'), Some(0x9c));
+        assert_eq!(win_ansi('’'), Some(0x92));
+        for c in ['α', '\u{1d400}', '\n', '\t', '\0', '\u{81}', '\u{7f}', '中'] {
+            assert_eq!(win_ansi(c), None, "{c:?}");
+        }
+    }
+
+    #[test]
+    fn the_widths_are_the_advances_of_our_glyphs() {
+        for family in FontFamily::ALL {
+            for bold in [false, true] {
+                let widths = code_widths(family, bold);
+                assert_eq!(widths.len(), 224);
+                let style = TextStyle {
+                    family,
+                    bold,
+                    size: 1000.0,
+                };
+                let line = layout("Wé€ «a»", style).lines.remove(0);
+                for glyph in &line.glyphs {
+                    let c = "Wé€ «a»".encode_utf16().nth(glyph.index).unwrap();
+                    let code = win_ansi(char::from_u32(u32::from(c)).unwrap()).unwrap();
+                    let width = widths[usize::from(code - FIRST_CODE)];
+                    assert!((width - glyph.advance).abs() < 1e-3, "{family:?} {code:#x}");
+                }
+                assert_eq!(widths[usize::from(0x81 - FIRST_CODE)], 0.0);
+            }
+        }
+    }
+
+    #[test]
     fn groups_are_numbered_by_name_in_order_of_first_appearance() {
         let mut next = Ref::new(10);
         let mut groups = Groups::default();
@@ -821,6 +1128,7 @@ mod tests {
             index,
             name: name.map(str::to_owned),
             fills: vec![],
+            texts: vec![],
         };
         assert_eq!(
             group_name(&layer(0, Some("Calque 1"))).as_deref(),

@@ -10,6 +10,8 @@ publish.workspace = true
 [dependencies]
 ardoise-core = { path = "../ardoise-core" }
 ardoise-ink = { path = "../ardoise-ink" }
+# Text frames: their layout and glyph outlines, the very ones the editor draws.
+ardoise-text = { path = "../ardoise-text" }
 # Background images: decodes the JPEG photos users import (pure Rust; no thread pool).
 jpeg-decoder = { version = "0.3", default-features = false }
 # Lossless WebP files: libwebp's encoder, built from source with `cc` (`ardoise-media` already builds

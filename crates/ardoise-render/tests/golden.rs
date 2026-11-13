@@ -1,7 +1,8 @@
 //! Reference images: synthetic notes covering every tool, colour and pressure range, every
-//! paper and template, texture on and off, a landscape and a portrait page, a hidden layer and
-//! a background image (turned, translucent, reaching beyond the page), rendered and compared
-//! with `testdata/golden/*.png`.
+//! paper and template, texture on and off, a landscape and a portrait page, a hidden layer, a
+//! background image (turned, translucent, reaching beyond the page) and text frames (both
+//! families, turned, scaled, translucent, between strokes of their layers), rendered and
+//! compared with `testdata/golden/*.png`.
 //!
 //! `cargo xtask golden` regenerates the images (it runs the ignored test
 //! `regenerate_golden_images`); look at them before committing.
@@ -14,12 +15,13 @@ use std::path::PathBuf;
 
 use ardoise_core::note::{
     A4_LANDSCAPE, A4_PORTRAIT, Background, BackgroundImage, ImageRect, Layer, Note, Origin,
-    PageSize, Paper, Template, Timing,
+    PageObject, PageSize, Paper, Template, TextBody, Timing,
 };
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
 use ardoise_render::{
     Image, NoteView, Picture, RenderOptions, decode_png, encode_png, render_note,
 };
+use ardoise_text::FontFamily;
 
 /// Largest accepted mean absolute difference per channel (0..255) between a fresh render and
 /// its reference image.
@@ -397,6 +399,156 @@ fn slate() -> Note {
 }
 
 /// A small page with handwriting on lines.
+/// A text frame (SPEC §4.4) at `(x, y)`, turned and scaled.
+#[allow(clippy::too_many_arguments)]
+fn text_frame(
+    layer: u32,
+    (x, y): (f32, f32),
+    text: &str,
+    (font, bold, size): (FontFamily, bool, f32),
+    color: Rgba,
+    quarter_turns: u8,
+    scale: f32,
+) -> PageObject {
+    let mut object = PageObject::text(
+        format!("{x}-{y}"),
+        layer,
+        0,
+        x,
+        y,
+        TextBody {
+            text: text.into(),
+            font,
+            bold,
+            size,
+            color,
+        },
+    );
+    object.quarter_turns = quarter_turns;
+    object.scale = scale;
+    object
+}
+
+/// Text frames in both families, bold or not, the three sizes, several colours (one
+/// translucent), turned and scaled, several lines with a tab, accents and Greek letters (taken
+/// from Andika); over a highlighter stroke of their layer, under a stroke of the layer above; one
+/// on a hidden layer (not drawn), one on a layer without entry (on top).
+fn text_frames() -> Note {
+    const LM: FontFamily = FontFamily::LatinModern;
+    const ANDIKA: FontFamily = FontFamily::Andika;
+    let strokes = vec![
+        stroke(
+            Tool::Highlighter,
+            YELLOW_MARKER,
+            500.0,
+            segment((900.0, 1450.0), (6200.0, 1450.0), 0.8),
+        ),
+        on_layer(
+            stroke(
+                Tool::Ballpoint,
+                RED,
+                60.0,
+                cursive(1000.0, 1700.0, 600.0, 9, 5, 0.8),
+            ),
+            1,
+        ),
+    ];
+    let objects = vec![
+        text_frame(
+            0,
+            (1000.0, 900.0),
+            "Leçon 3 : l'énergie",
+            (LM, true, 900.0),
+            NAVY,
+            0,
+            1.0,
+        ),
+        text_frame(
+            0,
+            (1000.0, 2400.0),
+            "1.\tLa masse se conserve.\n2.\tÉlèves, œuvre « 12 € »\n\tα + β = γ",
+            (ANDIKA, false, 600.0),
+            BLACK,
+            0,
+            1.0,
+        ),
+        text_frame(
+            0,
+            (1000.0, 5000.0),
+            "Petit texte translucide, gras",
+            (LM, true, 400.0),
+            translucent(MAGENTA, 150),
+            0,
+            1.0,
+        ),
+        text_frame(
+            0,
+            (1000.0, 5800.0),
+            "Andika gras ×1,5",
+            (ANDIKA, true, 400.0),
+            GREEN,
+            0,
+            1.5,
+        ),
+        text_frame(
+            1,
+            (10_000.0, 800.0),
+            "Tourné d'un quart",
+            (ANDIKA, false, 600.0),
+            BLUE,
+            1,
+            1.0,
+        ),
+        text_frame(
+            1,
+            (9200.0, 7000.0),
+            "À l'envers",
+            (LM, false, 600.0),
+            RED,
+            2,
+            0.8,
+        ),
+        text_frame(
+            1,
+            (6400.0, 6900.0),
+            "Trois quarts",
+            (LM, false, 400.0),
+            VIOLET,
+            3,
+            1.0,
+        ),
+        text_frame(
+            2,
+            (1000.0, 4400.0),
+            "jamais vu",
+            (ANDIKA, true, 900.0),
+            RED,
+            0,
+            1.0,
+        ),
+        text_frame(
+            5,
+            (4200.0, 1100.0),
+            "au-dessus",
+            (ANDIKA, false, 400.0),
+            GREY,
+            0,
+            1.0,
+        ),
+    ];
+    let mut n = small_page(bg(Paper::Cream, Template::Seyes, true), strokes);
+    n.layers = ["Calque 1", "Calque 2", "Masqué"]
+        .iter()
+        .enumerate()
+        .map(|(i, name)| Layer {
+            name: (*name).into(),
+            visible: i != 2,
+        })
+        .collect();
+    n.objects = objects;
+    n
+}
+
 fn small_page(background: Background, strokes: Vec<Stroke>) -> Note {
     let page = PageSize {
         width: 10_500,
@@ -813,6 +965,7 @@ fn cases() -> Vec<(&'static str, Note, RenderOptions, Option<Picture>)> {
         ),
         ("background_off", background_off(), plain, None),
         ("background_image", with_image, at(0.06), Some(picture)),
+        ("text_frames", text_frames(), at(0.06), None),
     ]
 }
 

@@ -1,21 +1,30 @@
 //! What the vector formats (SVG, PDF) draw for a note, computed once for both: the page
 //! background as shapes (with the background image, embedded as a raster), and the visible
-//! strokes' fills, grouped by layer.
+//! strokes' fills and text frames, grouped by layer ([`crate::draw_items`]).
 
 use crate::background::{VectorBackground, vector_background};
 use crate::look::{Fill, Look};
 use crate::picture::{NoteView, PlacedPicture};
-use crate::visible_strokes;
+use crate::text::TextFill;
+use crate::{DrawItem, draw_items};
 
-/// The strokes of one layer, in drawing order.
+/// What one layer draws: its strokes' fills, then its text frames.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LayerFills {
     /// Index of the layer in the note.
     pub index: u32,
-    /// Its name; `None` for strokes whose layer has no entry (drawn on top).
+    /// Its name; `None` for strokes and objects whose layer has no entry (drawn on top).
     pub name: Option<String>,
-    /// Non-empty fills, bottom first.
+    /// Non-empty fills of the layer's strokes, bottom first.
     pub fills: Vec<Fill>,
+    /// The layer's text frames, in note order, drawn over its strokes.
+    pub texts: Vec<TextFill>,
+}
+
+impl LayerFills {
+    fn is_empty(&self) -> bool {
+        self.fills.is_empty() && self.texts.is_empty()
+    }
 }
 
 /// A note ready for a vector writer.
@@ -29,7 +38,7 @@ pub(crate) struct Scene<'a> {
     /// The background image, over the background and under the strokes; only with the
     /// background.
     pub picture: Option<PlacedPicture<'a>>,
-    /// Visible layers holding strokes, bottom first.
+    /// Visible layers holding strokes or text frames, bottom first.
     pub layers: Vec<LayerFills>,
 }
 
@@ -40,24 +49,42 @@ impl<'a> Scene<'a> {
         let background = background.then(|| vector_background(&note.background, note.page));
         let look = Look::vector(background.as_ref().is_some_and(|b| b.dark));
         let mut layers: Vec<LayerFills> = Vec::new();
-        for stroke in visible_strokes(note) {
-            let fills = look
-                .fills(stroke)
-                .into_iter()
-                .filter(|f| !f.outline.is_empty());
-            match layers.last_mut() {
-                Some(layer) if layer.index == stroke.layer => layer.fills.extend(fills),
-                _ => layers.push(LayerFills {
-                    index: stroke.layer,
-                    name: note
-                        .layers
-                        .get(stroke.layer as usize)
-                        .map(|l| l.name.clone()),
-                    fills: fills.collect(),
-                }),
+        // Sorted by layer, strokes before objects within one: each layer's items follow each
+        // other.
+        for item in draw_items(note) {
+            let (index, fills, text) = match item {
+                DrawItem::Stroke(i) => {
+                    let Some(stroke) = note.strokes.get(i) else {
+                        continue;
+                    };
+                    let fills: Vec<Fill> = look
+                        .fills(stroke)
+                        .into_iter()
+                        .filter(|f| !f.outline.is_empty())
+                        .collect();
+                    (stroke.layer, fills, None)
+                }
+                DrawItem::Object(i) => {
+                    let Some(object) = note.objects.get(i) else {
+                        continue;
+                    };
+                    (object.layer, Vec::new(), TextFill::of(object))
+                }
+            };
+            if layers.last().is_none_or(|layer| layer.index != index) {
+                layers.push(LayerFills {
+                    index,
+                    name: note.layers.get(index as usize).map(|l| l.name.clone()),
+                    fills: Vec::new(),
+                    texts: Vec::new(),
+                });
+            }
+            if let Some(layer) = layers.last_mut() {
+                layer.fills.extend(fills);
+                layer.texts.extend(text);
             }
         }
-        layers.retain(|layer| !layer.fills.is_empty());
+        layers.retain(|layer| !layer.is_empty());
         Scene {
             width: note.page.width as f32,
             height: note.page.height as f32,
@@ -67,9 +94,12 @@ impl<'a> Scene<'a> {
         }
     }
 
-    /// Every fill, in drawing order.
-    pub(crate) fn fills(&self) -> impl Iterator<Item = &Fill> {
-        self.layers.iter().flat_map(|layer| &layer.fills)
+    /// How many fills and text frames there are.
+    pub(crate) fn len(&self) -> usize {
+        self.layers
+            .iter()
+            .map(|layer| layer.fills.len() + layer.texts.len())
+            .sum()
     }
 }
 
@@ -159,7 +189,7 @@ mod tests {
             summary,
             [(0, Some("A"), 2), (2, Some("C"), 2), (9, None, 1)]
         );
-        assert_eq!(scene.fills().count(), 5);
+        assert_eq!(scene.len(), 5);
         assert!(
             scene
                 .background
@@ -167,6 +197,66 @@ mod tests {
                 .is_some_and(|b| !b.marks.is_empty())
         );
         assert!(Scene::of((&n).into(), false).background.is_none());
+    }
+
+    #[test]
+    fn text_frames_go_over_their_layers_strokes_and_a_text_only_layer_has_its_entry() {
+        use ardoise_core::note::{ObjectBody, PageObject, TextBody};
+        let text = |layer, words: &str| {
+            PageObject::text(
+                words,
+                layer,
+                0,
+                100.0,
+                100.0,
+                TextBody {
+                    text: words.into(),
+                    font: ardoise_text::FontFamily::Andika,
+                    bold: false,
+                    size: 400.0,
+                    color: Rgba::BLACK,
+                },
+            )
+        };
+        let mut n = note(
+            Paper::White,
+            vec![stroke(Tool::Ballpoint, 0, 5), stroke(Tool::FeltTip, 0, 5)],
+        );
+        let mut unknown = text(0, "x");
+        unknown.body = ObjectBody::Unknown {
+            kind: "equation".into(),
+            fields: Default::default(),
+        };
+        n.objects = vec![
+            text(2, "haut"),
+            text(0, "bas"),
+            text(1, "caché"),
+            unknown,
+            text(9, "orphelin"),
+            // Blank: nothing to draw, no layer for it.
+            text(7, "  "),
+            text(0, "bas 2"),
+        ];
+        let scene = Scene::of((&n).into(), false);
+        let summary: Vec<(u32, usize, Vec<&str>)> = scene
+            .layers
+            .iter()
+            .map(|l| {
+                let texts = l.texts.iter().map(|t| t.text.as_str()).collect();
+                (l.index, l.fills.len(), texts)
+            })
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                (0, 3, vec!["bas", "bas 2"]),
+                (2, 0, vec!["haut"]),
+                (9, 0, vec!["orphelin"])
+            ]
+        );
+        assert_eq!(scene.layers[1].name.as_deref(), Some("C"));
+        assert_eq!(scene.layers[2].name, None);
+        assert_eq!(scene.len(), 7);
     }
 
     #[test]

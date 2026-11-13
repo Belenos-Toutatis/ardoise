@@ -1,10 +1,12 @@
 //! Raster ink: paints each stroke's fills (from [`crate::look`]) with tiny-skia, anti-aliased.
 //! Grain fills use a repeating tile of the grain in the stroke's colour, shifted by the
-//! stroke's seed.
+//! stroke's seed. Also turns the glyph outlines of text frames ([`crate::text`]) into paths in
+//! pixels, curves kept.
 
 use std::collections::HashMap;
 
 use ardoise_ink::Outline;
+use ardoise_text::{Path as GlyphPath, Segment};
 use tiny_skia::{
     BlendMode, Color, ColorU8, FillRule, FilterQuality, Paint, Path, PathBuilder, Pattern, Pixmap,
     Rect, Shader, SpreadMode, Transform,
@@ -99,6 +101,34 @@ impl InkPainter {
         builder.finish()
     }
 
+    /// Glyph outlines in page coordinates (`ardoise_text`, with their curves) as a path in
+    /// pixels, its quadratic and cubic curves kept as curves; `None` if nothing of it falls on the
+    /// page.
+    pub(crate) fn glyph_path(&self, glyphs: &GlyphPath) -> Option<Path> {
+        let [x0, y0, x1, y1] = glyphs.bounds()?;
+        let s = self.scale;
+        let visible = x1 * s >= -1.0
+            && y1 * s >= -1.0
+            && x0 * s <= self.width + 1.0
+            && y0 * s <= self.height + 1.0;
+        if !visible {
+            return None;
+        }
+        let mut builder = PathBuilder::new();
+        for segment in &glyphs.segments {
+            match *segment {
+                Segment::MoveTo([x, y]) => builder.move_to(x * s, y * s),
+                Segment::LineTo([x, y]) => builder.line_to(x * s, y * s),
+                Segment::QuadTo([cx, cy], [x, y]) => builder.quad_to(cx * s, cy * s, x * s, y * s),
+                Segment::CubicTo([ax, ay], [bx, by], [x, y]) => {
+                    builder.cubic_to(ax * s, ay * s, bx * s, by * s, x * s, y * s);
+                }
+                Segment::Close => builder.close(),
+            }
+        }
+        builder.finish()
+    }
+
     /// The look strokes are drawn with (scale and paper).
     pub(crate) fn look(&self) -> Look {
         self.look
@@ -165,7 +195,8 @@ fn blend_mode(blend: Blend) -> BlendMode {
     }
 }
 
-fn fill_solid(pixmap: &mut Pixmap, path: &Path, rgb: [u8; 3], alpha: f32, blend: Blend) {
+/// Fills `path` (pixels) with one colour, anti-aliased, with the non-zero rule.
+pub(crate) fn fill_solid(pixmap: &mut Pixmap, path: &Path, rgb: [u8; 3], alpha: f32, blend: Blend) {
     let mut color = Color::from_rgba8(rgb[0], rgb[1], rgb[2], 255);
     color.set_alpha(alpha.clamp(0.0, 1.0));
     let paint = Paint {
