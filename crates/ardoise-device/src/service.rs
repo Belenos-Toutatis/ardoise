@@ -313,7 +313,7 @@ pub struct ServiceConfig {
     pub options: TabletOptions,
     pub simulated: bool,
     /// Where rescue copies of the blackboard's pages go when the library's `_ardoise` folder
-    /// cannot be written (the app's local data, `%LOCALAPPDATA%Ardoiselackboard-rescue`):
+    /// cannot be written (the app's local data, `%LOCALAPPDATA%\Ardoise\blackboard-rescue`):
     /// `crate::rescue`.
     pub rescue_fallback: Option<PathBuf>,
 }

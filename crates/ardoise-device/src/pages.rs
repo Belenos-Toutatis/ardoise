@@ -330,13 +330,35 @@ impl ImportedPages {
     /// page of the tablet).
     pub fn in_trash(&self, page: &DownloadedPage) -> bool {
         let id = page_note_id(page);
-        let Some(paths) = self.trashed.get(&id) else {
+        let by_id = self.trashed.get(&id).is_some_and(|paths| {
+            paths.iter().any(|path| {
+                format::read_note(path).is_ok_and(|file| {
+                    file.note.id == id && file.original.as_deref() == Some(page.bytes.as_slice())
+                })
+            })
+        });
+        by_id || self.earlier_store_in_trash(page)
+    }
+
+    /// For a page of the blackboard: a trashed note created at the page's time whose
+    /// `original.bin` starts with the page's bytes, the note of its screen updated by a later
+    /// store (it carries that store's id), as [`ImportedPages::find`] accepts in the library.
+    fn earlier_store_in_trash(&self, page: &DownloadedPage) -> bool {
+        let Some(created) = page.timestamp.and_then(|t| t.checked_mul(1000)) else {
             return false;
         };
-        paths.iter().any(|path| {
-            format::read_note(path).is_ok_and(|file| {
-                file.note.id == id && file.original.as_deref() == Some(page.bytes.as_slice())
-            })
+        if page.kind != TabletKind::Blackboard || page.bytes.is_empty() {
+            return false;
+        }
+        self.trashed.values().flatten().any(|path| {
+            format::read_header(path).is_ok_and(|header| header.note.created == created)
+                && format::read_note(path).is_ok_and(|file| {
+                    file.note.page == BLACKBOARD_PAGE
+                        && file
+                            .original
+                            .as_deref()
+                            .is_some_and(|original| original.starts_with(&page.bytes))
+                })
         })
     }
 
@@ -879,13 +901,11 @@ impl<'a> LibrarySink<'a> {
             Ok(expected) => expected,
             Err(error) => return why(error.to_string()),
         };
-        // The library's checked save: a file changed since it was read is never overwritten.
+        // The library's checked save: a file changed since it was read is never overwritten. A
+        // save refused (changed meanwhile, read-only, locked) writes nothing: a new note instead.
         let stamp = match self.library.save(&loaded.path, &file, &loaded.stamp) {
             Ok(stamp) => stamp,
-            Err(error @ ardoise_core::library::LibraryError::Conflict { .. }) => {
-                return why(error.to_string());
-            }
-            Err(error) => return Update::Failed(error.to_string()),
+            Err(error) => return why(error.to_string()),
         };
         let saved = SavedNote {
             path: loaded.path,
@@ -2158,5 +2178,53 @@ mod update_tests {
         let file = library.read(&added.path).unwrap().file;
         assert_eq!(board_position_of(&file), Ok(BoardPosition::ButtonsRight));
         assert_eq!(file.note.page, board_page(BoardPosition::ButtonsRight));
+    }
+
+    /// The earlier note cannot be saved over (read-only here; locked alike): nothing was written,
+    /// so a new note is added rather than the page failing (review of the H8 work, finding 3).
+    #[cfg(windows)]
+    #[test]
+    fn an_earlier_note_that_cannot_be_saved_over_gives_a_new_note() {
+        let (_dir, library) = library();
+        let stored = store(&library, page(FIRST, screen(5), None));
+        let read_only = |on: bool| {
+            let mut permissions = std::fs::metadata(&stored.path).unwrap().permissions();
+            permissions.set_readonly(on);
+            std::fs::set_permissions(&stored.path, permissions).unwrap();
+        };
+        read_only(true);
+        let before = std::fs::read(&stored.path).unwrap();
+        let mut whole = screen(5);
+        whole.extend(screen(8));
+        let added = LibrarySink::new(&library, "", BLACKBOARD_PAGE, "Calque 1", || NOW)
+            .store_page(page(SECOND, whole, Some(FIRST as u32)));
+        read_only(false);
+        let added = added.unwrap();
+        assert!(matches!(added.how, Stored::NewNotUpdated(_)), "{added:?}");
+        assert_ne!(added.path, stored.path);
+        assert_eq!(std::fs::read(&stored.path).unwrap(), before, "untouched");
+        assert_eq!(library.list().notes.len(), 2);
+    }
+
+    /// The note of a screen updated by a later store carries that store's id; once it is in the
+    /// trash, the earlier page still counts as deleted by the user (a leftover copy of it does
+    /// not come back: review of the H8 work, finding 9), as the later one does.
+    #[test]
+    fn the_earlier_page_of_a_trashed_updated_note_counts_as_in_the_trash() {
+        let (_dir, library) = library();
+        let first = page(FIRST, screen(5), None);
+        store(&library, first.clone());
+        let mut whole = screen(5);
+        whole.extend(screen(8));
+        let second = page(SECOND, whole, Some(FIRST as u32));
+        let updated = store(&library, second.clone());
+        assert!(matches!(updated.how, Stored::Updated { .. }));
+        library.trash(&updated.path).unwrap();
+        let imported = ImportedPages::scan(&library);
+        assert_eq!(imported.find(&library, &first), None);
+        assert!(imported.in_trash(&second));
+        assert!(imported.in_trash(&first));
+        // Another page created at that time but not held: not in the trash.
+        assert!(!imported.in_trash(&page(FIRST, screen(9), None)));
     }
 }

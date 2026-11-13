@@ -617,8 +617,10 @@ The host cannot rely on a page staying on the tablet when it was described in th
 
 - **Where.** `<library>/_ardoise/rescued-pages/page-<time>.bin` (the raw bytes as the tablet sent them, the files
   `--import-blackboard-pages` reads), with `page-<time>.json` beside it when the page had a `previous`
-  (`{"previous": T}`). When that folder cannot be written: `%LOCALAPPDATA%\Ardoise\blackboard-rescue\`
-  (`ServiceConfig::rescue_fallback`). Every write is atomic. Doubtful copies go to a `doubtful\` subfolder of either.
+  (`{"previous": T}`). When that folder cannot be written: `%LOCALAPPDATA%\Ardoise\blackboard-rescue\library-<hash>\`
+  (`ServiceConfig::rescue_fallback`), a subfolder per library (a 64-bit FNV-1a hash of its root, lower case, `/`
+  separators: never its path in clear), so that a copy is only ever imported into the library it was taken for. Every
+  write is atomic. Doubtful copies go to a `doubtful\` subfolder of either.
 - **Clean copy, written before anything can fail.** A clean transfer of an open page (count reached, quiet window,
   record check) is copied before its note is written. Once the note is written and read back (and no stream byte
   came meanwhile) the copy is removed. If the note cannot be written, the copy stays and the sync stops with
@@ -636,8 +638,11 @@ The host cannot rely on a page staying on the tablet when it was described in th
 - **Imported at the next sync, first.** A blackboard sync (with its usual permission) first writes out what is held,
   then imports every clean copy, oldest first, through the same path as a page from the tablet (`keep_page`, the
   app's page store: atomic note, read back, `ImportedPages` against duplicates), removing each copy once its note is
-  read back; then the tablet's pages. A clean copy that is not whole records moves to `doubtful\`. The automatic sync
-  at connection also starts when copies wait.
+  read back, or when its note is in the trash (the user deleted it); then the tablet's pages. A copy, or a page held,
+  that cannot be written stays as it is and stops nothing: the other copies and the tablet's pages come, and the
+  first such failure is said at the end of the sync when nothing else is (`pageRescued`, `pageNotSaved`;
+  `SyncRun::deferred`). A clean copy that is not whole records moves to `doubtful\`. The automatic sync at
+  connection also starts when copies wait.
 - **Short-form pages** are not copied before their note: they stay until deleted (measured). The explicit delete
   `12 05 06` after a page is kept stays for every page (harmless when the tablet already removed it).
 
@@ -650,9 +655,15 @@ The host cannot rely on a page staying on the tablet when it was described in th
 - In live mode, a stream notification of more than 6 records (42 bytes, `MAX_LIVE_RECORDS`) is a page the erase button
   made the tablet send: it starts a *push*, never given to the live sink. The push goes on while notifications are
   full chunks (244 bytes), while the bytes pushed so far are not whole records (a page always is), or while they come
-  within `PUSH_GAP` (25 ms, **supposed**: page chunks came about 10 ms apart, live notifications 40 to 45 ms apart,
-  §2.2) of the push's previous one; its first notification shorter than a full chunk is its last. The log says how
-  many bytes were set aside. Limit: a page of 6 records or fewer pushed alone passes for pen records.
+  within `PUSH_GAP` of the push's previous one; its first notification shorter than a full chunk is its last. The
+  log says how many bytes were set aside. Limit: a page of 6 records or fewer pushed alone passes for pen records.
+- Time does not tell a page from the pen: on the PC's own sessions (research note §6) the chunks of a page and the
+  pen's notifications both came a few tens of milliseconds apart, with bursts of about a millisecond (the earlier
+  figures of §2.2, from Mi Home's capture, do not hold on the PC). So the size rule does the work, and time only
+  closes a push that ends on a full chunk: `PUSH_GAP` is 100 ms (**supposed**: above the gaps seen inside a page).
+  The trade-off: a push that ends on a full chunk of whole records (no short last chunk) swallows the pen's next
+  notification if it comes within 100 ms (6 records at most, about 50 ms of ink); the opposite choice (25 ms at
+  first) let up to 6 records of the pushed page become ink when its short last chunk came late, which is worse.
 - Outside live mode, the quiet window already keeps a push out of a later download, and a push before any download on
   the link is only counted. What was wrong: after a sync, the session takes any stream byte for "more of the last
   page" (dirty: rightly, the next page or live mode must not take them), and the worker reopened the link at once,
@@ -667,7 +678,10 @@ The host cannot rely on a page staying on the tablet when it was described in th
 When live mode is asked (a new run, not one reconnecting) and the blackboard holds stored pages (counted again then):
 
 - automatic sync **and** delete after import on: the sync runs first (the status shows `syncing`, the sink
-  `waiting`), then live mode starts, whatever the sync's outcome (its error stays in `lastSync`);
+  `waiting`). Once no sync runs or waits, the pages are counted again: none left, live mode starts; pages left (the
+  sync failed, could not run, or was cancelled) end the run as below (`PagesFirst`), the sync's error staying in
+  `lastSync`. A pre-live sync cut by a lost link resumes at the reconnection, still before live mode (`PreLive`:
+  the run counts as checked only once the tablet holds no page);
 - otherwise live mode does not start. `TabletService::live_pages_first()` answers `BlackboardPagesFirst { pages }`
   (`blackboardPagesFirst`) at once while the blackboard is connected, so `live_start` and `live_resume` fail before
   any session starts; a run that was waiting when the blackboard connects ends with `LiveInput::PagesFirst { pages }`,
@@ -741,7 +755,9 @@ the handwriting cache is keyed by id and ink, and the ink changed anyway; a draf
 stamp it started from, and a changed file is restored as a copy anyway; the assistant names notes by id or path and
 lists again. The earlier page still counts as imported: `ImportedPages::find` also accepts, for a blackboard page, a
 note created at that page's time whose `original.bin` starts with the page's bytes (a rescue copy of it found later
-does not come back). Not covered: a page of a clock never set (its note is dated by the import), and the middle page
+does not come back), and `ImportedPages::in_trash` the same in the trash (once the user trashed the updated note,
+neither page comes back). A revision an assistant made of the note before the update keeps `revision.of` = the old
+id: it still names the note it was made from, which now has another id. Not covered: a page of a clock never set (its note is dated by the import), and the middle page
 of three stores found again later (a duplicate note, nothing lost).
 ## 10. The four positions of the blackboard: the interface (Q17; the Rust side is §11)
 

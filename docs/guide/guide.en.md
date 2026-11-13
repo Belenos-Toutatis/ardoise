@@ -333,8 +333,9 @@ has downloaded it**; the page of an erased screen stays until it is deleted. So 
 
 - Before writing the note, it keeps a **rescue copy** of the bytes received, in the `_ardoise\rescued-pages\` folder of
   the library (file `page-<time>.bin`, with a `page-<time>.json` when the page replaces an earlier store of the same
-  screen); if that folder cannot be written, in `%LOCALAPPDATA%\Ardoise\blackboard-rescue\` on this PC. Once the note is
-  written and read back, the copy is deleted: normally, that folder is empty or absent.
+  screen); if that folder cannot be written, in `%LOCALAPPDATA%\Ardoise\blackboard-rescue\` on this PC (a `library-…`
+  subfolder per library: a copy is only imported into its own library). Once the note is written and read back, the
+  copy is deleted: normally, that folder is empty or absent.
 - If the note cannot be written (library unreachable, disk full), the copy stays, Ardoise says so ("A page of the Xiaomi
   tablet could not be written in the library…") and **imports the page by itself at the next sync** of the Xiaomi
   tablet, before the tablet's own pages. Check that the library can be reached and has room left.
@@ -408,8 +409,10 @@ with a reminder, and the **Tablet button in live mode** setting applies to the B
   works too. The tablet may also send the whole page when it is erased: Ardoise sets it aside and never draws it (no
   stray stroke); the diagnostic log says how many bytes were set aside.
 - **Before live mode**, Ardoise fetches the pages stored in the tablet: erasing the screen during live mode can lose the
-  page of the screen in progress if it was not fetched. With **Sync automatically when connecting** and **Delete from the tablet
-  after import** both on, the panel shows the sync, then live mode starts. Otherwise, if the tablet holds pages, live mode
+  page of the screen in progress if it was not fetched. With **Sync automatically when connecting** and **Delete from
+  the tablet after import** both on, the panel shows the sync, then live mode starts; if the sync leaves pages on the
+  tablet (a page could not be imported), live mode does not start, as below, and the result of the sync says why.
+  Otherwise, if the tablet holds pages, live mode
   does not start: a window says the tablet still holds stored pages ("The Xiaomi tablet still holds 2 stored
   pages…") and offers **Import and delete** or **Cancel** (Esc too). **Import and delete** imports the pages, which
   are deleted from the tablet once imported, showing the progress, and live mode then starts by itself; if pages are

@@ -402,6 +402,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!((again.imported.len(), again.skipped), (0, 2));
+        // The user deletes the note: neither page comes back (the earlier one is recognised in
+        // the trash by its time and bytes, the note carrying the later page's id).
+        opened.trash(&note).unwrap();
+        let trashed = import_pages(pages.path(), library.path(), &mut store).unwrap();
+        assert_eq!((trashed.imported.len(), trashed.skipped), (0, 2));
+        assert!(opened.list().notes.is_empty());
     }
 
     /// The pages are turned for the position given (the settings'): landscape held on a side,

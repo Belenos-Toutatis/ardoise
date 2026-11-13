@@ -42,8 +42,8 @@ use ardoise_proto::live::LiveRecord;
 
 use super::{
     BoardPermission, Connection, IDLE_POLL, ImportedPages, LIVE_POLL, LiveInput, LiveState,
-    PageContext, PageStore, SEARCH_PAUSE, SEARCH_SLICE, StatusError, SyncProgress, SyncRun, Worker,
-    keep_page, keep_page_as, pages_text, saved_count,
+    PageContext, PageStore, PreLive, SEARCH_PAUSE, SEARCH_SLICE, StatusError, SyncProgress,
+    SyncRun, Worker, keep_page, keep_page_as, pages_text, saved_count,
 };
 use crate::blackboard::{
     BoardInfo, BoardSession, BoardSync, Oddities, PageKeeper, PageStep, Rescued,
@@ -652,13 +652,14 @@ impl Worker {
             },
             permission,
             board: BoardSync::default(),
+            deferred: None,
         };
         let mut run = run;
-        // Rescued pages first (docs/design/blackboard.md §9.2).
-        if rescued && let Err(error) = self.import_rescued(&mut run, &rescue) {
-            self.problem(&error);
-            self.finish_sync(run, Some(&error));
-            return;
+        // Rescued pages first (docs/design/blackboard.md §9.2): one that cannot be imported
+        // stops neither the others nor the tablet's pages; it is said at the end.
+        if rescued && let Some(error) = self.import_rescued(&mut run, &rescue) {
+            self.keep(error.to_string());
+            run.deferred = Some(error);
         }
         if total == 0 {
             self.finish_sync(run, None);
@@ -676,14 +677,13 @@ impl Worker {
     }
 
     /// Writes out the pages held in memory, then imports every clean rescue copy, oldest first,
-    /// through the store of any page; each copy goes once its note is read back. A copy that is
-    /// not whole records moves apart as doubtful. The first page that cannot be written ends the
-    /// sync (`PageRescued`, its copy kept; `PageNotSaved` for a page still held).
-    fn import_rescued(
-        &mut self,
-        run: &mut SyncRun,
-        rescue: &RescueStore,
-    ) -> Result<(), DeviceError> {
+    /// through the store of any page; each copy goes once its note is read back, or when its note
+    /// is in the trash (the user deleted it). A copy that is not whole records moves apart as
+    /// doubtful. A page that cannot be written stays (its copy, or in memory) and the others go
+    /// on; the first such failure is returned (`PageNotSaved` for a page still held,
+    /// `PageRescued` for a copy).
+    fn import_rescued(&mut self, run: &mut SyncRun, rescue: &RescueStore) -> Option<DeviceError> {
+        let mut failure = None;
         let held = std::mem::take(&mut self.held);
         for (page, kind) in held {
             match rescue.save(&page, kind) {
@@ -704,7 +704,7 @@ impl Worker {
                         Ok(message) => self.note(message),
                         Err(error) => {
                             self.held.push((page, kind));
-                            return Err(DeviceError::PageNotSaved {
+                            failure.get_or_insert(DeviceError::PageNotSaved {
                                 time,
                                 cause: format!("{error}; {cause}"),
                             });
@@ -739,6 +739,14 @@ impl Worker {
                 run.board.note_doubtful(file.time);
                 continue;
             }
+            if run.imported.in_trash(&page) {
+                self.note(format!(
+                    "the page of {} kept aside has its note in the trash: its copy goes",
+                    utc(file.time)
+                ));
+                rescue.remove(&file);
+                continue;
+            }
             let name = format!("the page of {} kept aside", utc(file.time));
             match keep_page_as(&mut self.store_page, run, page, &name) {
                 Ok(message) => {
@@ -746,14 +754,17 @@ impl Worker {
                     rescue.remove(&file);
                 }
                 Err(error) => {
-                    return Err(DeviceError::PageRescued {
+                    self.note(format!(
+                        "{name} could not be imported, its copy stays: {error}"
+                    ));
+                    failure.get_or_insert(DeviceError::PageRescued {
                         time: file.time,
                         cause: error.to_string(),
                     });
                 }
             }
         }
-        Ok(())
+        failure
     }
 
     /// One step of the sync ([`BoardSession::sync_page`], the only per-page code): describes,
@@ -910,7 +921,11 @@ impl Worker {
         if self.live_belongs_elsewhere(TabletKind::Blackboard) {
             return;
         }
-        if self.live.as_ref().is_some_and(|run| !run.pages_checked) {
+        if self
+            .live
+            .as_ref()
+            .is_some_and(|run| run.pre_live != PreLive::Checked)
+        {
             return self.board_pages_before_live();
         }
         let Some(board) = self.board.as_mut() else {
@@ -954,10 +969,12 @@ impl Worker {
     }
 
     /// Live mode asked while the blackboard holds stored pages (SPEC §4.2,
-    /// docs/design/blackboard.md §9.5): with the automatic sync and "delete after import" on,
-    /// they are synced first and live mode starts after the sync, whatever its outcome; otherwise
-    /// the run ends at once ([`LiveInput::PagesFirst`]), nothing asked of the tablet's stream.
-    /// Looked at once per run, before it first streams.
+    /// docs/design/blackboard.md §9.5), before the run first streams. The pages are counted:
+    /// none, live mode starts. With the automatic sync and "delete after import" on, they are
+    /// synced first (again when that sync was cut short and waits, after a lost link), then
+    /// counted again once no sync runs or waits. Pages left on the tablet then (the sync failed
+    /// or could not run), or the sync not allowed: the run ends ([`LiveInput::PagesFirst`]),
+    /// nothing asked of the tablet's stream; the sync's error stays in `last_sync`.
     fn board_pages_before_live(&mut self) {
         let counted = match self.board.as_mut() {
             Some(board) => board.page_count(),
@@ -972,20 +989,28 @@ impl Worker {
                 device.stored_pages = pages;
             }
         });
-        if let Some(run) = self.live.as_mut() {
-            run.pages_checked = true;
-        }
+        let state = self
+            .live
+            .as_ref()
+            .map_or(PreLive::Checked, |run| run.pre_live);
         if pages == 0 {
+            if let Some(run) = self.live.as_mut() {
+                run.pre_live = PreLive::Checked;
+            }
             return;
         }
         let options = self.config.options;
-        if options.auto_sync && options.delete_after_import {
+        let allowed = options.auto_sync && options.delete_after_import;
+        if allowed && (state == PreLive::Unchecked || self.want_sync) {
             self.note(format!(
                 "live mode asked: {} on the blackboard are imported first",
                 pages_text(pages)
             ));
             if let Some(run) = self.live.as_mut() {
-                run.sink.input(LiveInput::State(LiveState::Waiting));
+                if run.pre_live == PreLive::Unchecked {
+                    run.sink.input(LiveInput::State(LiveState::Waiting));
+                }
+                run.pre_live = PreLive::Syncing;
             }
             self.want_sync = true;
             self.board_permission = self.board_permission.max(Some(BoardPermission::Option));
@@ -993,9 +1018,12 @@ impl Worker {
             return;
         }
         self.note(format!(
-            "live mode refused: {} on the blackboard, and the automatic sync or delete after \
-             import is off: they must be imported first",
-            pages_text(pages)
+            "live mode refused: {} on the blackboard{}: they must be imported first",
+            pages_text(pages),
+            match allowed {
+                true => " after the sync for it",
+                false => ", and the automatic sync or delete after import is off",
+            }
         ));
         if let Some(mut run) = self.live.take() {
             run.sink.input(LiveInput::PagesFirst { pages });

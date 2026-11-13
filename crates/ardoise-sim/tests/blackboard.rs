@@ -2289,7 +2289,8 @@ fn a_rescue_copy_goes_to_the_local_folder_or_stays_in_memory() {
             .code,
         "pageRescued"
     );
-    let local_copies = RescueStore::new(None, Some(local.path())).pages(RescueKind::Clean);
+    let local_copies =
+        RescueStore::new(Some(library.path()), Some(local.path())).pages(RescueKind::Clean);
     assert_eq!(local_copies.len(), 1);
     assert_eq!(std::fs::read(&local_copies[0].path).unwrap(), page.bytes);
     run.service.sync_now(false).unwrap();
@@ -2300,7 +2301,7 @@ fn a_rescue_copy_goes_to_the_local_folder_or_stays_in_memory() {
         std::slice::from_ref(&page.bytes)
     );
     assert!(
-        RescueStore::new(None, Some(local.path()))
+        RescueStore::new(Some(library.path()), Some(local.path()))
             .pages(RescueKind::Clean)
             .is_empty()
     );
@@ -3174,5 +3175,314 @@ fn a_screen_stored_again_after_the_position_changed_keeps_the_way_up_of_its_note
         .file;
     assert_eq!(board_position_of(&file), Ok(BoardPosition::ButtonsRight));
     assert_eq!(heading(&page_points(&file.note)[0]), (0, -1));
+    run.service.shutdown();
+}
+
+// --- after the review of the H8 work -------------------------------------------------------------
+
+/// The app's page store, failing for the pages whose time is in `failing` (shared: the test
+/// changes it), and telling whether the tablet streamed when each page was offered.
+fn store_failing_for(
+    failing: Arc<Mutex<Vec<u32>>>,
+    board: SimBoard,
+    streaming: Arc<Mutex<Vec<bool>>>,
+) -> PageStore {
+    Box::new(
+        move |root: &Path, page: DownloadedPage, context: &PageContext| {
+            streaming.lock().unwrap().push(board.is_streaming());
+            let time = u32::try_from(page.timestamp.unwrap_or(0)).unwrap_or(0);
+            if failing.lock().unwrap().contains(&time) {
+                return Err("the disk is full".into());
+            }
+            let library = Library::open(root).map_err(|e| e.to_string())?;
+            let mut sink = LibrarySink::new(&library, "", context.size, "Calque 1", || NOW_MS)
+                .with_orientation(context.orientation);
+            sink.store_page(page)
+        },
+    )
+}
+
+/// A live run waiting for the blackboard, which then connects with its pages: the pre-live sync
+/// is cut by a lost link in the middle; at the reconnection the sync resumes, and live mode
+/// starts only once the pages are in the library (finding 1 of the review: the run was marked
+/// checked before its sync ran, and started on the reconnection with the pages on the tablet).
+#[test]
+fn a_pre_live_sync_cut_by_a_lost_link_resumes_before_live_mode() {
+    let _report = common::report("blackboard: the pre-live sync cut by a lost link");
+    let library = new_library();
+    let board = board_with_pages(None);
+    added_beforehand(&board, library.path());
+    board.power_off();
+    let streaming = Arc::new(Mutex::new(Vec::new()));
+    let mut run = Running::start(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        TabletOptions::default(),
+        Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+        store_failing_for(Arc::default(), board.clone(), streaming.clone()),
+    );
+    // The link drops when the host deletes the first page (its note is written).
+    let cut = board.clone();
+    board.on_next_download(move || cut.disconnect_at_next_request());
+    let (sender, inputs) = mpsc::channel();
+    run.service.start_live(Box::new(ChannelSink(sender)));
+    board.power_on();
+    let (started, _) = records_until(&inputs, |i| matches!(i, LiveInput::Started { .. }));
+    assert!(matches!(
+        started,
+        LiveInput::Started {
+            kind: TabletKind::Blackboard,
+            ..
+        }
+    ));
+    say!("{:?}", board.stats());
+    assert_eq!(board.stats().links_lost, 1, "the link was cut");
+    assert_eq!(
+        board.stored_page_count(),
+        0,
+        "every page fetched before live mode"
+    );
+    assert_eq!(notes(library.path()).len(), 3);
+    assert!(streaming.lock().unwrap().iter().all(|s| !s));
+    run.wait(|s| s.connection == Connection::Live);
+    run.service.stop_live();
+    run.service.shutdown();
+}
+
+/// SPEC §4.2: when the pre-live sync leaves pages on the tablet (a page that cannot be written
+/// here), live mode does not start: the run ends with `PagesFirst`, the sync's error stays in
+/// `lastSync`, nothing is asked of the stream (finding 2 of the review: live mode started
+/// whatever the sync's outcome). Both orders.
+#[test]
+fn a_pre_live_sync_that_leaves_pages_ends_the_run_with_pages_first() {
+    let _report = common::report("blackboard: the pre-live sync leaves pages");
+    for asked_first in [true, false] {
+        let library = new_library();
+        let board = board_with_pages(None);
+        let first = board.stored_pages()[0].time;
+        added_beforehand(&board, library.path());
+        if asked_first {
+            board.power_off();
+        }
+        let failing = Arc::new(Mutex::new(vec![first]));
+        let streaming = Arc::new(Mutex::new(Vec::new()));
+        let mut run = Running::start(
+            vec![SimDevice::Board(board.clone())],
+            library.path(),
+            TabletOptions::default(),
+            Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+            store_failing_for(failing.clone(), board.clone(), streaming.clone()),
+        );
+        if !asked_first {
+            // The automatic sync at the connection fails on the first page too.
+            run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.error.is_some()));
+        }
+        let (sender, inputs) = mpsc::channel();
+        run.service.start_live(Box::new(ChannelSink(sender)));
+        if asked_first {
+            board.power_on();
+        }
+        let refused = loop {
+            match inputs.recv_timeout(WAIT).expect("live input in time") {
+                LiveInput::PagesFirst { pages } => break pages,
+                LiveInput::Started { .. } => panic!("live mode started with pages on the tablet"),
+                _ => {}
+            }
+        };
+        assert_eq!(refused, 3);
+        let status = run.wait(|s| s.connection == Connection::Connected && s.pending.is_none());
+        let last = status.last_sync.unwrap();
+        assert_eq!(
+            last.error.unwrap().code,
+            "libraryAccess",
+            "the sync's error stays"
+        );
+        assert!(!board.is_streaming());
+        assert_eq!(board.stats().live_records, 0);
+        assert!(streaming.lock().unwrap().iter().all(|s| !s));
+        assert_eq!(board.stored_page_count(), 3);
+        run.service.shutdown();
+    }
+}
+
+/// Clean rescue copies are imported first; one that cannot be imported stops neither the next
+/// copy nor the tablet's pages, stays, and is said at the end (finding 3 of the review: it ended
+/// the sync before anything else, at every sync).
+#[test]
+fn a_rescue_copy_that_cannot_be_imported_stops_nothing_else() {
+    let _report = common::report("blackboard: a rescue copy that cannot be imported");
+    let library = new_library();
+    let board = SimBoard::blackboard();
+    board.draw_page(&reference_board_pages()[2]);
+    added_beforehand(&board, library.path());
+    // Two copies kept aside by an earlier sync, of pages the tablet no longer holds.
+    let store = RescueStore::new(Some(library.path()), None);
+    let copy = |time: u32, page: usize| {
+        let other = SimBoard::blackboard();
+        other.draw_page(&reference_board_pages()[page]);
+        let bytes = other.stored_pages()[0].bytes.clone();
+        let page = DownloadedPage {
+            announced_size: 0,
+            bytes: bytes.clone(),
+            timestamp: Some(i64::from(time)),
+            kind: TabletKind::Blackboard,
+            previous: None,
+        };
+        store.save(&page, RescueKind::Clean).unwrap();
+        bytes
+    };
+    let tablet_page = board.stored_pages()[0].clone();
+    let first = tablet_page.time - 120;
+    let _ = copy(first, 0);
+    let second = copy(tablet_page.time - 60, 1);
+    let failing = Arc::new(Mutex::new(vec![first]));
+    let mut run = Running::start(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        TabletOptions::default(),
+        Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+        store_failing_for(failing.clone(), board.clone(), Arc::default()),
+    );
+    let status = run.wait(|s| s.last_sync.is_some());
+    let last = status.last_sync.clone().unwrap();
+    say!("{last:?}");
+    assert_eq!(last.error.as_ref().unwrap().code, "pageRescued");
+    assert_eq!(last.saved.len(), 2, "the second copy and the tablet's page");
+    let kept = kept_bytes(library.path());
+    assert!(kept.contains(&second) && kept.contains(&tablet_page.bytes));
+    assert_eq!(board.stored_page_count(), 0);
+    assert_eq!(
+        rescued(library.path(), RescueKind::Clean)
+            .iter()
+            .map(|(time, _)| *time)
+            .collect::<Vec<_>>(),
+        [first],
+        "the copy that failed stays"
+    );
+    // Once it can be written, the next sync brings it.
+    failing.lock().unwrap().clear();
+    run.service.sync_now(false).unwrap();
+    let done = run.wait(|s| synced_after(s, &status.last_sync));
+    assert_eq!(done.last_sync.unwrap().error, None);
+    assert_eq!(notes(library.path()).len(), 3);
+    assert!(rescued(library.path(), RescueKind::Clean).is_empty());
+    run.service.shutdown();
+}
+
+/// A page set apart as doubtful (a short-form page taken by another application while its
+/// transfer stalled), then a later page that stops the sync: the error said is the later page's,
+/// the doubtful one is in the log (finding 5 of the review: it replaced any such error).
+#[test]
+fn a_later_error_is_not_replaced_by_an_earlier_doubtful_page() {
+    let _report = common::report("blackboard: the error of the page that stopped the sync");
+    let library = new_library();
+    let board = SimBoard::blackboard();
+    board.draw_page(&reference_board_pages()[0]);
+    let taken = board.stored_pages()[0].time;
+    // Not whole records: unreadable.
+    board.store_raw_page(vec![0xa1, 1, 2, 3, 4, 5, 6, 0xa1, 1, 2]);
+    added_beforehand(&board, library.path());
+    board.stall_next_download(70);
+    let elsewhere = board.clone();
+    board.on_next_download(move || elsewhere.page_taken_elsewhere(taken));
+    let mut run = Running::start(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        TabletOptions::default(),
+        Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+        store_with(|_| Ok(())),
+    );
+    let status = run.wait(|s| s.last_sync.is_some());
+    let last = status.last_sync.clone().unwrap();
+    say!("{last:?}");
+    assert_eq!(last.error.as_ref().unwrap().code, "pageUnreadable");
+    assert_eq!(
+        rescued(library.path(), RescueKind::Doubtful)
+            .iter()
+            .map(|(time, bytes)| (*time, bytes.len()))
+            .collect::<Vec<_>>(),
+        [(taken, 70)],
+        "what came of the page taken elsewhere is kept apart"
+    );
+    run.service.shutdown();
+    assert!(logs(library.path()).contains("kept apart as doubtful"));
+}
+
+/// Pages held in memory (nothing could be written anywhere) all stay held when the first of them
+/// cannot be written again; each comes once it can (finding 6 of the review).
+#[test]
+fn pages_held_in_memory_stay_held_until_each_can_be_written() {
+    let _report = common::report("blackboard: pages held in memory");
+    let library = new_library();
+    let board = SimBoard::blackboard();
+    added_beforehand(&board, library.path());
+    let blocked = library.path().join("_ardoise").join("rescued-pages");
+    std::fs::write(&blocked, b"not a folder").unwrap();
+    let failing = Arc::new(Mutex::new(Vec::new()));
+    let mut run = Running::start(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        TabletOptions::default(),
+        Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+        store_failing_for(failing.clone(), board.clone(), Arc::default()),
+    );
+    run.wait(|s| s.connection == Connection::Connected);
+    // Each page fails while its time is in `failing` (the store sees the page's time).
+    let mut pages = Vec::new();
+    let mut before = None;
+    for drawing in &reference_board_pages()[..2] {
+        board.write(drawing);
+        board.clock().advance(Duration::from_secs(2));
+        // The page's time is the tablet's clock when stored (later than any page before).
+        let time = u32::try_from(board.tablet_time()).unwrap();
+        failing.lock().unwrap().extend([time, time + 1]);
+        board.press_store();
+        let page = board.stored_pages()[0].clone();
+        failing.lock().unwrap().push(page.time);
+        let status = run.wait(|s| synced_after(s, &before));
+        assert_eq!(
+            status
+                .last_sync
+                .as_ref()
+                .unwrap()
+                .error
+                .as_ref()
+                .unwrap()
+                .code,
+            "pageNotSaved"
+        );
+        before = status.last_sync.clone();
+        board.erase();
+        pages.push(page);
+    }
+    assert_eq!(board.stored_page_count(), 0, "both left the tablet");
+    // The first held page still cannot be written; the second can.
+    let first = pages[0].time;
+    failing.lock().unwrap().retain(|time| *time == first);
+    run.service.sync_now(false).unwrap();
+    let status = run.wait(|s| synced_after(s, &before));
+    assert_eq!(
+        status
+            .last_sync
+            .as_ref()
+            .unwrap()
+            .error
+            .as_ref()
+            .unwrap()
+            .code,
+        "pageNotSaved"
+    );
+    assert_eq!(
+        kept_bytes(library.path()),
+        std::slice::from_ref(&pages[1].bytes)
+    );
+    // Then the first too.
+    failing.lock().unwrap().clear();
+    run.service.sync_now(false).unwrap();
+    let done = run.wait(|s| synced_after(s, &status.last_sync));
+    assert_eq!(done.last_sync.unwrap().error, None);
+    let mut expected = vec![pages[0].bytes.clone(), pages[1].bytes.clone()];
+    expected.sort();
+    assert_eq!(kept_bytes(library.path()), expected);
     run.service.shutdown();
 }

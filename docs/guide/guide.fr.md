@@ -355,7 +355,8 @@ Ardoise procède ainsi :
 - Avant d'écrire la note, elle garde une **copie de secours** des octets reçus, dans le dossier `_ardoise\rescued-pages\`
   de la bibliothèque (fichier `page-<heure>.bin`, avec un `page-<heure>.json` quand la page remplace un enregistrement
   précédent du même écran) ; si ce dossier ne peut pas être écrit, dans `%LOCALAPPDATA%\Ardoise\blackboard-rescue\` sur
-  ce PC. Une fois la note écrite et relue, la copie est supprimée : en temps normal, ce dossier est vide ou absent.
+  ce PC (un sous-dossier `library-…` par bibliothèque : une copie n'est importée que dans sa bibliothèque). Une fois la
+  note écrite et relue, la copie est supprimée : en temps normal, ce dossier est vide ou absent.
 - Si la note ne peut pas être écrite (bibliothèque inaccessible, disque plein), la copie reste, Ardoise le dit (« Une page
   de la tablette Xiaomi n'a pas pu être écrite dans la bibliothèque… ») et **importe la page toute seule à la prochaine
   synchronisation** de la tablette Xiaomi, avant les pages de la tablette. Vérifiez que la bibliothèque est accessible et
@@ -439,7 +440,8 @@ s'applique qu'à la Bamboo Slate.
 - **Avant le direct**, Ardoise récupère les pages enregistrées dans la tablette : effacer l'écran pendant le direct peut
   faire perdre la page de l'écran en cours si elle n'a pas été récupérée. Avec **Synchroniser automatiquement à la
   connexion** et **Effacer de la tablette après import** activés, le panneau montre la synchronisation, puis le direct
-  commence. Sinon,
+  commence ; si la synchronisation laisse des pages sur la tablette (une page n'a pas pu être importée), le direct ne
+  démarre pas, comme ci-dessous, et le résultat de la synchronisation dit pourquoi. Sinon,
   si la tablette contient des pages, le direct ne démarre pas : une fenêtre dit que la tablette contient encore des
   pages enregistrées (« La tablette Xiaomi contient encore 2 pages enregistrées… ») et propose **Importer et effacer**
   ou **Annuler** (Échap aussi). **Importer et effacer** importe les pages, qui sont effacées de la tablette une fois

@@ -89,7 +89,8 @@
 //! live mode across a reconnection: not measured); a delete ignored
 //! ([`SimBoard::ignore_next_delete`]) or slow ([`SimBoard::delay_next_delete`]); a page that is
 //! not records ([`SimBoard::store_raw_page`]); a store of the screen whose page is not the screen
-//! ([`SimBoard::store_raw_screen`]); an action run when the next download starts
+//! ([`SimBoard::store_raw_screen`]); a page taken by another application
+//! ([`SimBoard::page_taken_elsewhere`]); an action run when the next download starts
 //! ([`SimBoard::on_next_download`], to land a request in the middle of it) or right after the
 //! next delete ([`SimBoard::on_next_delete`]).
 
@@ -520,6 +521,17 @@ impl SimBoard {
     pub fn store_raw_page(&self, bytes: Vec<u8>) {
         let wall = self.wall_seconds();
         self.state().push_page(bytes, wall);
+    }
+
+    /// The page of `time` leaves the tablet without this host deleting it, as when another
+    /// application imported it (Mi Home deletes each page it imports): a fault, for a page that
+    /// is no longer described when the host looks again.
+    pub fn page_taken_elsewhere(&self, time: u32) {
+        let mut state = self.state();
+        state.pages.retain(|page| page.time != time);
+        if state.open.is_some_and(|open| open.time == time) {
+            state.open = None;
+        }
     }
 
     /// Presses the store button, but the page stored holds `bytes` instead of the screen's
