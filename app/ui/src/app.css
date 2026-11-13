@@ -931,6 +931,35 @@ select {
   border-style: dashed;
 }
 
+/* The free order of a binder: where dragged cards would land, a bar in the gap on that side of the card. */
+.note-card.insert-before::after,
+.note-card.insert-after::after {
+  content: '';
+  position: absolute;
+  top: -0.2rem;
+  bottom: -0.2rem;
+  width: 0.3rem;
+  border-radius: 0.15rem;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.note-card.insert-before::after {
+  left: -0.65rem;
+}
+
+.note-card.insert-after::after {
+  right: -0.65rem;
+}
+
+.note-grid.reordering .card-open {
+  cursor: grab;
+}
+
+.order-help {
+  margin: 0 0 0.75rem;
+}
+
 .card-open {
   display: flex;
   flex-direction: column;

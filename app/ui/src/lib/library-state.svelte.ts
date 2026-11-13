@@ -11,20 +11,30 @@ import { LibraryActivity } from './library-activity.svelte';
 import type { TurnDirection } from './library-batch';
 import { TagColorState } from './tag-colors.svelte';
 import {
+  arrangeByBinderOrder,
+  binderChain,
+  binderPathBelow,
   buildBinderTree,
   displayTitle,
   isInBinder,
   mergeTags,
+  moveByStep,
+  moveToSpot,
   oldestFirst,
+  orderIn,
   parseTags,
   queryWords,
   sameTag,
   sameView,
+  sortChoices,
   visibleNotes,
+  type DropSpot,
   type LibraryView,
+  type MoveStep,
+  type OrderChange,
   type SortOrder,
 } from './library-logic';
-import type { FileStamp, LibraryListing, MergeLayout, NoteSummary, TrashEntry } from './note';
+import type { ExportSource, FileStamp, LibraryListing, MergeLayout, NoteSummary, TrashEntry } from './note';
 
 /** Thumbnails kept: at least this many, and enough for the whole library (up to the maximum). */
 const THUMBNAIL_CACHE_MIN = 400;
@@ -49,6 +59,7 @@ export class LibraryState {
   error = $state<string | null>(null);
   view = $state<LibraryView>({ kind: 'all' });
   #query = $state('');
+  /** The order the user chose; what is shown is `effectiveOrder` (the free order of a binder only applies to one). */
   order = $state<SortOrder>('date-desc');
   /** Paths of the selected notes. */
   selected = $state<string[]>([]);
@@ -58,12 +69,28 @@ export class LibraryState {
   dragOutSupported = $state(false);
   /** Confirmation of the last operation that created a note, shown in a banner. */
   notice = $state<string | null>(null);
-  /** The export or assemble dialog, with the notes it was opened for (displayed order). */
-  dialog = $state<{ kind: 'export' | 'print' | 'assemble'; notes: NoteSummary[] } | null>(null);
+  /**
+   * The export, print or assemble dialog, with the notes it was opened for (displayed order). With `binder`, it is
+   * « Exporter le classeur en PDF » or « Imprimer le classeur » of that binder (`''` never): the notes are the binder's,
+   * in its order, and the dialog offers its sub-binders as an option (`binderNotes`).
+   */
+  dialog = $state<{ kind: 'export' | 'print' | 'assemble'; notes: NoteSummary[]; binder?: string } | null>(null);
+  /** « Changer la date… » is open on this note. */
+  dateNote = $state<NoteSummary | null>(null);
+  /** The place between two cards a drag would drop at, and the one a screen reader was last told about. */
+  insertion = $state<DropSpot | null>(null);
+  /** What a screen reader is told after a card moved (an `aria-live` region of the grid). */
+  announcement = $state('');
   /** Operations on several notes: progress, failures, « Annuler » (`library-activity.svelte.ts`). */
   readonly activity = new LibraryActivity(() => this.refresh());
   /** Colours of the tags (`_ardoise/tags.json`), loaded by the sidebar (`tag-colors.svelte.ts`). */
   readonly tagColors = new TagColorState((message) => (this.error = message));
+
+  /** The writes of the order of a binder under way, and the last of them (`applyOrder`). */
+  #orderWrites = 0;
+  #orderChain: Promise<void> = Promise.resolve();
+  /** Changes at each move and each write of an order: a listing read before the change is older than what the grid shows. */
+  #orderEpoch = 0;
 
   /** Paths being dragged; kept here because a drag event's data is not readable until the drop. */
   private dragPaths: string[] = [];
@@ -87,7 +114,21 @@ export class LibraryState {
 
   readonly notes = $derived(this.listing?.notes ?? []);
   readonly tree = $derived(buildBinderTree(this.listing?.binders ?? [], this.notes));
-  readonly visible = $derived(visibleNotes(this.notes, this.view, this.#query, this.order, currentLocale(), this.hits));
+  /** The order shown: the user's, except that the free order of a binder falls back to the date outside a binder. */
+  readonly effectiveOrder = $derived(orderIn(this.order, this.view));
+  /** The orders the sort menu offers in this view. */
+  readonly sortChoices = $derived(sortChoices(this.view));
+  readonly visible = $derived(
+    visibleNotes(this.notes, this.view, this.#query, this.order, currentLocale(), this.hits, {
+      tree: this.tree,
+      orders: this.listing?.orders ?? {},
+    }),
+  );
+  /**
+   * Cards can be moved among each other: the free order of a binder is shown and nothing narrows the notes (a search
+   * would hide cards whose places matter).
+   */
+  readonly canReorder = $derived(this.effectiveOrder === 'binder' && this.view.kind === 'binder' && this.#query.trim() === '');
   /** `selected` as a set: every card asks whether it is selected. */
   readonly #selectedSet = $derived(new Set(this.selected));
   readonly selectedNotes = $derived(this.notes.filter((n) => this.#selectedSet.has(n.path)));
@@ -171,10 +212,12 @@ export class LibraryState {
 
   async refresh(): Promise<void> {
     const mine = ++this.sequence;
+    const epoch = this.#orderEpoch;
     try {
       const [listing, trash] = await Promise.all([api.libraryList(), api.trashList()]);
       if (mine !== this.sequence) return;
-      this.listing = listing;
+      // A move made while the listing was being read: the orders it holds are older than the grid's, which wins.
+      this.listing = epoch === this.#orderEpoch || !this.listing ? listing : { ...listing, orders: this.listing.orders };
       this.trash = trash;
       const known = new Set(listing.notes.map((n) => n.path));
       if (this.selected.some((path) => !known.has(path))) {
@@ -233,6 +276,36 @@ export class LibraryState {
   /** Opens the export, print or assemble dialog over the notes selected now. */
   openDialog(kind: 'export' | 'print' | 'assemble'): void {
     this.dialog = { kind, notes: [...this.selectedDisplayed] };
+  }
+
+  /** Opens « Exporter le classeur en PDF » or « Imprimer le classeur » over `binder`. */
+  openBinderDialog(kind: 'export' | 'print', binder: string): void {
+    this.dialog = { kind, notes: this.binderNotes(binder, false), binder };
+  }
+
+  /** Whether `binder` has a sub-binder (the dialogs offer to include them only then). */
+  hasSubBinders(binder: string): boolean {
+    return binderChain(this.tree, binder).length > 1;
+  }
+
+  /** What exporting or printing `binder` takes: its notes (`binderNotes`) as sources, each with the bookmark it gets in a PDF. */
+  binderSources(binder: string, includeSub: boolean): ExportSource[] {
+    const locale = currentLocale();
+    return this.binderNotes(binder, includeSub).map((note) => ({
+      path: note.path,
+      outline: { path: binderPathBelow(binder, note.binder), title: displayTitle(note, locale) },
+    }));
+  }
+
+  /**
+   * The notes of `binder` in its free order, with those of its sub-binders after them (each in its own order, the
+   * sub-binders as the sidebar shows them) when `includeSub`: what exporting or printing a binder takes, whatever sort
+   * is on screen.
+   */
+  binderNotes(binder: string, includeSub: boolean): NoteSummary[] {
+    const chain = includeSub ? binderChain(this.tree, binder) : [binder];
+    const shown = this.notes.filter((n) => chain.includes(n.binder));
+    return arrangeByBinderOrder(shown, binder, { tree: this.tree, orders: this.listing?.orders ?? {} }, currentLocale());
   }
 
   closeDialog(): void {
@@ -338,6 +411,86 @@ export class LibraryState {
   endDrag(): void {
     this.dragPaths = [];
     this.dragging = false;
+    this.insertion = null;
+  }
+
+  /**
+   * A drag is over the left or right half of the card `path`: the mark shows where the dragged cards would land.
+   * Returns whether they may land there (the free order is shown, and the cards of the dragged notes' binder are next
+   * to the spot); the card then accepts the drop.
+   */
+  hoverSpot(path: string, side: 'before' | 'after'): boolean {
+    const spot = this.canReorder && this.dragging ? { path, side } : null;
+    if (!spot || !moveToSpot(this.visible, this.dragPaths, spot)) {
+      this.insertion = null;
+      return false;
+    }
+    if (this.insertion?.path !== path || this.insertion.side !== side) this.insertion = spot;
+    return true;
+  }
+
+  /** The pointer left the card `path`: its mark goes (the next card sets its own). */
+  leaveSpot(path: string): void {
+    if (this.insertion?.path === path) this.insertion = null;
+  }
+
+  /** The dragged cards are dropped at the place the mark shows: they move there, in their binder's order. */
+  async dropAtSpot(): Promise<void> {
+    const spot = this.insertion;
+    const paths = this.dragPaths;
+    const change = spot ? moveToSpot(this.visible, paths, spot) : null;
+    this.endDrag();
+    if (change) this.applyOrder(change, paths);
+  }
+
+  /**
+   * The keyboard's way to reorder: the card `path` (or the whole selection when it is part of it) goes one place
+   * earlier or later among the notes of its binder, or to its start or end. Said aloud through `announcement`.
+   * Returns whether anything moved.
+   */
+  async moveCards(path: string, step: MoveStep): Promise<boolean> {
+    if (!this.canReorder) return false;
+    const paths = this.isSelected(path) ? [...this.selected] : [path];
+    const change = moveByStep(this.visible, paths, step);
+    if (!change) {
+      this.announcement = t(step === 'earlier' || step === 'start' ? 'library.order.atStart' : 'library.order.atEnd');
+      return false;
+    }
+    this.applyOrder(change, paths);
+    return true;
+  }
+
+  /**
+   * Stores a new order of one binder: the grid follows at once (so the caller can put the focus back on the card without
+   * waiting for the file), and the file is written behind it.
+   */
+  private applyOrder(change: OrderChange, paths: string[]): void {
+    this.error = null;
+    const titles = paths.map((p) => this.titleOf(p));
+    this.announcement =
+      titles.length === 1
+        ? t('library.order.moved', { title: titles[0], position: change.position, count: change.count })
+        : t('library.order.movedMany', { count: titles.length, position: change.position, total: change.count });
+    if (this.listing) this.listing = { ...this.listing, orders: { ...this.listing.orders, [change.binder]: change.ids } };
+    // One write after the other, in the order the moves were made: a key held down makes moves faster than the files
+    // are written, and two writes at once could end with the older order. The listing is read again once the last
+    // write is over (reading it between two would bring the older order back for a moment).
+    this.#orderWrites += 1;
+    this.#orderEpoch += 1;
+    const write = this.#orderChain.then(async () => {
+      try {
+        await api.setBinderOrder(change.binder, change.ids);
+      } catch (error) {
+        this.error = errorMessage(error);
+        this.announcement = '';
+      }
+    });
+    this.#orderChain = write;
+    void write.then(async () => {
+      this.#orderWrites -= 1;
+      this.#orderEpoch += 1;
+      if (this.#orderWrites === 0) await this.refresh();
+    });
   }
 
   /** Moves the dragged notes into `binder` (`''` is the library root). */
@@ -420,6 +573,35 @@ export class LibraryState {
     const gone = new Set(done.trashed.map((t) => t.path));
     this.selected = this.selected.filter((p) => !gone.has(p));
     this.activity.trashed(done, (path) => titles.get(path) ?? path);
+  }
+
+  /**
+   * Writes a copy of each note next to it (same binder and date, `(copie)` after the title) one after the other, with
+   * progress; offers to delete the copies.
+   */
+  async duplicateNotes(notes: NoteSummary[]): Promise<void> {
+    this.error = null;
+    await this.activity.duplicate(
+      notes.map((note) => ({ path: note.path, title: displayTitle(note, currentLocale()) })),
+      t('library.duplicate.word'),
+    );
+  }
+
+  /** Opens « Changer la date… » on `note`. */
+  openDate(note: NoteSummary): void {
+    this.dateNote = note;
+  }
+
+  closeDate(): void {
+    this.dateNote = null;
+  }
+
+  /**
+   * Sets the creation date of `note` (Unix milliseconds) and offers to put the old one back. The error, if any, goes
+   * back to the caller (the dialog shows it).
+   */
+  async setCreated(note: NoteSummary, created: number): Promise<void> {
+    await this.activity.setCreated(note.path, displayTitle(note, currentLocale()), note.created, created, note.stamp);
   }
 
   /** Turns each note a quarter turn, as the editor does; offers to turn them back. */

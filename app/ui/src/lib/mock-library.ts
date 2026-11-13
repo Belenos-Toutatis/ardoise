@@ -36,6 +36,29 @@ function tabletState(library: MockLibrary) {
   return tablet;
 }
 
+/** The latest creation date accepted, as the Rust library's (`MAX_CREATED_MS`: 9999-12-31 00:00 UTC). */
+const MAX_CREATED = 253_402_214_400_000;
+
+/** `title (word)`, then `(word 2)`, `(word 3)`… as `copy_title` of the Rust library. */
+export function copyTitle(title: string, word: string): string {
+  const trimmed = title.trim();
+  const name = word.trim();
+  const open = trimmed.endsWith(')') ? trimmed.lastIndexOf('(') : -1;
+  if (open >= 0) {
+    const inside = trimmed.slice(open + 1, -1);
+    const before = trimmed.slice(0, open).trimEnd();
+    let n = 0;
+    if (inside.toLowerCase() === name.toLowerCase()) n = 1;
+    else {
+      const space = inside.lastIndexOf(' ');
+      const k = Number(inside.slice(space + 1));
+      if (space > 0 && inside.slice(0, space).toLowerCase() === name.toLowerCase() && Number.isInteger(k) && k >= 2) n = k;
+    }
+    if (n > 0) return before ? `${before} (${name} ${n + 1})` : `(${name} ${n + 1})`;
+  }
+  return trimmed ? `${trimmed} (${name})` : `(${name})`;
+}
+
 let counter = 0;
 
 export function newId(): string {
@@ -153,7 +176,9 @@ function listing(library: MockLibrary): LibraryListing {
   const counts = new Map<string, number>();
   for (const note of notes) for (const tag of note.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
   const tags: TagCount[] = [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => a.tag.localeCompare(b.tag));
-  return { notes, binders: visibleBinders(binders, notes), tags, problems: [...mockProblems] };
+  const orders: Record<string, string[]> = {};
+  for (const [binder, ids] of library.orders) orders[binder] = [...ids];
+  return { notes, binders: visibleBinders(binders, notes), tags, problems: [...mockProblems], orders };
 }
 
 function modify(stored: StoredNote, change: (note: Note) => void): FileStamp {
@@ -312,6 +337,50 @@ export function mockLibraryInvoke(command: string, args: Record<string, unknown>
       library.notes.set(target, stored);
       notifyLibraryChanged();
       return { path: target, stamp };
+    }
+
+    case 'duplicate_note': {
+      const library = mockLibrary();
+      const source = find(library, args.path as string);
+      const copy: Note = JSON.parse(JSON.stringify(source.note)) as Note;
+      copy.id = newId();
+      copy.title = copyTitle(copy.title, args.copyWord as string);
+      copy.favorite = false;
+      copy.modified = Date.now();
+      const stored: StoredNote = { ...source, note: copy, stamp: freshStamp(), binder: source.binder };
+      // The original's tablet page and sound are the copy's too (docs/design/library-order.md).
+      if (source.original) stored.original = JSON.parse(JSON.stringify(source.original));
+      const path = freePath(library, source.binder, fileName(copy));
+      library.notes.set(path, stored);
+      // A copy goes right after its original in the binder's order, when the binder has one.
+      const order = library.orders.get(source.binder);
+      const at = order?.indexOf(source.note.id) ?? -1;
+      if (order && at >= 0) order.splice(at + 1, 0, copy.id);
+      notifyLibraryChanged();
+      return summary(path, stored);
+    }
+
+    case 'set_note_created': {
+      const library = mockLibrary();
+      const path = args.path as string;
+      const stored = findFresh(library, path, args.stamp as FileStamp);
+      const created = args.created as number;
+      if (!Number.isFinite(created) || created < 0 || created > MAX_CREATED) failure('invalidDate', String(created));
+      const stamp = modify(stored, (note) => (note.created = created));
+      library.notes.delete(path);
+      const target = freePath(library, stored.binder, fileName(stored.note));
+      library.notes.set(target, stored);
+      notifyLibraryChanged();
+      return { path: target, stamp };
+    }
+
+    case 'set_binder_order': {
+      const library = mockLibrary();
+      const binder = cleanBinder(args.binder as string);
+      if (binder !== '' && !library.binders.has(binder)) failure('binderNotFound', binder);
+      library.orders.set(binder, [...new Set((args.ids as string[]).filter(Boolean))]);
+      notifyLibraryChanged();
+      return undefined;
     }
 
     case 'tablet_info':

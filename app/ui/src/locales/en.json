@@ -62,7 +62,8 @@
       "date-desc": "Date: newest first",
       "date-asc": "Date: oldest first",
       "title-asc": "Title: A → Z",
-      "title-desc": "Title: Z → A"
+      "title-desc": "Title: Z → A",
+      "binder": "Binder order"
     },
     "newNote": "New note",
     "notes": "Notes",
@@ -79,6 +80,8 @@
       "menu": "Actions for {title}",
       "rename": "Rename",
       "renameLabel": "New note title",
+      "duplicate": "Duplicate",
+      "changeDate": "Change the date…",
       "trash": "Move to trash",
       "filterTag": "Show notes tagged {tag}"
     },
@@ -109,6 +112,7 @@
       "export": "Export…",
       "print": "Print…",
       "assemble": "Assemble…",
+      "duplicate": "Duplicate",
       "assembleNeeds": "Select at least two notes to assemble them."
     },
     "empty": {
@@ -155,6 +159,49 @@
       "error": "Couldn't assemble the notes: {message}",
       "done": "New note created: {title}",
       "progress": "Assembling {count} notes…"
+    },
+    "duplicate": {
+      "word": "copy",
+      "progress": "Copying notes: {done} of {total}",
+      "undoProgress": "Deleting the copies: {done} of {total}",
+      "done": {
+        "one": "Copy created: {title} (same binder, same date).",
+        "other": "{count} copies created (same binder, same date)."
+      },
+      "failed": {
+        "one": "One note could not be copied:",
+        "other": "{count} notes could not be copied:"
+      },
+      "undone": {
+        "one": "The copy is in the trash.",
+        "other": "The {count} copies are in the trash."
+      },
+      "undoFailed": {
+        "one": "One copy could not be moved to the trash:",
+        "other": "{count} copies could not be moved to the trash:"
+      }
+    },
+    "date": {
+      "title": "Change the date",
+      "intro": "Creation date of the note \"{title}\".",
+      "current": "Current date: {date}",
+      "label": "New date and time",
+      "today": "Today",
+      "hint": "This is the date the note shows and the library sorts it by; it also starts the file name. The writing and the sound do not change.",
+      "apply": "Change the date",
+      "applying": "Changing…",
+      "error": "The date could not be changed: {message}",
+      "done": "Date of \"{title}\" changed.",
+      "undone": "Date of \"{title}\" put back.",
+      "undoFailed": "The date could not be put back:"
+    },
+    "order": {
+      "help": "Arrange the notes by dragging them between two cards, or from the keyboard with Alt + left or right arrow (Alt + Home or End: to the start or the end). Dropped on a binder of the sidebar, a note changes binder.",
+      "searching": "During a search the notes keep the binder's order but do not move: clear the search to arrange them.",
+      "moved": "{title} moved to position {position} of {count}.",
+      "movedMany": "{count} notes moved from position {position} of {total}.",
+      "atStart": "Already at the start of the binder.",
+      "atEnd": "Already at the end of the binder."
     },
     "turn": {
       "button": "Turn",
@@ -234,6 +281,9 @@
     "binder": {
       "menu": "Actions on the binder \"{name}\"",
       "rename": "Rename…",
+      "exportPdf": "Export the binder as a PDF…",
+      "print": "Print the binder…",
+      "emptyHint": "This binder holds no notes.",
       "delete": "Delete…",
       "newName": "New name of the binder \"{name}\"",
       "renameDo": "Rename",
@@ -806,6 +856,9 @@
     "draftFailed": "the backup copy of the changes could not be written or read ({detail})",
     "draftNotFound": "these recovered changes no longer exist",
     "invalidTagColor": "this colour is not in the palette ({detail})",
+    "orderNewer": "the order of this binder was saved by a newer version of Ardoise: update Ardoise on this PC to change it ({detail})",
+    "orderConflict": "the order of this binder changed while it was being saved, probably on another computer; try again ({detail})",
+    "invalidDate": "this date cannot be a note's date: choose a date between 1970 and 9999 ({detail})",
     "tagColorsNewer": "the tag colours were saved by a newer version of Ardoise: update Ardoise on this PC to change them ({detail})",
     "tagColorsConflict": "the tag colours were changing at the same moment, probably on another computer; try again in a moment ({detail})",
     "binderExists": "a binder or a file already has this name here; choose another one ({detail})",
@@ -1394,6 +1447,10 @@
     "title": "Export",
     "subjectNote": "Note: {title}",
     "subjectMany": "Selected notes: {count}",
+    "subjectBinder": "Binder \"{name}\"",
+    "includeSubBinders": "Include the sub-binders",
+    "includeSubBindersHint": "The notes of each sub-binder come after those of the binder, in that sub-binder's order; the sub-binders follow the sidebar's order.",
+    "binderPdfHint": "A single PDF, one page per note ({count} in all), in the binder's order. Each note is a bookmark of the PDF, filed under the name of its sub-binder.",
     "format": "Format",
     "formats": {
       "png": "PNG (image)",
@@ -1524,13 +1581,21 @@
   },
   "print": {
     "title": "Print",
-    "intro": "Windows opens its print window so that you can choose the printer, the number of copies and the pages. Each note is printed on a page of its own, in its orientation (portrait or landscape).",
+    "intro": "Windows opens its print window so that you can choose the printer, the number of copies and the pages. Each note is printed on a page of its own, in its orientation (portrait or landscape), unless you put several on a sheet.",
+    "binderHint": "Notes to print: {count}, in the binder's order.",
     "options": "Settings",
     "background": "Print the background (paper, lines, texture, background image)",
     "backgroundHint": "Unchecked: only the writing is printed, on white paper.",
     "fit": "Size on the sheet",
     "fitActual": "Real size (reduced only if the note is larger than the sheet)",
     "fitFit": "Fitted to the sheet",
+    "perSheet": "Notes per sheet",
+    "perSheetChoices": {
+      "1": "1 (one note per sheet)",
+      "2": "2 per sheet",
+      "4": "4 per sheet"
+    },
+    "perSheetHint": "The notes are laid out in order on the sheet, each in its own cell, without being distorted. In the Windows window the pages are the sheets: \"1-2\" prints the first two sheets.",
     "run": "Print…",
     "again": "Print again…",
     "running": "Printing…",

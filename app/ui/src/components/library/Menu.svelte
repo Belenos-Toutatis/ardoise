@@ -8,10 +8,16 @@
     hint?: string;
     onselect: () => void;
   }
+
+  /** Closes the menu that is open, if any: a right click on another card or binder opens its own menu, and only one is open. */
+  let closeOpenMenu: (() => void) | null = null;
 </script>
 
 <script lang="ts">
-  /** A small "more actions" menu button: opens a list of actions, closes on Escape or outside click. */
+  /**
+   * A small "more actions" menu button: opens a list of actions, closes on Escape or outside click; `show()` opens it
+   * from the owner's right click.
+   */
   import { tick } from 'svelte';
 
   let { label, items }: { label: string; items: MenuItem[] } = $props();
@@ -23,13 +29,25 @@
   async function toggle() {
     open = !open;
     if (open) {
+      if (closeOpenMenu !== closeMe) closeOpenMenu?.();
+      closeOpenMenu = closeMe;
       await tick();
       root?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
     }
   }
 
+  /** Opens the menu (the right click on what the menu belongs to); nothing when it is open already. */
+  export function show(): void {
+    if (!open) void toggle();
+  }
+
+  function closeMe() {
+    open = false;
+  }
+
   function close(returnFocus: boolean) {
     open = false;
+    if (closeOpenMenu === closeMe) closeOpenMenu = null;
     if (returnFocus) trigger?.focus();
   }
 

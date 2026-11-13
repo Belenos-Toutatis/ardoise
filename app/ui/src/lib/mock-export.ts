@@ -71,6 +71,17 @@ export const mockPrint = {
   cancel: false,
 };
 
+/** The last export asked for, whole (tests read it: the sources, the outline of a binder's PDF…). */
+export const mockExportRequest = {
+  last: null as {
+    sources: ExportSource[];
+    format: ExportFormat;
+    options: ExportOptions;
+    destination: string;
+    outline: { path: string[]; title: string }[] | undefined;
+  } | null,
+};
+
 const EXTENSIONS: Record<ExportFormat, string> = { png: 'png', jpg: 'jpg', webp: 'webp', svg: 'svg', pdf: 'pdf' };
 
 /** The note an export source stands for: its unsaved `note`, else the one stored at `path`. */
@@ -213,6 +224,13 @@ export function mockExportInvoke(command: string, args: Record<string, unknown>)
       const notes = sources.map(sourceNote);
       const options = args.options as ExportOptions;
       checkOptions(options, format);
+      mockExportRequest.last = {
+        sources,
+        format,
+        options,
+        destination: args.destination as string,
+        outline: args.outline as { path: string[]; title: string }[] | undefined,
+      };
       if (isRaster(format)) {
         checkImageSize(
           notes.map((n) => n.page),
@@ -229,7 +247,9 @@ export function mockExportInvoke(command: string, args: Record<string, unknown>)
       sources.forEach(sourceNote);
       mockPrint.last = { sources, options: args.options as PrintOptions };
       if (mockPrint.cancel) return { printed: false, pages: 0 };
-      return afterDelay(() => ({ printed: true, pages: sources.length }));
+      // The dialog's pages are the sheets: two or four notes share one.
+      const perSheet = (args.options as PrintOptions).perSheet || 1;
+      return afterDelay(() => ({ printed: true, pages: Math.ceil(sources.length / perSheet) }));
     }
 
     case 'cancel_export':

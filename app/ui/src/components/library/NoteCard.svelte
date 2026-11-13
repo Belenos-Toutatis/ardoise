@@ -3,7 +3,7 @@
   import { tick, untrack } from 'svelte';
   import { startDragOut, type DragOutPhase } from '../../lib/drag-out';
   import { currentLocale, t } from '../../lib/i18n.svelte';
-  import { displayTitle, formatDate } from '../../lib/library-logic';
+  import { displayTitle, formatDate, type MoveStep } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
   import { whenNearViewport } from '../../lib/near-viewport';
   import type { NoteSummary } from '../../lib/note';
@@ -22,6 +22,7 @@
     onfocuscard,
     onrenamed,
     onresume,
+    onmoved,
   }: {
     note: NoteSummary;
     lib: LibraryState;
@@ -34,7 +35,12 @@
     onrenamed: (path: string) => void;
     /** « Reprendre en mode direct » (M12): live mode takes the window, on this note. */
     onresume?: (note: NoteSummary) => void;
+    /** The card was moved by the keyboard (Alt + arrows): the grid gives the focus back to it. */
+    onmoved?: (path: string) => void;
   } = $props();
+
+  /** Alt + these keys move the card in the free order of a binder. */
+  const MOVES: Record<string, MoveStep> = { ArrowLeft: 'earlier', ArrowRight: 'later', Home: 'start', End: 'end' };
 
   let src = $state<string | null>(null);
   let host = $state<HTMLElement | null>(null);
@@ -42,6 +48,7 @@
   let draft = $state('');
   let input = $state<HTMLInputElement | null>(null);
   let dragOut = $state<DragOutPhase>('idle');
+  let menu = $state<{ show: () => void } | null>(null);
 
   const locale = $derived(currentLocale());
   const title = $derived(displayTitle(note, locale));
@@ -59,6 +66,8 @@
           return block === 'noTablet' ? t('live.resume.noTablet') : block === 'busy' ? t('live.resume.tabletBusy') : null;
         })(),
   );
+  /** The mark of the place a dragged card would land at, on the side of this card it is on. */
+  const insertion = $derived(lib.insertion?.path === note.path ? lib.insertion.side : null);
   const stampKey = $derived(
     `${note.stamp.modified.secs_since_epoch}.${note.stamp.modified.nanos_since_epoch}.${note.stamp.len}`,
   );
@@ -124,6 +133,10 @@
     } else if (key === 'F2') {
       event.preventDefault();
       startRename();
+    } else if (event.altKey && !event.ctrlKey && !event.metaKey && lib.canReorder && key in MOVES) {
+      // The keyboard's way to reorder the free order of a binder (the drag's alternative).
+      event.preventDefault();
+      void lib.moveCards(note.path, MOVES[key]).then((moved) => moved && onmoved?.(note.path));
     } else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(key)) {
       onnavigate(event, index);
     }
@@ -141,6 +154,33 @@
       event.dataTransfer.setData('application/x-ardoise-notes', JSON.stringify(paths));
       event.dataTransfer.setData('text/plain', paths.join('\n'));
     }
+  }
+
+  /** A drag over the card, in the free order of a binder: the mark shows on which side of it the cards would land. */
+  function dragover(event: DragEvent) {
+    if (!lib.canReorder || !lib.dragging) return;
+    const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const side = event.clientX < box.left + box.width / 2 ? 'before' : 'after';
+    if (!lib.hoverSpot(note.path, side)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  }
+
+  function dragleave(event: DragEvent) {
+    if (!(event.currentTarget as HTMLElement).contains(event.relatedTarget as Node | null)) lib.leaveSpot(note.path);
+  }
+
+  function drop(event: DragEvent) {
+    if (!lib.canReorder || !lib.dragging || !lib.insertion) return;
+    event.preventDefault();
+    void lib.dropAtSpot();
+  }
+
+  /** The right click opens the card's menu (not over the title being edited, which keeps the system's menu). */
+  function contextmenu(event: MouseEvent) {
+    if (renaming) return;
+    event.preventDefault();
+    menu?.show();
   }
 
   /** Pointer down on the drag handle: the note (or the whole selection) goes out as PNG files. */
@@ -190,7 +230,20 @@
   </span>
 {/snippet}
 
-<li class="note-card" class:selected class:conflict={note.conflict} data-path={note.path}>
+<!-- The right click and the drag over are the pointer's extras: the keyboard has the card's menu and Alt + arrows. -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<li
+  class="note-card"
+  class:selected
+  class:conflict={note.conflict}
+  class:insert-before={insertion === 'before'}
+  class:insert-after={insertion === 'after'}
+  data-path={note.path}
+  oncontextmenu={contextmenu}
+  ondragover={dragover}
+  ondragleave={dragleave}
+  ondrop={drop}
+>
   <label class="card-check" title={t('library.card.select', { title })}>
     <input
       type="checkbox"
@@ -282,6 +335,7 @@
 
   <div class="card-menu">
     <Menu
+      bind:this={menu}
       label={t('library.card.menu', { title })}
       items={[
         { id: 'rename', label: t('library.card.rename'), onselect: startRename },
@@ -301,6 +355,13 @@
               },
             ]
           : []),
+        {
+          id: 'duplicate',
+          label: t('library.card.duplicate'),
+          disabled: lib.activity.busy,
+          onselect: () => void lib.duplicateNotes([note]),
+        },
+        { id: 'date', label: t('library.card.changeDate'), onselect: () => lib.openDate(note) },
         { id: 'trash', label: t('library.card.trash'), danger: true, onselect: () => void lib.trashNotes([note.path]) },
       ]}
     />

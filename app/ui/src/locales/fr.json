@@ -62,7 +62,8 @@
       "date-desc": "Date : la plus récente d'abord",
       "date-asc": "Date : la plus ancienne d'abord",
       "title-asc": "Titre : A → Z",
-      "title-desc": "Titre : Z → A"
+      "title-desc": "Titre : Z → A",
+      "binder": "Ordre du classeur"
     },
     "newNote": "Nouvelle note",
     "notes": "Notes",
@@ -79,6 +80,8 @@
       "menu": "Actions pour {title}",
       "rename": "Renommer",
       "renameLabel": "Nouveau titre de la note",
+      "duplicate": "Dupliquer",
+      "changeDate": "Changer la date…",
       "trash": "Mettre à la corbeille",
       "filterTag": "Afficher les notes de l'étiquette {tag}"
     },
@@ -109,6 +112,7 @@
       "export": "Exporter…",
       "print": "Imprimer…",
       "assemble": "Assembler…",
+      "duplicate": "Dupliquer",
       "assembleNeeds": "Sélectionnez au moins deux notes pour les assembler."
     },
     "empty": {
@@ -155,6 +159,49 @@
       "error": "Impossible d'assembler les notes : {message}",
       "done": "Nouvelle note créée : {title}",
       "progress": "Assemblage de {count} notes…"
+    },
+    "duplicate": {
+      "word": "copie",
+      "progress": "Copie des notes : {done} sur {total}",
+      "undoProgress": "Suppression des copies : {done} sur {total}",
+      "done": {
+        "one": "Copie créée : {title} (même classeur, même date).",
+        "other": "{count} copies créées (même classeur, même date)."
+      },
+      "failed": {
+        "one": "Une note n'a pas pu être copiée :",
+        "other": "{count} notes n'ont pas pu être copiées :"
+      },
+      "undone": {
+        "one": "La copie est à la corbeille.",
+        "other": "Les {count} copies sont à la corbeille."
+      },
+      "undoFailed": {
+        "one": "Une copie n'a pas pu être mise à la corbeille :",
+        "other": "{count} copies n'ont pas pu être mises à la corbeille :"
+      }
+    },
+    "date": {
+      "title": "Changer la date",
+      "intro": "Date de création de la note « {title} ».",
+      "current": "Date actuelle : {date}",
+      "label": "Nouvelle date et heure",
+      "today": "Aujourd'hui",
+      "hint": "C'est la date que montre la note et selon laquelle la bibliothèque la trie ; elle commence aussi le nom du fichier. L'écriture et le son ne changent pas.",
+      "apply": "Changer la date",
+      "applying": "Changement…",
+      "error": "Impossible de changer la date : {message}",
+      "done": "Date de « {title} » changée.",
+      "undone": "Date de « {title} » rétablie.",
+      "undoFailed": "La date n'a pas pu être rétablie :"
+    },
+    "order": {
+      "help": "Rangez les notes en les faisant glisser entre deux cartes, ou au clavier avec Alt + flèche gauche ou droite (Alt + Début ou Fin : au début ou à la fin). Glissée sur un classeur de la barre latérale, une note change de classeur.",
+      "searching": "Pendant une recherche, les notes gardent l'ordre du classeur mais ne se déplacent pas : videz la recherche pour les ranger.",
+      "moved": "{title} déplacée en position {position} sur {count}.",
+      "movedMany": "{count} notes déplacées à partir de la position {position} sur {total}.",
+      "atStart": "Déjà au début du classeur.",
+      "atEnd": "Déjà à la fin du classeur."
     },
     "turn": {
       "button": "Tourner",
@@ -234,6 +281,9 @@
     "binder": {
       "menu": "Actions sur le classeur « {name} »",
       "rename": "Renommer…",
+      "exportPdf": "Exporter le classeur en PDF…",
+      "print": "Imprimer le classeur…",
+      "emptyHint": "Ce classeur ne contient aucune note.",
       "delete": "Supprimer…",
       "newName": "Nouveau nom du classeur « {name} »",
       "renameDo": "Renommer",
@@ -806,6 +856,9 @@
     "draftFailed": "la copie de secours des modifications n'a pas pu être écrite ou lue ({detail})",
     "draftNotFound": "ces modifications récupérées n'existent plus",
     "invalidTagColor": "cette couleur ne fait pas partie de la palette ({detail})",
+    "orderNewer": "l'ordre de ce classeur a été enregistré par une version plus récente d'Ardoise : mettez Ardoise à jour sur ce PC pour le modifier ({detail})",
+    "orderConflict": "l'ordre de ce classeur a changé pendant l'enregistrement, sans doute sur un autre ordinateur ; réessayez ({detail})",
+    "invalidDate": "cette date ne peut pas être celle d'une note : choisissez une date entre 1970 et 9999 ({detail})",
     "tagColorsNewer": "les couleurs des étiquettes ont été enregistrées par une version plus récente d'Ardoise : mettez Ardoise à jour sur ce PC pour les modifier ({detail})",
     "tagColorsConflict": "les couleurs des étiquettes changeaient au même moment, sans doute sur un autre ordinateur ; réessayez dans un instant ({detail})",
     "binderExists": "un classeur ou un fichier porte déjà ce nom à cet endroit ; choisissez-en un autre ({detail})",
@@ -1394,6 +1447,10 @@
     "title": "Exporter",
     "subjectNote": "Note : {title}",
     "subjectMany": "Notes sélectionnées : {count}",
+    "subjectBinder": "Classeur « {name} »",
+    "includeSubBinders": "Inclure les sous-classeurs",
+    "includeSubBindersHint": "Les notes de chaque sous-classeur viennent après celles du classeur, dans l'ordre de ce sous-classeur ; les sous-classeurs sont dans l'ordre de la barre latérale.",
+    "binderPdfHint": "Un seul PDF, une page par note ({count} au total), dans l'ordre du classeur. Chaque note est un signet du PDF, rangé sous le nom de son sous-classeur.",
     "format": "Format",
     "formats": {
       "png": "PNG (image)",
@@ -1524,13 +1581,21 @@
   },
   "print": {
     "title": "Imprimer",
-    "intro": "Windows ouvre sa fenêtre d'impression pour choisir l'imprimante, le nombre de copies et les pages. Chaque note est imprimée sur une page, dans son orientation (portrait ou paysage).",
+    "intro": "Windows ouvre sa fenêtre d'impression pour choisir l'imprimante, le nombre de copies et les pages. Chaque note est imprimée sur une page, dans son orientation (portrait ou paysage), sauf si vous en mettez plusieurs par feuille.",
+    "binderHint": "Notes à imprimer : {count}, dans l'ordre du classeur.",
     "options": "Réglages",
     "background": "Imprimer le fond (papier, lignes, texture, image de fond)",
     "backgroundHint": "Décoché : seule l'écriture est imprimée, sur papier blanc.",
     "fit": "Taille sur la feuille",
     "fitActual": "Taille réelle (réduite seulement si la note dépasse la feuille)",
     "fitFit": "Ajustée à la feuille",
+    "perSheet": "Notes par feuille",
+    "perSheetChoices": {
+      "1": "1 (une note par feuille)",
+      "2": "2 par feuille",
+      "4": "4 par feuille"
+    },
+    "perSheetHint": "Les notes sont rangées dans l'ordre sur la feuille, chacune dans sa case, sans être déformée. Dans la fenêtre de Windows, les pages sont les feuilles : « 1-2 » imprime les deux premières feuilles.",
     "run": "Imprimer…",
     "again": "Imprimer de nouveau…",
     "running": "Impression en cours…",
