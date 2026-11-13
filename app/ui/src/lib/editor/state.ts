@@ -10,8 +10,15 @@ import { type Affine, type Rect, type Vec } from './geometry';
 import { layerVisible, onLayer } from './hit';
 import * as ops from './ops';
 import type { Orientation } from './page-size';
+import type { ShapeKind } from './shape-tools';
 
-export type Mode = 'select' | 'pen' | 'eraser' | 'pan' | 'crop';
+/** What a drag on the page does: select, write, draw a line, a rectangle or an ellipse (`ShapeKind`), erase, move the page, crop. */
+export type Mode = 'select' | 'pen' | ShapeKind | 'eraser' | 'pan' | 'crop';
+
+/** The modes whose drag puts new ink on the active layer (they need it visible). */
+export function inksNewStrokes(mode: Mode): boolean {
+  return mode === 'pen' || mode === 'line' || mode === 'rectangle' || mode === 'ellipse';
+}
 export type EraserMode = 'whole' | 'partial';
 
 export interface ToolSettings {

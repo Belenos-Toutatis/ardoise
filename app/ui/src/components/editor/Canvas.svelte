@@ -16,6 +16,11 @@
    * a double tap fits the page) unless "Draw with a finger" is on, and a finger is ignored while
    * a pen is in contact or hovering.
    *
+   * Shape tools (docs/design/shape-tools.md): with the line, rectangle or ellipse tool a drag shows the shape between its
+   * two ends, as it will be drawn (`lib/editor/shape-tools.ts`, the toggles in `shapePrefs`, Shift and Alt inverting two
+   * of them while held), and one ordinary stroke is added when the pointer is let go; Escape drops it
+   * (`cancelGesture`).
+   *
    * M17 (docs/design/paper-projection-narration.md §2.6, §3.2): while a writing recording runs, a stroke takes its
    * times from `strokeClock` (the sound's clock); otherwise it goes after the note's ink and the end of a note-time
    * narration (`nextStrokeBase`). The stroke in progress is told to `oninprogress` (the projection streams it), what
@@ -55,6 +60,7 @@
     canDraw,
     crop,
     erase,
+    inksNewStrokes,
     select,
     selectionBounds,
     transformSelection,
@@ -72,6 +78,15 @@
     type View,
     type Viewport,
   } from '../../lib/editor/view';
+  import { shapePrefs } from '../../lib/editor/shape-prefs.svelte';
+  import {
+    MIN_SHAPE_MS,
+    buildShapeStroke,
+    effectiveToggles,
+    shapeDuration,
+    type ShapeKind,
+    type SnapGrid,
+  } from '../../lib/editor/shape-tools';
   import { nextStrokeBase, type StrokeClock } from '../../lib/editor/writing-clock';
   import { t } from '../../lib/i18n.svelte';
   import type { Ink, InkPoint } from '../../lib/ink';
@@ -92,6 +107,7 @@
     split = null,
     onzone,
     straighten = null,
+    snapGrid = null,
     strokeClock = null,
     narration = null,
     oninprogress,
@@ -125,6 +141,8 @@
      * accent line. Nothing of it is in the note.
      */
     straighten?: { sources: readonly number[]; strokes: readonly Stroke[] } | null;
+    /** The lines of the page's template the shape tools snap to when asked (null: none to snap to). */
+    snapGrid?: SnapGrid | null;
     /**
      * A writing recording runs (M17): a stroke begun now takes its times from the sound's clock (the note time of its
      * pointer events), to its end even if the recording stops meanwhile. Null: the editor's rule.
@@ -144,6 +162,9 @@
   const REAL_SIZE = 96 / 25.4 / 100;
   const HANDLE_PX = 10;
 
+  /** A shape shorter than this on screen, in pixels, is a click: nothing is drawn. */
+  const MIN_SHAPE_PX = 4;
+
   /** What a lasso does to the selection: replace it, add to it (Shift), remove from it (Ctrl). */
   type Combine = 'replace' | 'add' | 'remove';
 
@@ -152,6 +173,8 @@
     /** `stroke`: the id the stroke in progress is told by (`oninprogress`). */
     | { kind: 'pen'; id: number; points: InkPoint[]; t0: number; base: number; stroke: number }
     | { kind: 'eraser'; id: number; last: Vec }
+    /** A shape tool: the two ends, the keys held now (Shift, Alt), and the time of the pointer-down as the pen has it. */
+    | { kind: 'shape'; id: number; shape: ShapeKind; start: Vec; end: Vec; shift: boolean; alt: boolean; t0: number; base: number }
     /** `barrel`: started by the pen's barrel button, which ends when the button is released. */
     | { kind: 'lasso'; id: number; points: Vec[]; combine: Combine; barrel?: boolean }
     | { kind: 'zone'; id: number; points: Vec[] }
@@ -265,6 +288,11 @@
     return drag !== null;
   }
 
+  /** Escape: the gesture under way is dropped, the note is not changed (a view moved by a pan stays moved). */
+  export function cancelGesture() {
+    dropDrag();
+  }
+
   /** The page as wide as the stage (its top shown when it is taller). */
   export function fitWidth() {
     measure();
@@ -370,8 +398,30 @@
     return { x: p.x, y: p.y, pressure, t: Math.max(0, Math.round(d.base + (e.timeStamp - d.t0))) };
   }
 
+  /** The stroke of the shape being dragged as it would be added now, or null while it is too small. */
+  function shapeStroke(d: Extract<Drag, { kind: 'shape' }>, base: number, durationMs: number) {
+    return buildShapeStroke({
+      kind: d.shape,
+      start: d.start,
+      end: d.end,
+      toggles: effectiveToggles(shapePrefs, d),
+      grid: snapGrid,
+      minSize: MIN_SHAPE_PX / view.scale,
+      tool: tools.tool,
+      color: tools.color,
+      width: tools.width,
+      base,
+      durationMs,
+    });
+  }
+
   let frame = 0;
   function showLive() {
+    if (drag?.kind === 'shape') {
+      const stroke = shapeStroke(drag, 0, MIN_SHAPE_MS);
+      livePath = stroke ? ink.path({ tool: stroke.tool, width: stroke.width, points: stroke.points }) : '';
+      return;
+    }
     if (drag?.kind !== 'pen') return;
     livePath = ink.path({ tool: tools.tool, width: tools.width, points: drag.points });
   }
@@ -426,7 +476,7 @@
   const barrelActive = $derived(barrelPicked && doc.selection.length > 0 && tools.mode !== 'select');
   /** The selection can be grabbed: with the selection tool, or after a barrel-button lasso. */
   const grabbable = $derived(
-    !readonly && !split && doc.selection.length > 0 && (tools.mode === 'select' || (barrelActive && (tools.mode === 'pen' || tools.mode === 'eraser'))),
+    !readonly && !split && doc.selection.length > 0 && (tools.mode === 'select' || (barrelActive && (inksNewStrokes(tools.mode) || tools.mode === 'eraser'))),
   );
 
   /**
@@ -519,7 +569,7 @@
     e.preventDefault();
     // Splitting: the page is read-only, except for tracing the zone.
     if (split && !panRequested && !split.tracing) return;
-    if (!split && !panRequested && tools.mode === 'pen' && !canDraw(doc)) {
+    if (!split && !panRequested && inksNewStrokes(tools.mode) && !canDraw(doc)) {
       onblocked?.();
       return;
     }
@@ -563,6 +613,11 @@
       case 'eraser':
         transient = erase(doc, [p], tools.eraserRadius, tools.eraser);
         begin({ kind: 'eraser', id, last: p });
+        break;
+      case 'line':
+      case 'rectangle':
+      case 'ellipse':
+        begin({ kind: 'shape', id, shape: tools.mode, start: p, end: p, shift: e.shiftKey, alt: e.altKey, t0: e.timeStamp, base: strokeBase(e.timeStamp) });
         break;
       case 'select': {
         // With Shift or Ctrl the gesture is always a lasso, even on the selection's frame.
@@ -637,6 +692,12 @@
         drag.last = p;
         break;
       }
+      case 'shape':
+        drag.end = pagePoint(e);
+        drag.shift = e.shiftKey;
+        drag.alt = e.altKey;
+        scheduleLive();
+        break;
       case 'lasso':
       case 'zone':
         drag.points.push(pagePoint(e));
@@ -686,6 +747,14 @@
     if (e.pointerType === 'pen') presence.gone(pointerId(e));
   }
 
+  /** Shift or Alt pressed or let go while a shape is dragged: the preview follows without waiting for the pointer to move. */
+  function shapeKeys(e: KeyboardEvent) {
+    if (drag?.kind !== 'shape' || (e.key !== 'Shift' && e.key !== 'Alt')) return;
+    drag.shift = e.shiftKey;
+    drag.alt = e.altKey;
+    scheduleLive();
+  }
+
   function finish(e: PointerEvent, cancelled: boolean) {
     if (!drag || pointerId(e) !== drag.id) return;
     const d = drag;
@@ -707,6 +776,17 @@
         if (!cancelled && transient && transient !== doc) onchange(transient);
         transient = null;
         break;
+      case 'shape': {
+        livePath = '';
+        if (cancelled) break;
+        // The keys held as the pointer is let go count, and the shape takes the time the drag took.
+        d.end = pagePoint(e);
+        d.shift = e.shiftKey;
+        d.alt = e.altKey;
+        const stroke = shapeStroke(d, d.base, shapeDuration(e.timeStamp - d.t0, strokeClock !== null));
+        if (stroke) onchange(addStroke(doc, stroke));
+        break;
+      }
       case 'lasso': {
         lasso = null;
         if (cancelled) break;
@@ -757,6 +837,8 @@
     }
   }
 </script>
+
+<svelte:window onkeydown={shapeKeys} onkeyup={shapeKeys} />
 
 <div class="stage" bind:this={stage}>
   <svg
@@ -901,6 +983,9 @@
   }
 
   .mode-pen,
+  .mode-line,
+  .mode-rectangle,
+  .mode-ellipse,
   .mode-crop,
   .mode-zone {
     cursor: crosshair;

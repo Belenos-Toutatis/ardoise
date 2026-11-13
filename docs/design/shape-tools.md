@@ -1,0 +1,41 @@
+# The shape tools: line, rectangle, ellipse
+
+SPEC §4.4 « Outils de tracé », docs/questions.md Q20 (point 4). Editor only: live mode has its own tools (`LiveView` does not use `Toolbar.svelte` nor the `Mode` type).
+
+## What the user does
+
+Three tools next to the pen (`Mode` has `'line' | 'rectangle' | 'ellipse'`, `ShapeKind` in `lib/editor/shape-tools.ts`). A drag (mouse, pen, or a finger when « Dessiner au doigt » is on: the tools follow `fingerDraws()` like the pen) shows the shape and adds one stroke when the pointer is let go. With a shape tool chosen the toolbar shows three toggles (`[data-slot="shape-options"]`, `aria-pressed` buttons, `data-action="shape-regular|centre|snap"`): « Forme régulière », « Depuis le centre », « Aimanter au quadrillage ». Shift inverts the first and Alt the second for the stroke being drawn (read from the pointer events and from the key events while dragging, so that pressing the key without moving shows at once). Nothing is straightened unless a toggle or a key asks.
+
+The toggles are `shapePrefs` (`lib/editor/shape-prefs.svelte.ts`): in memory, for the life of the app, shared by every editor opened meanwhile, **not saved**: a restart starts with all three off, so a choice made long ago never straightens or snaps a stroke by surprise (the user said « des fois on n'a pas envie que ce soit dressé »). Browser storage like « Dessiner au doigt » was the alternative.
+
+No keyboard shortcut: the free letters (`l`, `o`, `k`…) match neither the tools' names in both languages nor the letters of the others (`r` is the replay, `e` the eraser).
+
+## Geometry (`lib/editor/shape-tools.ts`, pure)
+
+`resolveShape({ kind, start, end, toggles, grid, minSize })` gives a `ShapeSpec` or null. In order: both points snap (when `toggles.snap` and the page has a grid), the end is made regular (a square on the longer side; a line on the horizontal, vertical or 45° diagonal closest, whichever is within 22.5°; the diagonal takes the longer side), then the first point is a corner or the centre. A regular shape wins over the snapping when they disagree (ruled paper: only the horizontals snap, so a square's height may stop between two rules). `minSize` is 4 screen pixels in page units: a click draws nothing, nor does a rectangle or an ellipse with one side shorter, nor two points that snapped to the same dot. Where the stroke starts: the corner the pointer went down on (from the centre: the corner the pointer is on); an ellipse starts at the parametric angle of that corner.
+
+## From a spec to a stroke
+
+**One stroke per shape**: a line, a rectangle (one closed stroke through its four corners, the last point on the first) and an ellipse (one closed stroke). One stroke, not four for the rectangle, because that is what « Redresser les formes » makes (`ardoise_ink::shapes`), so straightening a shape drawn with the tool changes nothing, the lasso takes it whole, and « Annuler » undoes it as one. The partial eraser opens a closed stroke like any other.
+
+**Sampling**: a point at most 0.5 mm apart (`SAMPLE_SPACING`, the same as `ardoise_ink::shapes::SAMPLE_SPACING`), the vertices being samples; an ellipse at equal angles, 72 points at least (small ones stay round), `ceil(2π·max(rx, ry) / 0.5 mm)` otherwise; 4 000 at most (the spacing grows for huge shapes). A line is densified too: a two-point line would appear all at once in the replay.
+
+**Corners and curves**: nothing special is needed. The outline (`ardoise_ink::outline`, in WebAssembly on screen and in Rust for the exports, the same code) keeps a turn of more than 60° sharp (the Catmull-Rom tangent is zero there, then a round join), so a rectangle's four corners, which are samples, stay sharp; an ellipse sampled this finely is smooth to the flatness of the outline (1 unit, 10 µm) at any zoom, and the SVG and PDF writers fill the same contours. `shape-tools.test.ts` checks it on the real outline: each corner reaches half the line's width beyond the vertex, along the diagonal (a rounded corner stops short by far more), the ellipse's contour stays within half the width of the ideal curve, a line within half the width of its axis.
+
+**Pressure**: 1 for every point (`SHAPE_PRESSURE`). At full pressure every ink draws exactly its nominal width (`ardoise_ink`, « Widths »), so the shape is as wide as the width chosen, where a mouse stroke (0.6) is a little finer; the pen's own pressure is ignored, a shape being deliberate. Pressure-sensitive inks: the brush tapers at both ends of any stroke, so a brush rectangle is thin at its start corner; the fountain pen's nib makes its horizontals and verticals differ, as for any stroke.
+
+**Times**: the first point is where `Canvas` puts a pen stroke's (`strokeBase`: after the note's ink and the end of a narration in note time, or the sound's clock during a writing recording); the times then grow with the distance along the path over `shapeDuration(dragMs, recording)`: the drag's own duration, at least 150 ms, at most 2 s, except during a writing recording where the real time is kept (the shape then follows the sound). Times never go back, so the replay draws the shape progressively, « supprimer les temps morts » and the timeline see an ordinary stroke.
+
+`Canvas` keeps the shape tools' code to a drag kind (`'shape'`), `shapeStroke`, a few lines in `onpointerdown`, `onpointermove` and `finish`, and `cancelGesture()`; the preview is the real outline of the stroke that would be added (`livePath`, redrawn at most once per frame). The projection stream (`oninprogress`) is not fed during the drag: the shape appears on the projection when it is added, like a pasted stroke.
+
+## The snap grid: one source of truth
+
+The page's templates are drawn **in Rust only** (`crates/ardoise-render/src/background.rs`, in millimetres; the editor shows the PNG `render_background` makes, the exports use the same geometry). The web view has a stand-in for browser development (`mock-notes.ts`) which is not the desktop app's. So the grid is not written again in TypeScript for the app: `ardoise_render::snap_grid(template, width_mm, height_mm)` builds it from the very functions `draw_template` draws with (`lined_rules`, `seyes_rules`, `seyes_columns`, `grid_lines`, `millimetre_lines`, each a `Lattice { first_mm, pitch_mm, count }`; the drawing loops were rewritten to iterate those, the golden renders being unchanged), and the Tauri command `template_snap_grid(page, template)` hands it to the interface in device units. `SnapGridWatch` (`shape-prefs.svelte.ts`) asks once per template and page size and `Editor` passes the answer to the toolbar (the toggle is disabled with a hint while it is null) and to `Canvas`.
+
+What snaps: squared 5 mm and dotted paper, the intersections (the grid is centred on the page, so the first line is not at the edge); millimetre paper, the lines every millimetre (the 10 mm grid centred, as drawn); ruled paper, the horizontal rules only (the first at 16 mm, every 8 mm, down to 4 mm above the bottom; the vertical is free); Seyès, the strong horizontal rules (from 16 mm, every 8 mm; not the thin ones between them) and the vertical lines of the large squares (the margin at 32 mm, then every 8 mm). Blank paper and music staves have none. A point beyond the first or last line snaps to it.
+
+The browser stand-in (`templateSnapGrid` in `mock-notes.ts`) repeats the numbers for development in a browser; the Rust tests (`the_snap_grid_is_the_lines_the_template_draws`, `the_millimetre_lattice_is_where_the_template_draws_its_lines`, `the_snap_grid_goes_to_the_interface_in_device_units`) and `shape-tools.test.ts` (« the mock stand-in for the snap grid ») give the same A4 portrait values, which keeps the two together.
+
+## Tests and journey
+
+`shape-tools.test.ts` (geometry, snapping per template, the 45° rule, minimal size, Shift and Alt, points, times, outlines), `Canvas.shapes.test.ts` (strokes added through pointer events: count, closed, style, layer, times, recording clock, pen and finger, hidden layer, cancel, toggles, snapping), `Editor.shapetools.test.ts` (the toolbar, the toggles, FR and EN names, the magnet disabled without a template and following the Page tab, undo and save). Journey: `app/e2e/journeys-m15-straighten.mjs`, « outils de tracé », through `Input.dispatchMouseEvent` (not run from the session that wrote it).

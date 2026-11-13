@@ -1,6 +1,12 @@
 <script lang="ts">
-  /** Tools and style: mode, ink tool, colour (Inkspace palette + custom colours), width, eraser. */
+  /**
+   * Tools and style: mode (select, pen, the shape tools, eraser, move the page), ink tool, colour (Inkspace palette +
+   * custom colours), width, eraser. With a shape tool, three toggles (`shapePrefs`): regular, from the centre, snap to
+   * the page's template (docs/design/shape-tools.md).
+   */
   import { INKSPACE_COLOR_NAMES, sameColor, toHex, fromHex } from '../../lib/editor/colors';
+  import { shapePrefs, type ShapeToggle } from '../../lib/editor/shape-prefs.svelte';
+  import { isShapeKind } from '../../lib/editor/shape-tools';
   import type { EraserMode, Mode, ToolSettings } from '../../lib/editor/state';
   import { t } from '../../lib/i18n.svelte';
   import { TOOLS, type Tool } from '../../lib/ink';
@@ -37,6 +43,7 @@
     shapesOpen = false,
     shapesSelected = 0,
     shapesFound = 0,
+    snapAvailable = false,
     onshapesopen,
     onshapes,
     onshapesdefaults,
@@ -83,6 +90,8 @@
     /** How many strokes are selected, and how many shapes they give with `shapes` (the panel says it). */
     shapesSelected?: number;
     shapesFound?: number;
+    /** The page has a template with lines to snap the shapes to (« Aimanter au quadrillage » is enabled). */
+    snapAvailable?: boolean;
     /** The panel opens or closes (the small button, or a click outside it). */
     onshapesopen?: (open: boolean) => void;
     onshapes?: (next: ShapeSettings) => void;
@@ -107,12 +116,21 @@
     return () => window.removeEventListener('pointerdown', away, true);
   });
 
-  const MODES: { mode: Mode; icon: string }[] = [
+  /** `icon`: a glyph; the shape tools have a drawn one (`ShapeIcon`). */
+  const MODES: { mode: Mode; icon?: string }[] = [
     { mode: 'select', icon: '⬚' },
     { mode: 'pen', icon: '✎' },
+    { mode: 'line' },
+    { mode: 'rectangle' },
+    { mode: 'ellipse' },
     { mode: 'eraser', icon: '⌫' },
     { mode: 'pan', icon: '✋' },
   ];
+
+  const SHAPE_TOGGLES: ShapeToggle[] = ['regular', 'centre', 'snap'];
+
+  /** A toggle is pressed; the snap one is not while the page has nothing to snap to. */
+  const pressed = (toggle: ShapeToggle) => shapePrefs[toggle] && (toggle !== 'snap' || snapAvailable);
 
   const mm = (units: number) => (units / 100).toFixed(units < 100 ? 2 : 1);
 
@@ -134,11 +152,58 @@
         title={t(`editor.modes.${mode}`)}
         onclick={() => onmode(mode)}
       >
-        <span aria-hidden="true">{icon}</span>
+        {#if icon}
+          <span aria-hidden="true">{icon}</span>
+        {:else}
+          <svg class="shape-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            {#if mode === 'line'}
+              <path d="M5 19 19 5" />
+            {:else if mode === 'rectangle'}
+              <rect x="4" y="6" width="16" height="12" rx="1" />
+            {:else}
+              <ellipse cx="12" cy="12" rx="8" ry="6" />
+            {/if}
+          </svg>
+        {/if}
         <span class="tool-label">{t(`editor.modes.${mode}`)}</span>
       </button>
     {/each}
   </div>
+
+  {#if isShapeKind(tools.mode)}
+    <div class="group shape-options" role="group" aria-label={t('editor.shapeTools.label')} data-slot="shape-options">
+      {#each SHAPE_TOGGLES as toggle}
+        {@const off = toggle === 'snap' && !snapAvailable}
+        <button
+          type="button"
+          class="button small-button toggle"
+          class:active={pressed(toggle)}
+          aria-pressed={pressed(toggle)}
+          disabled={locked || off}
+          data-action="shape-{toggle}"
+          title={off ? t('editor.shapeTools.snapDisabled') : t(`editor.shapeTools.${toggle}Hint`)}
+          onclick={() => shapePrefs.toggle(toggle)}
+        >
+          <svg class="shape-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            {#if toggle === 'regular'}
+              <rect x="3" y="3" width="10" height="10" />
+              <circle cx="16.5" cy="16.5" r="4.5" />
+            {:else if toggle === 'centre'}
+              <circle cx="12" cy="12" r="2" />
+              <path d="M12 3v4M12 17v4M3 12h4M17 12h4" />
+            {:else}
+              <path d="M5 5h14M5 12h14M5 19h14M5 5v14M12 5v14M19 5v14" />
+              <circle cx="12" cy="12" r="2.6" fill="currentColor" />
+            {/if}
+          </svg>
+          {t(`editor.shapeTools.${toggle}`)}
+        </button>
+      {/each}
+      {#if !snapAvailable}
+        <span class="label" data-slot="shape-snap-hint">{t('editor.shapeTools.snapNone')}</span>
+      {/if}
+    </div>
+  {/if}
 
   {#if tools.mode === 'eraser'}
     <div class="group" role="radiogroup" aria-label={t('editor.eraser.label')}>
@@ -372,10 +437,21 @@
     padding: 0.35rem 0.6rem;
   }
 
-  .toolbar .tool.active {
+  .toolbar .tool.active,
+  .toolbar .toggle.active {
     border-color: var(--accent);
     background: var(--accent);
     color: var(--accent-text);
+  }
+
+  .shape-icon {
+    width: 1.05rem;
+    height: 1.05rem;
+    vertical-align: -0.2em;
+  }
+
+  .shape-options {
+    flex-wrap: wrap;
   }
 
   .tool-label {

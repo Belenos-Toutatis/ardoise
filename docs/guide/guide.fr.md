@@ -1089,6 +1089,16 @@ Cliquez sur une carte pour ouvrir la note. En haut : **Bibliothèque** (retour),
 modifications, Ardoise demande : **Enregistrer et revenir**, **Revenir sans enregistrer** ou **Rester**. Annuler et
 rétablir n'ont pas de limite pendant que la note est ouverte.
 
+**La touche `Échap`, par étapes.** Chaque appui fait la plus petite chose qui s'applique : d'abord il abandonne le geste en
+cours (un trait, une forme, un lasso, un déplacement, la question qu'Ardoise pose à l'écran) ; sinon il ferme le panneau ou
+l'outil ouvert (la découpe, la relecture, le recadrage à la main, le réglage de **Redresser les formes**) ; sinon il enlève
+la sélection ; sinon il **enregistre la note et revient à la bibliothèque**, comme le bouton **Bibliothèque** mais sans poser
+la question des modifications : l'enregistrement est la réponse. Si l'enregistrement échoue (note modifiée ailleurs entre-temps,
+disque plein), la note reste ouverte et le message dit pourquoi. Pendant l'enregistrement d'une narration, `Échap` ne
+quitte jamais la note : un message demande d'arrêter l'enregistrement d'abord. Dans un champ de saisie (le titre, le nom d'un
+calque, une liste de choix) et dans une fenêtre ouverte (export, impression…), `Échap` reste celui du champ ou de la fenêtre ;
+une touche maintenue ne compte que pour un appui.
+
 Pour passer à une autre note sans revenir à la bibliothèque, utilisez **Page précédente** et **Page suivante** : les
 flèches `‹` et `›` à côté du titre, ou `Alt + ←` et `Alt + →`. Elles suivent la liste que la bibliothèque montre : même
 classeur, mêmes étiquettes, même recherche, même ordre. Entre les deux flèches, Ardoise écrit la place de la note, par
@@ -1163,13 +1173,15 @@ rien ouvrir ; `Entrée` ou `Espace` ouvre l'onglet ou le replie.
 
 ### Les outils
 
-La barre d'outils propose quatre outils (**Outil**) :
+La barre d'outils propose les outils suivants (**Outil**) :
 
 - **Stylo** : choisissez l'**Encre** (**Stylo à bille**, **Stylo plume**, **Feutre**, **Crayon**, **Pinceau**,
   **Surligneur**, **Craie**), la **Couleur** (**Noir**, **Bleu**, **Vert**, **Violet**, **Rouge**, **Orange**, **Gris**,
   ou **Choisir une autre couleur** ; les couleurs personnalisées sont mémorisées) et l'**Épaisseur**. L'épaisseur du trait
   suit la pression du stylet. **Appliquer à toute la note :** **Couleur**, **Encre** ou **Épaisseur** change tous les
   traits d'un coup.
+- **Ligne**, **Rectangle**, **Ellipse** : des formes nettes, tracées d'un glissé (voir **Tracer une ligne, un rectangle,
+  une ellipse**, plus bas).
 - **Gomme** : **Traits entiers** ou **Partielle**, avec sa **Taille**. Elle n'efface que sur le calque choisi (voir
   **Calques**).
 - **Sélection** (le lasso) : entourez des traits du calque choisi pour les sélectionner ; `Maj` + lasso ajoute, `Ctrl` + lasso retire. Le
@@ -1191,6 +1203,32 @@ pointe du stylet, comme un doigt, saisit ensuite la sélection au lieu de dessin
 sélection, elle la déplace ; posée sur une poignée du cadre, elle la redimensionne. Cela vaut avec les outils **Stylo**
 et **Gomme** : pas besoin de repasser par l'outil **Sélection**. Hors du cadre, le stylet dessine comme d'habitude, et
 `Échap` désélectionne.
+
+### Tracer une ligne, un rectangle, une ellipse
+
+Les outils **Ligne**, **Rectangle** et **Ellipse**, à côté du **Stylo**, tracent des formes nettes : appuyez (souris, stylet,
+ou doigt si **Dessiner au doigt** est activé), glissez, levez. La forme se voit pendant le glissé ; un simple clic ne trace
+rien ; `Échap` pendant le glissé l'abandonne. La forme prend l'**Encre**, la **Couleur** et l'**Épaisseur** choisies (à
+l'épaisseur indiquée, quelle que soit la pression) et va sur le calque choisi.
+
+**Rien n'est redressé sans que vous le demandiez** : une ligne va exactement du premier point au dernier, un rectangle ou une
+ellipse est inscrit dans la boîte que vous tracez. Trois boutons à bascule, sous la barre d'outils tant qu'un de ces outils est
+choisi, s'utilisent au doigt, au stylet ou à la souris, sans clavier :
+
+- **Forme régulière** : un carré, un cercle ; une ligne se cale sur l'horizontale, la verticale ou la diagonale à 45° la plus
+  proche. La touche `Maj`, tenue pendant un tracé, inverse ce bouton pour ce tracé.
+- **Depuis le centre** : le premier point est le centre de la forme (une ligne grandit des deux côtés). La touche `Alt`, tenue
+  pendant un tracé, inverse ce bouton pour ce tracé.
+- **Aimanter au quadrillage** : les points que vous posez (le départ et l'arrivée ; pour un rectangle ou une ellipse, les coins de
+  leur boîte) se calent sur le fond de la page : les intersections des fonds **Quadrillé 5 mm**, **Millimétré** et **Pointillé** ;
+  les lignes du fond **Ligné** (l'horizontale seulement, l'autre sens reste libre) ; les lignes et les grands carreaux du **Seyès**
+  (pas les traits fins). Le bouton est grisé, avec la raison, sur un fond sans lignes (uni, partition). Si la forme doit rester
+  régulière et que les deux sens n'ont pas le même pas (fond ligné), la forme régulière l'emporte.
+
+Les trois réglages sont gardés tant qu'Ardoise est ouvert, d'une note à l'autre, et reviennent éteints au prochain lancement.
+Une forme est un trait ordinaire : un rectangle ou une ellipse est un seul trait fermé (la gomme partielle peut l'ouvrir) ; la
+gomme, le lasso, **Annuler**, les calques, la relecture et tous les exports la traitent comme n'importe quel trait. Ces outils ne
+sont pas dans le mode direct avec une tablette.
 
 ### Redresser les formes
 
@@ -1804,7 +1842,8 @@ comparent aux touches que la fenêtre traite vraiment.
 | `Ctrl + A` | Tout sélectionner (les traits du calque choisi) |
 | `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copier, couper, coller des traits |
 | `Suppr` ou `Retour arrière` | Supprimer la sélection |
-| `Échap` | Désélectionner |
+| `Échap` | Par étapes, un appui par étape : abandonner le geste en cours ; fermer la découpe, la relecture, le recadrage ou le réglage de **Redresser les formes** ; désélectionner ; enregistrer la note et revenir à la bibliothèque (jamais pendant l'enregistrement d'une narration) |
+| `Maj`, `Alt` (tenues pendant le tracé d'une forme) | Inverser **Forme régulière** (`Maj`) ou **Depuis le centre** (`Alt`) pour ce tracé |
 | `Alt + ←`, `Alt + →` | **Page précédente**, **Page suivante** (la note d'avant, la note d'après dans la bibliothèque) |
 | `V`, `P`, `E`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Déplacer la page** |
 | `Espace` (maintenu) | Déplacer la page (sauf si un bouton a le focus : `Espace` agit alors sur ce bouton, y compris une icône du rail) |

@@ -2,6 +2,9 @@
 // with its count and its dashed preview on the page, « Redresser » (one undoable step), Escape and a click outside, the
 // values kept, and a panel that stays within a low and a narrow window and scrolls.
 //
+// It also holds the journey of the shape tools (Q20: line, rectangle, ellipse, their three toggles, the magnet on squared
+// paper) and of Escape by steps up to the library, which draw with the same mouse helpers.
+//
 // Written without a run (the window cannot be driven from the session that wrote it): the selectors are the panel's
 // (`[data-panel="straighten"]`, `data-action`, `data-slot`, `data-field`, `#straighten-panel-<field>`), the canvas's
 // (`g.straighten-preview`, `path.straighten-faded`) and the ones of the other editor journeys for the rest. It can only
@@ -288,6 +291,131 @@ export const straightenSettingJourneys = [
         if ((await app.evaluate(value('size'))) !== '5') throw new Error(`the minimum is ${await app.evaluate(value('size'))} mm, not 5`);
         await app.key('Escape');
         await app.waitFor(`document.querySelector(${JSON.stringify(PANEL)}) === null`, 'the closed panel');
+      });
+    },
+  },
+  {
+    name: 'outils de tracé : ligne, rectangle, ellipse, les trois boutons, l’aimant sur le quadrillé 5 mm ; Échap par étapes jusqu’à la bibliothèque',
+    // Q20 (SPEC §4.4, « Outils de tracé » and « Échap dans l'éditeur »). Written without a run (the window cannot be driven
+    // from the session that wrote it): the selectors are the toolbar's (`[data-slot="shape-options"]`, `data-action="shape-
+    // regular|centre|snap"`), the Page tab's template select and the ones of the journeys above. A shape is one stroke: its
+    // outline's box (`getBBox`, in page units) is the shape's box grown by half the line width (0.6 mm at full pressure).
+    async run(app, check) {
+      const l = (key) => text(app.language, key);
+      const tool = (mode) => `.toolbar button[title="${l(`editor.modes.${mode}`)}"]`;
+      const toggle = (name) => `[data-slot="shape-options"] [data-action="shape-${name}"]`;
+      const SIDE = '[data-side-panel]';
+      /** Half the line width of the ballpoint at full pressure, device units (a shape is drawn at full pressure). */
+      const HALF = 30;
+      const pressed = (name) => `document.querySelector(${JSON.stringify(toggle(name))})?.getAttribute('aria-pressed')`;
+      /** The boxes of the outlines of all the strokes, in page units. */
+      const boxes = `JSON.stringify([...document.querySelectorAll(${JSON.stringify(STROKES)})].map((p) => { const b = p.getBBox(); return [b.x, b.y, b.width, b.height]; }))`;
+      let box;
+      let pxPerMm;
+      let pitchMm;
+      const at = (fx, fy) => ({ x: box.x + box.w * fx, y: box.y + box.h * fy });
+      /** The first line of squared paper along a length of `mm` millimetres, device units: the grid is centred (`ardoise_render::snap_grid`). */
+      const firstLine = (mm) => ((mm - Math.floor(mm / 5) * 5) / 2) * 100;
+      /** Is `value` (device units) on a line of the grid that starts at `first`, every 500? */
+      const onGrid = (value, first) => Math.abs(((value - first) / 500) - Math.round((value - first) / 500)) * 500 < 3;
+      const lastBox = async () => JSON.parse(await app.evaluate(boxes)).at(-1);
+
+      await check('une nouvelle note, un fond quadrillé 5 mm : l’aimant est grisé avec un fond uni, puis disponible', async () => {
+        await app.waitFor(`document.querySelectorAll('.note-card').length > 0`, 'the demo notes');
+        await app.click('button.primary', l('library.newNote'));
+        await app.waitFor(`document.querySelector('.editor svg.canvas rect.sheet') !== null`, 'the editor');
+        await sleep(400);
+        box = await app.evaluate(sheetBox);
+        pxPerMm = box.w / box.mm;
+        pitchMm = 5;
+        await app.click(tool('line'));
+        await app.waitFor(`document.querySelector('[data-slot="shape-options"]') !== null`, 'the three toggles');
+        const names = await app.evaluate(`[...document.querySelectorAll('[data-slot="shape-options"] button')].map((b) => b.textContent.trim())`);
+        const expected = ['regular', 'centre', 'snap'].map((n) => l(`editor.shapeTools.${n}`));
+        if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`the toggles read ${JSON.stringify(names)}, not ${JSON.stringify(expected)}`);
+        if ((await app.evaluate(`document.querySelector(${JSON.stringify(toggle('snap'))}).disabled`)) !== true) throw new Error('the magnet is enabled on a plain page');
+        // The Page tab: the paper's template.
+        await app.click(`${SIDE} .side-rail [role="tab"][data-tab="page"]`);
+        await app.waitFor(`document.querySelector('${SIDE} [data-tab-panel="page"]')?.hidden === false`, 'the Page tab');
+        await app.evaluate(`(() => { const el = document.querySelector('select[data-field="template"]'); el.value = 'grid5mm'; el.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await app.waitFor(`document.querySelector(${JSON.stringify(toggle('snap'))}).disabled === false`, 'the magnet enabled on squared paper');
+        await sleep(300);
+        box = await app.evaluate(sheetBox);
+      });
+
+      await check('la ligne, sans rien demander : exactement du premier point au dernier, un seul trait', async () => {
+        const a = at(0.2, 0.2);
+        await app.drag(line(a.x, a.y, a.x + 40 * pxPerMm, a.y + 7 * pxPerMm, 20));
+        await app.waitFor(`${count} === 1`, 'the line');
+        const [x, y, w, h] = await lastBox();
+        // 40 mm across, 7 mm down (a straight line is as wide as it is long, plus its own width).
+        if (Math.abs(w - (4000 + 2 * HALF)) > 150 || Math.abs(h - (700 + 2 * HALF)) > 150) throw new Error(`the line's box is ${w} x ${h}, not about 4060 x 760 (nothing straightens unless asked)`);
+        if (!(x > 0 && y > 0)) throw new Error(`the line is at ${x}, ${y}`);
+      });
+
+      await check('« Forme régulière » + « Aimanter » : un carré dont les coins sont sur le quadrillé', async () => {
+        await app.click(tool('rectangle'));
+        await app.click(toggle('regular'));
+        await app.click(toggle('snap'));
+        if ((await app.evaluate(pressed('regular'))) !== 'true' || (await app.evaluate(pressed('snap'))) !== 'true') throw new Error('the toggles are not pressed');
+        const a = at(0.3, 0.4);
+        // Wider than tall: the square takes the longer side.
+        await app.drag(line(a.x, a.y, a.x + 50 * pxPerMm, a.y + 20 * pxPerMm, 20));
+        await app.waitFor(`${count} === 2`, 'the square');
+        const [x, y, w, h] = await lastBox();
+        if (Math.abs(w - h) > 3) throw new Error(`not a square: ${w} x ${h}`);
+        const first = await app.evaluate(`(() => { const s = document.querySelector('.editor svg.canvas'); return { x: (${firstLine.toString()})(Number(s.dataset.pageWidth) / 100), y: (${firstLine.toString()})(Number(s.dataset.pageHeight) / 100) }; })()`);
+        for (const [value, from, what] of [[x + HALF, first.x, 'left'], [x + w - HALF, first.x, 'right'], [y + HALF, first.y, 'top'], [y + h - HALF, first.y, 'bottom']]) {
+          if (!onGrid(value, from)) throw new Error(`the ${what} side is at ${value}, off the ${pitchMm} mm grid that starts at ${from}`);
+        }
+      });
+
+      await check('« Depuis le centre » : un cercle autour du premier point, qui est sur le quadrillé', async () => {
+        await app.click(tool('ellipse'));
+        // « Forme régulière » and the magnet stay on from one tool to the next.
+        if ((await app.evaluate(pressed('regular'))) !== 'true' || (await app.evaluate(pressed('snap'))) !== 'true') throw new Error('the toggles were not kept');
+        await app.click(toggle('centre'));
+        const c = at(0.7, 0.6);
+        await app.drag(line(c.x, c.y, c.x + 25 * pxPerMm, c.y + 5 * pxPerMm, 20));
+        await app.waitFor(`${count} === 3`, 'the circle');
+        const [x, y, w, h] = await lastBox();
+        if (Math.abs(w - h) > 3) throw new Error(`not a circle: ${w} x ${h}`);
+        const first = await app.evaluate(`(() => { const s = document.querySelector('.editor svg.canvas'); return { x: (${firstLine.toString()})(Number(s.dataset.pageWidth) / 100), y: (${firstLine.toString()})(Number(s.dataset.pageHeight) / 100) }; })()`);
+        if (!onGrid(x + w / 2, first.x) || !onGrid(y + h / 2, first.y)) throw new Error(`the centre ${x + w / 2}, ${y + h / 2} is off the grid`);
+      });
+
+      await check('Échap pendant le tracé d’une forme : rien n’est ajouté', async () => {
+        await app.click(tool('rectangle'));
+        const a = at(0.15, 0.8);
+        await app.mouse('mouseMoved', a.x, a.y);
+        await app.mouse('mousePressed', a.x, a.y);
+        await app.mouse('mouseMoved', a.x + 30 * pxPerMm, a.y + 10 * pxPerMm, { buttons: 1, button: 'left' });
+        await app.waitFor(`document.querySelectorAll('.editor g.ink path.live').length === 1`, 'the shape being drawn');
+        await app.key('Escape');
+        await app.waitFor(`document.querySelectorAll('.editor g.ink path.live').length === 0`, 'the shape dropped');
+        await app.mouse('mouseReleased', a.x + 30 * pxPerMm, a.y + 10 * pxPerMm);
+        await sleep(200);
+        if ((await app.evaluate(count)) !== 3) throw new Error('Escape did not drop the shape');
+        if ((await app.evaluate(`document.querySelector('.editor') !== null`)) !== true) throw new Error('Escape left the editor');
+      });
+
+      await check('Échap par étapes : désélectionne, puis enregistre et revient à la bibliothèque', async () => {
+        await app.click(tool('select'));
+        const a = at(0.02, 0.02);
+        const b = at(0.98, 0.98);
+        await app.drag([a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }, a, { x: a.x + 2, y: a.y + 2 }]);
+        await app.waitFor(`${selectedCount(l)} === 3`, 'the three shapes selected');
+        await app.key('Escape');
+        await app.waitFor(`${selectedCount(l)} === 0`, 'the selection dropped');
+        if ((await app.evaluate(`document.querySelector('.editor') !== null`)) !== true) throw new Error('the first Escape left the editor');
+        if ((await app.evaluate(`document.querySelector('.editor').dataset.dirty`)) !== 'yes') throw new Error('the note is not unsaved before the last step');
+        await app.key('Escape');
+        await app.waitFor(`document.querySelector('.editor') === null`, 'the library');
+        await app.waitFor(`document.querySelectorAll('.note-card').length > 0`, 'the library cards');
+        // Saved on the way: opening the note again shows the three shapes.
+        await app.click('.note-card .card-open');
+        await app.waitFor(`document.querySelector('.editor svg.canvas rect.sheet') !== null`, 'the editor again');
+        await app.waitFor(`${count} === 3`, 'the three shapes saved');
       });
     },
   },

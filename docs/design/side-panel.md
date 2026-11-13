@@ -468,7 +468,7 @@ export type EditorKeyKind =
   | 'close' | 'save' | 'previousPage' | 'nextPage'
   | 'leaveReplay' | 'playPause'
   | 'copy' | 'cut' | 'paste' | 'undo' | 'redo' | 'selectAll' | 'fit' | 'fitWidth'
-  | 'delete' | 'deselect' | 'panHold' | 'select' | 'pen' | 'eraser' | 'pan' | 'replay' | 'straighten';
+  | 'delete' | 'escape' | 'panHold' | 'select' | 'pen' | 'eraser' | 'pan' | 'replay' | 'straighten';
 export interface EditorKeyAction { kind: EditorKeyKind }
 /** What a key press asks of the editor; no gate (dialogs, fields, gestures): the editor applies them. */
 export function editorKeyAction(e: KeyInput, context: EditorKeyContext): EditorKeyAction | null;
@@ -484,7 +484,7 @@ Mapping, today's behaviour exactly (`key` = `e.key` lower-cased when it is one c
 6. `mod`: `isFitKey` → `fit`, `isFitWidthKey` → `fitWidth` (checked first, as 1795 does), `z` → `redo` with Shift else
    `undo`, `y` → `redo`, `a` → `selectAll`; else null.
 7. Alt → null.
-8. `Delete`, `Backspace` → `delete`; `Escape` → `deselect`; `' '` → `panHold`; `v`, `p`, `e`, `h` → `select`, `pen`,
+8. `Delete`, `Backspace` → `delete`; `Escape` → `escape` (M16 called it `deselect`; since Q20 it acts by steps, `docs/design/interface.md`, "Escape in the editor, in steps"); `' '` → `panHold`; `v`, `p`, `e`, `h` → `select`, `pen`,
    `eraser`, `pan`; `r` → `replay`; `f` → `straighten`; else null.
 
 `isFitKey`, `isFitWidthKey` move into the module (exported). The editor's `onkeydown` becomes, gates unchanged and in
@@ -514,7 +514,7 @@ function onkeydown(e: KeyboardEvent) {
 `spacePlays(e.target)`: preventDefault, `player.toggle()` unless `recorder.busy`); `fit` / `fitWidth` (preventDefault,
 `canvas?.fit()` / `fitWidth()`); `copy` / `cut` / `paste` (`expectClipboardEvent(kind)`, no preventDefault);
 `undo`, `redo`, `selectAll` (preventDefault, `doUndo`, `doRedo`, `reselect(selectAll(doc))`); `delete` (with a
-selection: preventDefault, `change(deleteSelection(doc))`); `deselect` (`reselect(clearSelection(doc))`); `panHold`
+selection: preventDefault, `change(deleteSelection(doc))`); `escape` (`onescape`: the step that applies, the selection being cleared at its turn); `panHold`
 (unless `spaceActivates(e.target)`: preventDefault, `spaceDown = true`); `select`, `pen`, `eraser`, `pan`
 (`setMode`); `replay` (`enterReplay()`); `straighten` (`straighten()`); `close`, `save`, `previousPage`, `nextPage`:
 nothing (they were handled above, or a modal is open and the key is the modal's, as today); an exhaustive `switch`
@@ -542,7 +542,7 @@ label keys `editor.keys.list.<id>`.
 | `selectAll` | Ctrl + A → selectAll | Ctrl + Shift + A | [false] |
 | `clipboard` | Ctrl + C → copy, Ctrl + X → cut, Ctrl + V → paste | | [false] |
 | `delete` | Delete, Backspace → delete | Shift + Delete, Shift + Backspace | [false] |
-| `deselect` | Esc → deselect | Shift + Esc | [false] |
+| `escape` | Esc → escape | Shift + Esc | [false] |
 | `fit` | Ctrl + 0 → fit | Ctrl + Shift + 0; Ctrl (+ Shift) + `à` with code `Digit0`; Ctrl + `0` with code `Numpad0` | every context |
 | `fitWidth` | Ctrl + 2 → fitWidth | Ctrl + Shift + 2; Ctrl (+ Shift) + `é` with code `Digit2`; code `Numpad2` | every context |
 | `pages` | Alt + ← → previousPage, Alt + → → nextPage | | every context |
@@ -740,7 +740,7 @@ New:
 | `editor.keys.list.selectAll` | Tout sélectionner (les traits du calque choisi) | Select all (the strokes of the chosen layer) |
 | `editor.keys.list.clipboard` | Copier, couper, coller des traits | Copy, cut, paste strokes |
 | `editor.keys.list.delete` | Supprimer la sélection | Delete the selection |
-| `editor.keys.list.deselect` | Désélectionner (ferme d'abord la découpe ou le réglage de « Redresser les formes » s'ils sont ouverts) | Deselect (first closes the split or the setting of “Straighten shapes” when open) |
+| `editor.keys.list.escape` | Échap, par étapes : annule le geste en cours ; sinon ferme la découpe, la relecture, le recadrage ou le réglage de « Redresser les formes » ouverts ; sinon désélectionne ; sinon enregistre la note et revient à la bibliothèque (pas pendant un enregistrement sonore) | Esc, in steps: cancels the gesture under way; else closes the open split, replay, crop or “Straighten shapes” setting; else deselects; else saves the note and goes back to the library (not while a sound is being recorded) |
 | `editor.keys.list.fit` | Ajuster : la page entière | Fit: the whole page |
 | `editor.keys.list.fitWidth` | Largeur : la page sur toute la largeur | Width: the page across the window |
 | `editor.keys.list.pages` | Page précédente, page suivante (la note d'avant, celle d'après) | Previous page, next page (the note before, the note after) |

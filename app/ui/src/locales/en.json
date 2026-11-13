@@ -843,6 +843,7 @@
   },
   "editor": {
     "back": "Library",
+    "backTitle": "Back to the library (Esc when nothing else is open or selected)",
     "loading": "Opening the note…",
     "loadError": "Cannot open this note: {message}",
     "title": "Title of the note",
@@ -910,8 +911,22 @@
       "label": "Tool",
       "select": "Select",
       "pen": "Pen",
+      "line": "Line",
+      "rectangle": "Rectangle",
+      "ellipse": "Ellipse",
       "eraser": "Eraser",
       "pan": "Move the page"
+    },
+    "shapeTools": {
+      "label": "Shape options",
+      "regular": "Regular shape",
+      "regularHint": "Square, circle; a line snaps to horizontal, vertical or a 45° diagonal. Holding Shift inverts this setting for one stroke.",
+      "centre": "From the centre",
+      "centreHint": "The first point is the centre of the shape (a line grows both ways). Holding Alt inverts this setting for one stroke.",
+      "snap": "Snap to the grid",
+      "snapHint": "Points snap to the page's paper: intersections of squared, millimetre and dotted paper; the rules of ruled paper; the rules and large squares of Seyès.",
+      "snapDisabled": "This paper has no lines to snap to: choose ruled, Seyès, squared, millimetre or dotted paper (Page tab).",
+      "snapNone": "No grid on this paper"
     },
     "eraser": {
       "label": "Eraser mode",
@@ -1198,7 +1213,7 @@
         "selectAll": "Select all (the strokes of the chosen layer)",
         "clipboard": "Copy, cut, paste strokes",
         "delete": "Delete the selection",
-        "deselect": "Deselect (first closes the split or the setting of “Straighten shapes” when open)",
+        "escape": "Esc, in steps: cancels the gesture under way; else closes the open split, replay, crop or “Straighten shapes” setting; else deselects; else saves the note and goes back to the library (not while a sound is being recorded)",
         "fit": "Fit: the whole page",
         "fitWidth": "Width: the page across the window",
         "pages": "Previous page, next page (the note before, the note after)",

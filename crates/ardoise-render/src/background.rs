@@ -213,14 +213,38 @@ impl TemplateCanvas for Canvas<'_> {
     }
 }
 
+/// Evenly spaced positions along one axis, in millimetres: `first_mm + i × pitch_mm` for `i` in
+/// `0..count`. What the template draws on an axis, and what the shape tools snap to ([`snap_grid`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Lattice {
+    pub first_mm: f32,
+    pub pitch_mm: f32,
+    pub count: u32,
+}
+
+impl Lattice {
+    /// The positions `start, start + step, …` up to `end` (inclusive).
+    fn new(start: f32, end: f32, step: f32) -> Lattice {
+        let count = if step > 0.0 && end >= start {
+            ((end - start) / step).floor() as u32 + 1
+        } else {
+            0
+        };
+        Lattice {
+            first_mm: start,
+            pitch_mm: step,
+            count,
+        }
+    }
+
+    fn positions(self) -> impl Iterator<Item = f32> {
+        (0..self.count).map(move |i| self.first_mm + i as f32 * self.pitch_mm)
+    }
+}
+
 /// Positions `start, start + step, …` up to `end` (inclusive).
 fn steps(start: f32, end: f32, step: f32) -> impl Iterator<Item = f32> {
-    let count = if step > 0.0 && end >= start {
-        ((end - start) / step).floor() as usize + 1
-    } else {
-        0
-    };
-    (0..count).map(move |i| start + i as f32 * step)
+    Lattice::new(start, end, step).positions()
 }
 
 /// Offset that centres a grid of `step` on a length `size` (equal margins at both ends).
@@ -235,6 +259,10 @@ const LINED_PITCH_MM: f32 = 8.0;
 /// them are a quarter of it).
 const SEYES_TOP_MM: f32 = 16.0;
 const SEYES_PITCH_MM: f32 = 8.0;
+/// Seyès: the margin line, and the vertical lines of the large squares start from it.
+const SEYES_MARGIN_MM: f32 = 32.0;
+/// Ruled paper stops its last rule this far above the bottom of the page.
+const LINED_BOTTOM_MM: f32 = 4.0;
 /// Squared paper.
 const GRID_PITCH_MM: f32 = 5.0;
 
@@ -269,6 +297,66 @@ pub fn ruling(template: Template, page_height_mm: f32) -> Option<Ruling> {
     }
 }
 
+/// The ruled paper's rules.
+fn lined_rules(height_mm: f32) -> Lattice {
+    Lattice::new(LINED_FIRST_MM, height_mm - LINED_BOTTOM_MM, LINED_PITCH_MM)
+}
+
+/// Seyès: its strong horizontal lines.
+fn seyes_rules(height_mm: f32) -> Lattice {
+    Lattice::new(SEYES_TOP_MM, height_mm, SEYES_PITCH_MM)
+}
+
+/// Seyès: the margin line and the strong vertical lines to its right, the large squares'.
+fn seyes_columns(width_mm: f32) -> Lattice {
+    Lattice::new(SEYES_MARGIN_MM, width_mm, SEYES_PITCH_MM)
+}
+
+/// Squared and dotted paper: lines (or dots) every 5 mm, the grid centred on the length.
+fn grid_lines(size_mm: f32) -> Lattice {
+    Lattice::new(centred(size_mm, GRID_PITCH_MM), size_mm, GRID_PITCH_MM)
+}
+
+/// Millimetre paper: a line every millimetre, the 10 mm grid centred on the length.
+fn millimetre_lines(size_mm: f32) -> Lattice {
+    let first = centred(size_mm, 10.0);
+    let first = first - first.floor();
+    Lattice::new(first, size_mm, 1.0)
+}
+
+/// Where the shape tools snap on a page: the lines (or the dots) the template prints, one lattice
+/// per axis; an axis without one (the vertical of ruled paper) stays free.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SnapGrid {
+    pub x: Option<Lattice>,
+    pub y: Option<Lattice>,
+}
+
+/// The snap grid of `template` on a page `width_mm` × `height_mm`, `None` for the templates
+/// without lines to snap to (blank, music staves). Written from the same functions
+/// [`draw_template`] draws with: ruled paper has its horizontal rules; Seyès its strong rules and
+/// its large squares' vertical lines (not the thin rules between them); squared paper, millimetre
+/// paper and dotted paper the intersections of their lines or the dots.
+pub fn snap_grid(template: Template, width_mm: f32, height_mm: f32) -> Option<SnapGrid> {
+    let both = |lattice: fn(f32) -> Lattice| SnapGrid {
+        x: Some(lattice(width_mm)),
+        y: Some(lattice(height_mm)),
+    };
+    match template {
+        Template::Lined => Some(SnapGrid {
+            x: None,
+            y: Some(lined_rules(height_mm)),
+        }),
+        Template::Seyes => Some(SnapGrid {
+            x: Some(seyes_columns(width_mm)),
+            y: Some(seyes_rules(height_mm)),
+        }),
+        Template::Grid5mm | Template::Dotted => Some(both(grid_lines)),
+        Template::Millimetric => Some(both(millimetre_lines)),
+        Template::Blank | Template::Music => None,
+    }
+}
+
 fn draw_template(c: &mut impl TemplateCanvas, template: Template, p: &Palette) {
     let (w, h) = c.size_mm();
     match template {
@@ -276,14 +364,14 @@ fn draw_template(c: &mut impl TemplateCanvas, template: Template, p: &Palette) {
         Template::Lined => {
             // Ruled lines 8 mm apart, below a two-line header.
             let fade = c.density(LINED_PITCH_MM);
-            for y in steps(LINED_FIRST_MM, h - 4.0, LINED_PITCH_MM) {
+            for y in lined_rules(h).positions() {
                 c.hline(y, 0.0, w, p.rule, fade);
             }
         }
         Template::Seyes => {
             // 8 mm squares (strong lines), 3 thin lines between the horizontal ones, vertical
             // lines right of a margin at 32 mm.
-            const MARGIN: f32 = 32.0;
+            const MARGIN: f32 = SEYES_MARGIN_MM;
             const TOP: f32 = SEYES_TOP_MM;
             let thin_fade = c.density(2.0);
             let strong_fade = c.density(SEYES_PITCH_MM);
@@ -292,20 +380,21 @@ fn draw_template(c: &mut impl TemplateCanvas, template: Template, p: &Palette) {
                     c.hline(y, 0.0, w, p.seyes_thin, thin_fade);
                 }
             }
-            for y in steps(TOP, h, SEYES_PITCH_MM) {
+            for y in seyes_rules(h).positions() {
                 c.hline(y, 0.0, w, p.seyes_strong, strong_fade);
             }
-            for x in steps(MARGIN + 8.0, w, 8.0) {
+            // The margin line itself is drawn below, in its own colour.
+            for x in seyes_columns(w).positions().skip(1) {
                 c.vline(x, 0.0, h, p.seyes_strong, strong_fade);
             }
             c.vline(MARGIN, 0.0, h, p.margin, 1.0);
         }
         Template::Grid5mm => {
             let fade = c.density(GRID_PITCH_MM);
-            for y in steps(centred(h, GRID_PITCH_MM), h, GRID_PITCH_MM) {
+            for y in grid_lines(h).positions() {
                 c.hline(y, 0.0, w, p.grid, fade);
             }
-            for x in steps(centred(w, GRID_PITCH_MM), w, GRID_PITCH_MM) {
+            for x in grid_lines(w).positions() {
                 c.vline(x, 0.0, h, p.grid, fade);
             }
         }
@@ -342,8 +431,8 @@ fn draw_template(c: &mut impl TemplateCanvas, template: Template, p: &Palette) {
         }
         Template::Dotted => {
             let fade = c.density(5.0);
-            for y in steps(centred(h, 5.0), h, 5.0) {
-                for x in steps(centred(w, 5.0), w, 5.0) {
+            for y in grid_lines(h).positions() {
+                for x in grid_lines(w).positions() {
                     c.dot(x, y, p.dot, fade);
                 }
             }
@@ -665,5 +754,76 @@ mod tests {
         assert_eq!(steps(1.0, 0.0, 1.0).count(), 0);
         assert_eq!(steps(0.0, 1.0, 0.0).count(), 0);
         assert!((centred(297.0, 5.0) - 1.0).abs() < 1e-4);
+    }
+
+    /// The lattice as `(first, pitch, last)` in millimetres.
+    fn span(lattice: Option<Lattice>) -> Option<(f32, f32, f32)> {
+        lattice.map(|l| (l.first_mm, l.pitch_mm, l.positions().last().unwrap()))
+    }
+
+    #[test]
+    fn the_snap_grid_is_the_lines_the_template_draws() {
+        let near = |a: Option<(f32, f32, f32)>, b: (f32, f32, f32)| {
+            let a = a.expect("a lattice");
+            assert!(
+                (a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3 && (a.2 - b.2).abs() < 1e-3,
+                "{a:?} != {b:?}"
+            );
+        };
+        // Ruled paper: rules from 16 mm every 8 mm down to 4 mm above the bottom; the vertical is free.
+        let lined = snap_grid(Template::Lined, 210.0, 297.0).unwrap();
+        assert_eq!(lined.x, None);
+        near(span(lined.y), (16.0, 8.0, 288.0));
+        // Seyès: the margin at 32 mm and a line every 8 mm; the strong rules from 16 mm every 8 mm.
+        let seyes = snap_grid(Template::Seyes, 210.0, 297.0).unwrap();
+        near(span(seyes.x), (32.0, 8.0, 208.0));
+        near(span(seyes.y), (16.0, 8.0, 296.0));
+        // Squared and dotted paper: every 5 mm, centred (210 mm holds 42 squares, 297 mm 59 and 2 mm over).
+        for template in [Template::Grid5mm, Template::Dotted] {
+            let grid = snap_grid(template, 210.0, 297.0).unwrap();
+            near(span(grid.x), (0.0, 5.0, 210.0));
+            near(span(grid.y), (1.0, 5.0, 296.0));
+        }
+        // Millimetre paper: every millimetre, on the lines of the 10 mm grid (centred: 210 mm → 0, 297 mm → 3.5).
+        let mm = snap_grid(Template::Millimetric, 210.0, 297.0).unwrap();
+        near(span(mm.x), (0.0, 1.0, 210.0));
+        near(span(mm.y), (0.5, 1.0, 296.5));
+        // No lines to snap to.
+        assert_eq!(snap_grid(Template::Blank, 210.0, 297.0), None);
+        assert_eq!(snap_grid(Template::Music, 210.0, 297.0), None);
+    }
+
+    #[test]
+    fn the_snap_grid_follows_the_page_size() {
+        let a5 = snap_grid(Template::Grid5mm, 148.0, 210.0).unwrap();
+        // 148 mm holds 29 squares and 3 mm over: the grid starts 1.5 mm in.
+        assert!((a5.x.unwrap().first_mm - 1.5).abs() < 1e-4);
+        assert_eq!(a5.x.unwrap().count, 30);
+        // A page narrower than the Seyès margin has no vertical line.
+        assert_eq!(
+            snap_grid(Template::Seyes, 20.0, 100.0)
+                .unwrap()
+                .x
+                .unwrap()
+                .count,
+            0
+        );
+    }
+
+    #[test]
+    fn the_millimetre_lattice_is_where_the_template_draws_its_lines() {
+        // The loop of `draw_template`: the lines at the origin of the 10 mm grid plus whole millimetres.
+        for size in [210.0_f32, 297.0, 148.5, 100.3] {
+            let origin = centred(size, 10.0);
+            let drawn: Vec<f32> = (-(origin.floor() as i32)..=((size - origin).floor() as i32))
+                .map(|i| origin + i as f32)
+                .collect();
+            let lattice = millimetre_lines(size);
+            let snapped: Vec<f32> = lattice.positions().collect();
+            assert_eq!(snapped.len(), drawn.len(), "{size}");
+            for (a, b) in snapped.iter().zip(&drawn) {
+                assert!((a - b).abs() < 1e-3, "{size}: {a} != {b}");
+            }
+        }
     }
 }

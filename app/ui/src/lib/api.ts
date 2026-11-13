@@ -47,6 +47,7 @@ import type {
 } from './video';
 import { mockOpenH264Download, mockVideoExport } from './mock-video';
 import type { NoteOriginal } from './original';
+import type { SnapGrid } from './editor/shape-tools';
 import type { Draft, DraftSnapshot, DraftSummary } from './editor/drafts';
 import type {
   HandwritingHit,
@@ -80,6 +81,7 @@ import type {
   SplitResult,
   SplitSpec,
   TabletInfo,
+  Template,
   TrashEntry,
 } from './note';
 
@@ -254,6 +256,11 @@ export const api = {
     widthPx: number,
     image?: { image: BackgroundImage; key: string },
   ) => call<string>('render_background', { page, background, widthPx, image }),
+  /**
+   * Where the shape tools snap on a page with this template (device units): the lines or dots the paper prints,
+   * one lattice per axis (an absent one is free); null for a template with none (blank, music staves).
+   */
+  templateSnapGrid: (page: PageSize, template: Template) => call<SnapGrid | null>('template_snap_grid', { page, template }),
   /**
    * PNG data URL of the paper of page `pageIndex` of the live session, like `renderBackground`,
    * with the background image of a resumed sheet (its pixels are the session's).

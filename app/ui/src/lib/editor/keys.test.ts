@@ -165,11 +165,11 @@ describe('editorKeyAction: Ctrl keys', () => {
 });
 
 describe('editorKeyAction: the plain keys', () => {
-  it('Delete and Backspace delete, Escape deselects, Space holds the pan, with or without Shift', () => {
+  it('Delete and Backspace delete, Escape acts by steps, Space holds the pan, with or without Shift', () => {
     for (const shift of [false, true]) {
       expect(kind('Delete', { shift })).toBe('delete');
       expect(kind('Backspace', { shift })).toBe('delete');
-      expect(kind('Escape', { shift })).toBe('deselect');
+      expect(kind('Escape', { shift })).toBe('escape');
       expect(kind(' ', { shift })).toBe('panHold');
     }
   });

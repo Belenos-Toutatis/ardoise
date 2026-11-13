@@ -54,6 +54,11 @@
    *   pas enregistrer » and « Recharger » let the sound go. « Annuler » drops the sound and keeps the strokes. While it
    *   records, what acts on the timeline it writes waits: the replay, « Revenir à l'original », the split, the video.
    *   The narration the note stores is known from its opening (`OpenedNote.narration`), not only in a replay.
+   *
+   * Escape acts by steps, the smallest first (`lib/editor/escape.ts`, `onescape`): the gesture under way, then the panel
+   * or the tool mode that is open, then the selection, then the note is saved and the editor goes back to the library
+   * (`leaveSaving`, which refuses while a narration is recorded). The shape tools (`lib/editor/shape-tools.ts`) are the
+   * canvas's; the editor only gives it the snap grid of the page's template (`SnapGridWatch`).
    */
   import { tick, untrack } from 'svelte';
   import { api, errorMessage, onLibraryChanged, onSessionEnding, type AppState } from '../../lib/api';
@@ -68,6 +73,8 @@
   import { strokesOutsidePage } from '../../lib/editor/ops';
   import type { Orientation } from '../../lib/editor/page-size';
   import { revertToOriginal } from '../../lib/editor/original';
+  import { escapeStep } from '../../lib/editor/escape';
+  import { SnapGridWatch } from '../../lib/editor/shape-prefs.svelte';
   import { nextFrame, previewStraightening, straightenSelection, type StraightenPreview } from '../../lib/editor/shapes';
   import {
     DEFAULT_SHAPE_SETTINGS,
@@ -280,6 +287,17 @@
   let spaceDown = $state(false);
   let canvas = $state<ReturnType<typeof Canvas>>();
   let toolbar = $state<ReturnType<typeof Toolbar>>();
+  /** The Fond tab, while it shows: Escape drops the question it may be asking (the PDF page, the orientation). */
+  let backgroundSection = $state<ReturnType<typeof BackgroundImageSection>>();
+  /** The lines of the page's template the shape tools snap to (null: none, or not known yet). */
+  const snap = new SnapGridWatch();
+  $effect(() => {
+    const page = doc?.note.page;
+    const template = doc?.note.background.template;
+    if (page && template) untrack(() => snap.follow(page, template));
+  });
+  /** Escape is saving the note to leave: a second press waits for it. */
+  let escapeLeaving = false;
   /** What the video export dialog exports; null while it is closed. */
   let video = $state.raw<ExportSource | null>(null);
   /** The video export dialog is exporting: the window must not close under it. */
@@ -1071,11 +1089,30 @@
     onresume?.(currentPath);
   }
 
+  /** The editor cannot be left now (a narration is recorded, a video is written): the notice says it. */
+  function leaveRefused(): boolean {
+    if (recorder.busy) showNotice(t('editor.replay.recordingBusy'), true);
+    else if (videoRunning) showNotice(t('videoExport.closeBusy'), true);
+    else return false;
+    return true;
+  }
+
   function back() {
-    if (recorder.busy) return showNotice(t('editor.replay.recordingBusy'), true);
-    if (videoRunning) return showNotice(t('videoExport.closeBusy'), true);
+    if (leaveRefused()) return;
     if (dirty || titleEdited()) leaving = true;
     else close();
+  }
+
+  /**
+   * Escape's last step: the note is saved and the editor goes back to the library, by the rules of the back button
+   * (nothing during a recording or a video export; the writes still queued are waited for), without the question:
+   * the save is the answer. A save or a rename that fails keeps the editor open, with its error in view.
+   */
+  function leaveSaving() {
+    if (leaveRefused() || escapeLeaving || leaving) return;
+    if (!dirty && !titleEdited()) return close();
+    escapeLeaving = true;
+    void saveAndLeave().finally(() => (escapeLeaving = false));
   }
 
   /**
@@ -1954,8 +1991,8 @@
           change(deleteSelection(doc));
         }
         break;
-      case 'deselect':
-        reselect(clearSelection(doc));
+      // Escape is `onescape`'s: it never gets here.
+      case 'escape':
         break;
       case 'panHold':
         // Space on a focused control (button, checkbox, radio…) works it; elsewhere it pans while held.
@@ -1986,6 +2023,53 @@
     }
   }
 
+  /**
+   * Escape, by steps (`lib/editor/escape.ts`): one press does the smallest step that applies. Dialogs, and a field typed
+   * in, keep their own Escape; a key held down does one step only.
+   */
+  function onescape(e: KeyboardEvent) {
+    if (!doc) return;
+    const step = escapeStep({
+      leaving,
+      owned: modalOpen() || !!exporting || !!printing || !!video || share.panelOpen || !!revisionDialog || !!offer,
+      dragging: canvas?.dragging() ?? false,
+      split: split !== null,
+      settings: shapesPanel,
+      typing: isTyping(e.target),
+      question: confirmDelete || (backgroundSection?.questionOpen() ?? false),
+      replaying,
+      cropping: tools.mode === 'crop',
+      selected: doc.selection.length,
+    });
+    if (step === 'ignore') return;
+    e.preventDefault();
+    switch (step) {
+      case 'stay':
+        return stay();
+      case 'cancelDrag':
+        return canvas?.cancelGesture();
+      case 'closeSplit':
+        return cancelSplit();
+      case 'closeSettings':
+        return closeShapes(true);
+      case 'question':
+        if (confirmDelete) confirmDelete = false;
+        else backgroundSection?.cancelQuestion();
+        return;
+      case 'leaveReplay':
+        // Leaving the replay would drop the narration being recorded: say so rather than do nothing.
+        return recorder.busy ? showNotice(t('editor.replay.recordingBusy'), true) : leaveReplay();
+      case 'leaveCrop':
+        return setMode('select');
+      case 'deselect':
+        return reselect(clearSelection(doc));
+      case 'leave':
+        return leaveSaving();
+      default:
+        step satisfies never;
+    }
+  }
+
   function onkeydown(e: KeyboardEvent) {
     const action = editorKeyAction(e, { replaying });
     // Ctrl + W and Ctrl + F4 close what is open here; a dialog's are its own (`Modal`).
@@ -2002,23 +2086,18 @@
       if (dirty) void save();
       return;
     }
-    if (leaving) {
-      if (e.key === 'Escape') stay();
+    if (e.key === 'Escape' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (!e.repeat && !e.defaultPrevented) onescape(e);
       return;
     }
-    // A dialog or the split panel is open: the editing keys wait; Escape closes the panel.
+    if (leaving) return;
+    // A dialog or the split panel is open: the editing keys wait; Ctrl + W closes the panel.
     if (exporting || printing || video || share.panelOpen || revisionDialog) return;
     if (split) {
-      if (e.key === 'Escape' || closes) {
+      if (closes) {
         e.preventDefault();
         cancelSplit();
       }
-      return;
-    }
-    // The setting's panel is open: Escape closes it (the values stay), without straightening.
-    if (shapesPanel && e.key === 'Escape' && !(e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      closeShapes(true);
       return;
     }
     if (closes) {
@@ -2037,8 +2116,8 @@
       return;
     }
     // A gesture under way commits on top of the doc it started from: changing the doc meanwhile
-    // (undo, redo, delete, paste, select all…) would be overwritten, so those keys wait.
-    if (canvas?.dragging() && (e.ctrlKey || e.metaKey || ['Delete', 'Backspace', 'Escape'].includes(e.key))) {
+    // (undo, redo, delete, paste, select all…) would be overwritten, so those keys wait (Escape drops the gesture).
+    if (canvas?.dragging() && (e.ctrlKey || e.metaKey || ['Delete', 'Backspace'].includes(e.key))) {
       e.preventDefault();
       return;
     }
@@ -2060,7 +2139,7 @@
 
 <section class="editor" data-path={currentPath} data-library={app.library} data-dirty={dirty ? 'yes' : 'no'}>
   <header class="editor-top">
-    <button type="button" class="button ghost" onclick={back}>
+    <button type="button" class="button ghost" title={t('editor.backTitle')} onclick={back}>
       <span aria-hidden="true">←</span>
       {t('editor.back')}
     </button>
@@ -2214,6 +2293,7 @@
       onvideo={openVideo}
       onstraighten={straighten}
       {shapes}
+      snapAvailable={snap.grid !== null}
       shapesOpen={shapesPanel}
       shapesSelected={straightenPreview?.selected ?? doc.selection.length}
       shapesFound={straightenPreview?.groups.length ?? 0}
@@ -2245,6 +2325,7 @@
         oncropped={() => setMode('select')}
         onblocked={hiddenLayerNotice}
         straighten={straightenPreview}
+        snapGrid={snap.grid}
         split={split ? { preview, tracing: split.mode === 'zone' && !split.busy, zone: split.mode === 'zone' ? split.zone : null } : null}
         onzone={(polygon) => {
           if (split && split.mode === 'zone') {
@@ -2295,6 +2376,7 @@
           {/snippet}
           {#snippet background()}
             <BackgroundImageSection
+              bind:this={backgroundSection}
               page={doc.note.page}
               image={doc.note.backgroundImage}
               pixels={doc.backgroundPixels}

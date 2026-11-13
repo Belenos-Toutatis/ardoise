@@ -6,10 +6,12 @@
 use std::path::Path;
 
 use ardoise_core::library::{FileStamp, Library, LibraryError};
-use ardoise_core::note::{Background, BackgroundImage, Note, PageSize};
+use ardoise_core::note::{Background, BackgroundImage, Note, PageSize, Template};
 use ardoise_ink::{Tool, outline};
 use ardoise_media::narration_header;
-use ardoise_render::{NoteView, Picture, RenderError, RenderOptions, encode_png, render_note};
+use ardoise_render::{
+    Lattice, NoteView, Picture, RenderError, RenderOptions, encode_png, render_note, snap_grid,
+};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
@@ -369,6 +371,57 @@ pub async fn render_background(
     .map_err(|error| CommandError::new("render", error))?
 }
 
+/// One axis of the points the shape tools snap to: `first + i × pitch` for `i` in `0..count`, in
+/// device units (10 µm).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapAxis {
+    pub first: f64,
+    pub pitch: f64,
+    pub count: u32,
+}
+
+/// The snap grid of a page's template (`null` for the templates without lines): a missing axis is free.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapGrid {
+    pub x: Option<SnapAxis>,
+    pub y: Option<SnapAxis>,
+}
+
+/// Device units per millimetre.
+const UNITS_PER_MM: f64 = 100.0;
+
+fn snap_axis(lattice: Lattice) -> SnapAxis {
+    SnapAxis {
+        first: f64::from(lattice.first_mm) * UNITS_PER_MM,
+        pitch: f64::from(lattice.pitch_mm) * UNITS_PER_MM,
+        count: lattice.count,
+    }
+}
+
+/// Where the shape tools snap on `page` with `template`: the lines or the dots the paper prints
+/// (`ardoise_render::snap_grid`, written from the geometry the template is drawn with).
+pub fn template_snap_grid_of(page: PageSize, template: Template) -> Option<SnapGrid> {
+    let units = UNITS_PER_MM as f32;
+    snap_grid(
+        template,
+        page.width as f32 / units,
+        page.height as f32 / units,
+    )
+    .map(|grid| SnapGrid {
+        x: grid.x.map(snap_axis),
+        y: grid.y.map(snap_axis),
+    })
+}
+
+/// The points the shape tools snap to on a page with this template (the editor's « Aimanter au
+/// quadrillage »), or `null` when the template has none.
+#[tauri::command]
+pub fn template_snap_grid(page: PageSize, template: Template) -> Option<SnapGrid> {
+    template_snap_grid_of(page, template)
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -597,6 +650,27 @@ mod tests {
 
     fn render_background_url(page: PageSize, background: Background, width: u32) -> String {
         tauri::async_runtime::block_on(render_background(page, background, width, None)).unwrap()
+    }
+
+    #[test]
+    fn the_snap_grid_goes_to_the_interface_in_device_units() {
+        // A sheet of 210 x 297 mm on squared paper: every 5 mm = 500 units; 210 mm holds 42 squares, 297 mm 59 and 2 mm over.
+        let page = PageSize {
+            width: 21_000,
+            height: 29_700,
+        };
+        let grid = template_snap_grid_of(page, Template::Grid5mm).unwrap();
+        let (x, y) = (grid.x.unwrap(), grid.y.unwrap());
+        assert_eq!((x.first, x.pitch, x.count), (0.0, 500.0, 43));
+        assert_eq!((y.pitch, y.count), (500.0, 60));
+        assert!((y.first - 100.0).abs() < 1e-3, "{}", y.first);
+        // The shape the interface reads.
+        assert_eq!(
+            serde_json::to_value(template_snap_grid_of(page, Template::Lined)).unwrap(),
+            serde_json::json!({ "x": null, "y": { "first": 1600.0, "pitch": 800.0, "count": 35 } })
+        );
+        assert_eq!(template_snap_grid_of(page, Template::Blank), None);
+        assert_eq!(template_snap_grid_of(page, Template::Music), None);
     }
 
     // --- The sound of a recording made while writing (M17) ---

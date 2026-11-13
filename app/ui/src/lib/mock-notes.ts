@@ -6,7 +6,8 @@
  * conflict leaves the sound kept).
  */
 import { commitStagedNarration, mockNarrationOf, stagedNarrationFor } from './mock-narration';
-import type { Background, BackgroundImage, FileStamp, Note, OpenedNote, PageSize, Paper, Rgba, RevisionSource } from './note';
+import type { SnapAxis, SnapGrid } from './editor/shape-tools';
+import type { Background, BackgroundImage, FileStamp, Note, OpenedNote, PageSize, Paper, Rgba, RevisionSource, Template } from './note';
 import type { NoteOriginal } from './original';
 import {
   UNHANDLED,
@@ -135,6 +136,8 @@ export function mockNotesInvoke(command: string, args: Record<string, unknown>):
       const entry = stored(args.path as string);
       return copy(entry.original ?? { source: 'none' }) satisfies NoteOriginal;
     }
+    case 'template_snap_grid':
+      return templateSnapGrid(args.page as PageSize, args.template as Template);
     case 'render_background':
       return backgroundDataUrl(
         args.page as PageSize,
@@ -251,6 +254,37 @@ function templateSvg(background: Background, w: number, h: number, dark: boolean
       }
       return out.join('');
     }
+  }
+}
+
+/**
+ * The browser's stand-in for `template_snap_grid` (`ardoise_render::snap_grid`, which the desktop app answers from the
+ * geometry its templates are drawn with): the same lines as `templateSvg` above, in device units. The numbers are
+ * those of the Rust tests (`the_snap_grid_is_the_lines_the_template_draws`); keep the two together.
+ */
+export function templateSnapGrid(page: PageSize, template: Template): SnapGrid | null {
+  const [w, h] = [page.width / 100, page.height / 100];
+  const axis = (start: number, end: number, step: number): SnapAxis => ({
+    first: Math.round(start * 100 * 1000) / 1000,
+    pitch: step * 100,
+    count: end >= start ? Math.floor((end - start) / step + 1e-9) + 1 : 0,
+  });
+  const grid = (size: number) => axis(centred(size, 5), size, 5);
+  switch (template) {
+    case 'lined':
+      return { x: null, y: axis(16, h - 4, 8) };
+    case 'seyes':
+      return { x: axis(32, w, 8), y: axis(16, h, 8) };
+    case 'grid5mm':
+    case 'dotted':
+      return { x: grid(w), y: grid(h) };
+    case 'millimetric': {
+      const lines = (size: number) => axis(centred(size, 10) - Math.floor(centred(size, 10)), size, 1);
+      return { x: lines(w), y: lines(h) };
+    }
+    case 'blank':
+    case 'music':
+      return null;
   }
 }
 

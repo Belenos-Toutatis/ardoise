@@ -58,7 +58,7 @@ describe('ShortcutsHelp: the editor', () => {
     expect(chords('delete')).toBe('Suppr, Retour arrière');
     expect(chords('pages')).toBe('Alt + ←, Alt + →');
     expect(chords('fit')).toBe('Ctrl + 0');
-    expect(chords('deselect')).toBe('Échap');
+    expect(chords('escape')).toBe('Échap');
     expect([...dt('redo').querySelectorAll('kbd')].map((kbd) => kbd.textContent)).toEqual(['Ctrl', 'Y', 'Ctrl', 'Maj', 'Z']);
   });
 
@@ -66,7 +66,7 @@ describe('ShortcutsHelp: the editor', () => {
     setLocale('en');
     const { chords, target } = render('editor', EDITOR_SHORTCUTS);
     expect(chords('redo')).toBe('Ctrl + Y, Ctrl + Shift + Z');
-    expect(chords('deselect')).toBe('Esc');
+    expect(chords('escape')).toBe('Esc');
     expect(target.querySelector('h3')!.textContent).toBe('Editor shortcuts');
     expect(target.querySelector('h4')!.textContent).toBe('During a replay');
   });
