@@ -26,7 +26,7 @@ use ardoise_device::identity::{self, DEVICE_FORMAT, DeviceRecord, HostId};
 use ardoise_device::log::DiagnosticLog;
 use ardoise_device::manager::Manager;
 use ardoise_device::pages::{
-    BLACKBOARD_PAGE, LibrarySink, board_page, board_position_of, page_note_id,
+    BLACKBOARD_PAGE, LibrarySink, board_page, board_position_of, orient_board, page_note_id,
 };
 use ardoise_device::rescue::{RescueKind, RescueStore};
 use ardoise_device::service::{
@@ -135,9 +135,45 @@ impl Running {
         Self::start_with(devices, root, options, hooks, store, None)
     }
 
+    /// [`Running::start`] with the simulated tablets in real time (connectors that follow the
+    /// computer's clock), no page store.
+    fn start_in_real_time(
+        devices: Vec<SimDevice>,
+        root: &Path,
+        options: TabletOptions,
+        hooks: Arc<dyn ServiceHooks>,
+    ) -> Running {
+        Self::build(
+            SimFactory::of(devices, true),
+            root,
+            options,
+            hooks,
+            Box::new(|_, _, _| Err("no page in this test".into())),
+            None,
+        )
+    }
+
     /// [`Running::start`] with a fallback folder for the rescue copies.
     fn start_with(
         devices: Vec<SimDevice>,
+        root: &Path,
+        options: TabletOptions,
+        hooks: Arc<dyn ServiceHooks>,
+        store: PageStore,
+        rescue_fallback: Option<PathBuf>,
+    ) -> Running {
+        Self::build(
+            SimFactory::of(devices, false),
+            root,
+            options,
+            hooks,
+            store,
+            rescue_fallback,
+        )
+    }
+
+    fn build(
+        factory: SimFactory,
         root: &Path,
         options: TabletOptions,
         hooks: Arc<dyn ServiceHooks>,
@@ -155,7 +191,7 @@ impl Running {
         };
         let service = TabletService::start(
             config,
-            Box::new(SimFactory::of(devices, false)),
+            Box::new(factory),
             hooks,
             Box::new(move |status| {
                 let _ = sender.lock().unwrap().send(status.clone());
@@ -2991,13 +3027,17 @@ fn in_each_position_a_stored_page_becomes_an_upright_note() {
     }
 }
 
-/// Touching live records as page points, until `n` of them came.
+/// Touching live records as page points, until `n` of them came. A `Reoriented` or a `Started` among
+/// them is a failure: a test that expects one reads it first.
 fn touching_points(inputs: &Receiver<LiveInput>, n: usize) -> Vec<(f32, f32)> {
     let mut received = Vec::new();
     while touching(&received).len() < n {
         match inputs.recv_timeout(WAIT).expect("records in time") {
             LiveInput::Records { records, .. } => received.extend(records),
             LiveInput::State(LiveState::Stopped) => panic!("live mode stopped"),
+            input @ (LiveInput::Reoriented { .. } | LiveInput::Started { .. }) => {
+                panic!("unexpected {input:?}")
+            }
             _ => {}
         }
     }
@@ -3027,12 +3067,31 @@ fn upright_gamma(points: &[(f32, f32)], size: ardoise_core::note::PageSize, what
     }
 }
 
-/// SPEC §4.2 (Q17): in live mode each record is turned as it arrives, for the position set when
-/// the run starts: `Started` gives its quarter turns (the live page's size follows), the "Γ" goes
-/// up then right on the page. Changing the position during the run changes nothing to it; the next
-/// run takes the new one.
+/// The position a quarter turn clockwise from `position`.
+fn quarter_turn_from(position: BoardPosition) -> BoardPosition {
+    BoardPosition::ALL
+        .into_iter()
+        .find(|p| p.quarter_turns() == (position.quarter_turns() + 1) % 4)
+        .unwrap()
+}
+
+/// The `Reoriented` the service sends when the blackboard is set to `position` during its run.
+fn reoriented_for(position: BoardPosition) -> LiveInput {
+    LiveInput::Reoriented {
+        width: 20_500,
+        height: 27_200,
+        orientation: Orientation::from_quarter_turns(position.quarter_turns()),
+    }
+}
+
+/// SPEC §4.2 (Q17, Q19): in live mode each record is turned as it arrives, for the position of the
+/// run: `Started` gives its quarter turns (the live page's size follows), the "Γ" goes up then
+/// right on the page. A position set during the run (the live window's switch, or the settings) is
+/// taken at once: the sink is told (`Reoriented`, with the new position's quarter turns, before
+/// any record turned the new way) and what the hand writes from then on comes upright for it; the
+/// Slate's orientation still turns nothing. The next run starts with the new position.
 #[test]
-fn in_each_position_live_mode_is_upright_and_a_run_keeps_its_position() {
+fn in_each_position_live_mode_is_upright_and_a_run_takes_a_new_position_at_once() {
     let _report = common::report("blackboard: the four positions, live mode");
     for position in BoardPosition::ALL {
         let library = new_library();
@@ -3069,23 +3128,44 @@ fn in_each_position_live_mode_is_upright_and_a_run_keeps_its_position() {
         let what = format!("{position:?}");
         upright_gamma(&touching_points(&inputs, 30), board_page(position), &what);
 
-        // Set to another position during the run: the run keeps its own.
-        let other = BoardPosition::ALL
-            .into_iter()
-            .find(|p| p.quarter_turns() == (position.quarter_turns() + 1) % 4)
-            .unwrap();
+        // The user turns the tablet a quarter turn clockwise and sets it so during the run: the
+        // run takes it at once.
+        let other = quarter_turn_from(position);
         run.service.set_options(TabletOptions {
             board_position: other,
             ..options
         });
+        let (reoriented, between) = records_until(&inputs, |i| {
+            matches!(i, LiveInput::Reoriented { .. } | LiveInput::Started { .. })
+        });
+        assert_eq!(
+            reoriented,
+            reoriented_for(other),
+            "{position:?} to {other:?}"
+        );
+        assert!(
+            touching(&between).is_empty(),
+            "nothing was written meanwhile"
+        );
         run.wait(|s| s.options.board_position == other);
-        board.draw_live(gamma_script(position));
-        let what = format!("{position:?} kept after {other:?} was set");
-        upright_gamma(&touching_points(&inputs, 30), board_page(position), &what);
+        board.draw_live(gamma_script(other));
+        let what = format!("{position:?}, then {other:?} during the run");
+        upright_gamma(&touching_points(&inputs, 30), board_page(other), &what);
+
+        // The Slate's orientation turns nothing (`touching_points` fails on a `Reoriented`).
+        run.service.set_options(TabletOptions {
+            board_position: other,
+            orientation: Orientation::PortraitRight,
+            ..options
+        });
+        run.wait(|s| s.options.orientation == Orientation::PortraitRight);
+        board.draw_live(gamma_script(other));
+        let what = format!("{other:?}, the Slate's orientation changed");
+        upright_gamma(&touching_points(&inputs, 30), board_page(other), &what);
         run.service.stop_live();
         records_until(&inputs, |i| *i == LiveInput::State(LiveState::Stopped));
 
-        // The next run is held as set now.
+        // The next run starts as set now.
         let (sender, inputs) = mpsc::channel();
         run.service.start_live(Box::new(ChannelSink(sender)));
         let (started, _) = records_until(&inputs, |i| matches!(i, LiveInput::Started { .. }));
@@ -3109,6 +3189,176 @@ fn in_each_position_live_mode_is_upright_and_a_run_keeps_its_position() {
         run.service.stop_live();
         run.service.shutdown();
     }
+}
+
+/// A sink slower than the blackboard (called on the service's thread, it holds it up): the
+/// notifications written meanwhile wait in the link, as they would behind a busy hub. Counts the
+/// notifications of records it was given.
+struct SlowSink(Sender<LiveInput>, Arc<AtomicU16>);
+
+impl LiveSink for SlowSink {
+    fn input(&mut self, input: LiveInput) {
+        if matches!(input, LiveInput::Records { .. }) {
+            self.1.fetch_add(1, Ordering::SeqCst);
+            // Two notifications of the blackboard's pace (6 records at 120 a second) or so.
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let _ = self.0.send(input);
+    }
+}
+
+/// Q19: the position changed while the blackboard streams, at a moment the test does not choose
+/// (real time, from another thread than the service's, notifications waiting in the link behind a
+/// slow sink): every record reaches the sink exactly once, in order, those before the one
+/// `Reoriented` turned the old way, those after it the new way, whether they were written before
+/// the switch or not. The worker turns each record as it reads it and takes the change between two
+/// notifications, so a record in flight is never turned twice (the page turns only what came
+/// before `Reoriented`) nor left unturned.
+#[test]
+fn a_position_changed_while_records_stream_turns_each_record_once_the_way_of_its_moment() {
+    let _report = common::report("blackboard: a switch racing with the records");
+    let library = new_library();
+    let board = SimBoard::real_time(SimBoardConfig::blackboard());
+    added_beforehand(&board, library.path());
+    // One long stroke of distinct points (2 s at the blackboard's rate).
+    let written: Vec<Point> = (0..240_u16)
+        .map(|i| Point {
+            x: 2000 + i * 50,
+            y: 3000 + i * 70,
+            pressure: 900,
+        })
+        .collect();
+    let (old, new) = (BoardPosition::ButtonsBottom, BoardPosition::ButtonsLeft);
+    let mut run = Running::start_in_real_time(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        TabletOptions {
+            board_position: old,
+            ..TabletOptions::default()
+        },
+        Arc::new(Writer {
+            board: board.clone(),
+            script: PenScript::new()
+                .near(written.clone())
+                .away(Duration::from_millis(200)),
+        }),
+    );
+    run.wait(|s| s.connection == Connection::Connected);
+    let (sender, inputs) = mpsc::channel();
+    let delivered = Arc::new(AtomicU16::new(0));
+    run.service
+        .start_live(Box::new(SlowSink(sender, delivered.clone())));
+    records_until(&inputs, |i| matches!(i, LiveInput::Started { .. }));
+    let streaming = Instant::now();
+    // Some of the stroke first, then the switch while the rest streams.
+    let mut before = Vec::new();
+    while touching(&before).len() < 60 {
+        if let LiveInput::Records { records, .. } = inputs.recv_timeout(WAIT).unwrap() {
+            before.extend(records);
+        }
+    }
+    // By now the blackboard has written more than the sink was given: the rest waits in the link.
+    let elapsed = streaming.elapsed();
+    let given = touching(&before).len();
+    let notifications = delivered.load(Ordering::SeqCst);
+    run.service.set_options(TabletOptions {
+        board_position: new,
+        ..TabletOptions::default()
+    });
+    let (reoriented, more) = records_until(&inputs, |i| matches!(i, LiveInput::Reoriented { .. }));
+    assert_eq!(reoriented, reoriented_for(new));
+    before.extend(more);
+    let mut after = Vec::new();
+    while touching(&before).len() + touching(&after).len() < written.len() {
+        match inputs.recv_timeout(WAIT).expect("the rest of the stroke") {
+            LiveInput::Records { records, .. } => after.extend(records),
+            other => assert!(
+                !matches!(
+                    other,
+                    LiveInput::Reoriented { .. } | LiveInput::Started { .. }
+                ),
+                "{other:?}"
+            ),
+        }
+    }
+    let (before, after) = (touching(&before), touching(&after));
+    let written_by_then = elapsed.as_secs_f64() * 120.0;
+    say!(
+        "switch after {elapsed:?} ({notifications} notifications, {given} records given, about \
+         {written_by_then:.0} written): {} records turned the old way, {} the new way",
+        before.len(),
+        after.len()
+    );
+    assert!(
+        written_by_then > given as f64 + 12.0,
+        "records were waiting in the link when the switch came"
+    );
+    assert!(
+        !after.is_empty(),
+        "the switch came while the stroke was streaming"
+    );
+    let turned = |point: &Point, position: BoardPosition| {
+        let (x, y) = orient_board(point.x, point.y, position);
+        (x, y, point.pressure)
+    };
+    let (first, rest) = written.split_at(before.len());
+    let expected_before: Vec<_> = first.iter().map(|p| turned(p, old)).collect();
+    let expected_after: Vec<_> = rest.iter().map(|p| turned(p, new)).collect();
+    assert_eq!(
+        before, expected_before,
+        "before the switch: the old way, once each"
+    );
+    assert_eq!(
+        after, expected_after,
+        "after the switch: the new way, once each"
+    );
+    run.service.stop_live();
+    run.service.shutdown();
+}
+
+/// Q19: after a position set during the run, a lost link and its reconnection keep it: no second
+/// `Started` (the hub keeps the page it turned), and the records of the new link come turned for the
+/// new position.
+#[test]
+fn a_run_that_reconnects_after_a_position_change_keeps_the_new_position() {
+    let _report = common::report("blackboard: reconnecting after a switch");
+    let library = new_library();
+    let board = SimBoard::blackboard();
+    added_beforehand(&board, library.path());
+    // The tablet is held with its buttons on the left, set upright by mistake.
+    let held = BoardPosition::ButtonsLeft;
+    let options = TabletOptions::default();
+    let mut run = Running::start(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        options,
+        // Writes a "Γ" each time live mode starts on the blackboard, the new link's included.
+        Arc::new(Writer {
+            board: board.clone(),
+            script: gamma_script(held),
+        }),
+        store_with(|_| Ok(())),
+    );
+    run.wait(|s| s.connection == Connection::Connected);
+    let (sender, inputs) = mpsc::channel();
+    run.service.start_live(Box::new(ChannelSink(sender)));
+    records_until(&inputs, |i| matches!(i, LiveInput::Started { .. }));
+    touching_points(&inputs, 30);
+    run.service.set_options(TabletOptions {
+        board_position: held,
+        ..options
+    });
+    let (reoriented, _) = records_until(&inputs, |i| matches!(i, LiveInput::Reoriented { .. }));
+    assert_eq!(reoriented, reoriented_for(held));
+    board.disconnect_after(Duration::from_millis(100));
+    records_until(&inputs, |i| *i == LiveInput::State(LiveState::Reconnecting));
+    records_until(&inputs, |i| *i == LiveInput::State(LiveState::Live));
+    // `touching_points` fails on a second `Started` or another `Reoriented`.
+    let what = "the new link, after the switch";
+    upright_gamma(&touching_points(&inputs, 30), board_page(held), what);
+    assert_eq!(board.stats().links_lost, 1);
+    run.service.stop_live();
+    run.service.shutdown();
 }
 
 /// SPEC §4.1 (Q17): a screen stored with the blackboard held on its left side, the position then
