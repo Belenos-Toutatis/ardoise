@@ -128,6 +128,7 @@ fn page() -> Note {
             visible: true,
         }],
         strokes,
+        objects: Vec::new(),
         timing: Timing::Recorded,
         origin: Origin::Ardoise,
     }

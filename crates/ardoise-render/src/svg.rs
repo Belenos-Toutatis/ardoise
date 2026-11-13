@@ -364,6 +364,7 @@ mod tests {
                 visible: true,
             }],
             strokes,
+            objects: Vec::new(),
             timing: Timing::Recorded,
             origin: Origin::Ardoise,
         }

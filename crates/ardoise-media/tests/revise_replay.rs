@@ -50,6 +50,7 @@ fn note(strokes: Vec<Stroke>) -> Note {
             visible: true,
         }],
         strokes,
+        objects: Vec::new(),
         timing: Timing::Recorded,
         origin: Origin::Tablet,
     }

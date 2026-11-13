@@ -94,6 +94,7 @@ fn note(strokes: Vec<Stroke>, visible: &[bool]) -> Note {
             })
             .collect(),
         strokes,
+        objects: Vec::new(),
         timing: Timing::Recorded,
         origin: Origin::Tablet,
     }

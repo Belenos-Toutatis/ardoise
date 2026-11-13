@@ -1,6 +1,6 @@
 [package]
 name = "ardoise-ink-wasm"
-description = "WebAssembly entry points of ardoise-ink for the interface (plain exports, no wasm-bindgen)."
+description = "WebAssembly entry points of ardoise-ink and ardoise-text for the interface (plain exports, no wasm-bindgen)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,6 +12,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 ardoise-ink = { path = "../ardoise-ink" }
+# Text frames: fonts, layout and glyph outlines (`src/text.rs`).
+ardoise-text = { path = "../ardoise-text" }
 
 [lints]
 workspace = true

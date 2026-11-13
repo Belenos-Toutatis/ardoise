@@ -79,6 +79,101 @@ const EXTRA_NPM_ROOTS: &[&str] = &["svelte"];
 
 const NOTICES_FILE: &str = "THIRD-PARTY-NOTICES";
 
+/// A font file embedded in the app (`crates/ardoise-text/fonts/`, provenance in its `README.md`). Fonts are not
+/// packages: they are listed here, with their licence, source and digest; the check verifies each file's SHA-256, so
+/// that a font replaced without updating its record (and the notices) fails.
+struct Font {
+    /// Name in `FONTS_DIR`.
+    file: &'static str,
+    family: &'static str,
+    version: &'static str,
+    licence: &'static str,
+    source: &'static str,
+    sha256: &'static str,
+    /// Licence texts in `FONTS_DIR`, reproduced in the notices.
+    texts: &'static [&'static str],
+}
+
+const FONTS_DIR: &str = "crates/ardoise-text/fonts";
+
+const GUST_SOURCE: &str =
+    "https://www.gust.org.pl/projects/e-foundry/latin-modern/download/lm2.004otf.zip";
+const GUST_TEXTS: &[&str] = &["GUST-FONT-LICENSE.txt", "LPPL-1.3c.txt"];
+const GUST_LICENCE: &str = "GUST Font License 1.0 (LPPL-1.3c or later)";
+const SIL_SOURCE: &str = "https://software.sil.org/downloads/r/andika/Andika-6.200.zip";
+const SIL_TEXTS: &[&str] = &["OFL-Andika.txt"];
+const SIL_LICENCE: &str = "OFL-1.1, Reserved Font Names \"Andika\" and \"SIL\"";
+
+const FONTS: &[Font] = &[
+    Font {
+        file: "lmroman10-regular.otf",
+        family: "Latin Modern Roman 10 Regular",
+        version: "2.004",
+        licence: GUST_LICENCE,
+        source: GUST_SOURCE,
+        sha256: "1aa18cfefa58132c52ce5de70db1fd1154201c19cd2b2cdaffba4906a33e6852",
+        texts: GUST_TEXTS,
+    },
+    Font {
+        file: "lmroman10-bold.otf",
+        family: "Latin Modern Roman 10 Bold",
+        version: "2.004",
+        licence: GUST_LICENCE,
+        source: GUST_SOURCE,
+        sha256: "102fe06c430a8b681b2bf6876b7cd967ae4d47b4b6b41d915eb7913b726d9fb1",
+        texts: GUST_TEXTS,
+    },
+    Font {
+        file: "Andika-Regular.ttf",
+        family: "Andika Regular",
+        version: "6.200",
+        licence: SIL_LICENCE,
+        source: SIL_SOURCE,
+        sha256: "694d12d0f3fb2be696dbbde93eee3ccbdee766751d836eb1fbe8aab2d439d38a",
+        texts: SIL_TEXTS,
+    },
+    Font {
+        file: "Andika-Bold.ttf",
+        family: "Andika Bold",
+        version: "6.200",
+        licence: SIL_LICENCE,
+        source: SIL_SOURCE,
+        sha256: "568e48915cd0ebbadfc3309e0550d050ccf9df526e809dffea189c68a54fb760",
+        texts: SIL_TEXTS,
+    },
+];
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Every embedded font is the file recorded in `FONTS` (same SHA-256); false, with a message, otherwise.
+fn check_fonts(root: &Path) -> bool {
+    let mut ok = true;
+    for font in FONTS {
+        let path = root.join(FONTS_DIR).join(font.file);
+        match fs::read(&path) {
+            Ok(bytes) if sha256_hex(&bytes) == font.sha256 => {}
+            Ok(_) => {
+                println!(
+                    "{FONTS_DIR}/{}: its SHA-256 is not the one recorded (update FONTS in xtask/src/licenses.rs and the fonts' README)",
+                    font.file
+                );
+                ok = false;
+            }
+            Err(e) => {
+                println!("{FONTS_DIR}/{}: cannot read it: {e}", font.file);
+                ok = false;
+            }
+        }
+    }
+    ok
+}
+
 // ---------------------------------------------------------------------------------------------
 // SPDX licence expressions
 // ---------------------------------------------------------------------------------------------
@@ -783,7 +878,7 @@ fn sorted(mut pkgs: Vec<&Pkg>) -> Vec<&Pkg> {
 }
 
 /// Builds the content of `THIRD-PARTY-NOTICES`.
-fn notices(rust: &[Pkg], npm: &[Pkg]) -> Result<String, String> {
+fn notices(root: &Path, rust: &[Pkg], npm: &[Pkg]) -> Result<String, String> {
     let mut out = String::new();
     let rule = "=".repeat(78);
     let thin = "-".repeat(78);
@@ -861,13 +956,39 @@ fn notices(rust: &[Pkg], npm: &[Pkg]) -> Result<String, String> {
         "openh264 Rust packages listed below are only the bindings, under BSD-2-Clause.",
     );
     w(&mut out, "");
+    w(&mut out, &format!("3. Fonts: {}", FONTS.len()));
+    w(&mut out, &thin);
+    w(&mut out, "");
+    w(
+        &mut out,
+        "The text tool draws with these font files, embedded unmodified (no subset) in",
+    );
+    w(
+        &mut out,
+        "Ardoise. Latin Modern: two files of the Latin Modern collection by GUST",
+    );
+    w(
+        &mut out,
+        "e-foundry; the complete work is at https://www.gust.org.pl/projects/e-foundry/latin-modern.",
+    );
+    w(&mut out, "");
+    w(&mut out, "file | font version | licence | source | SHA-256");
+    w(&mut out, "");
+    for font in FONTS {
+        let _ = writeln!(
+            out,
+            "{} | {} {} | {} | {} | {}",
+            font.file, font.family, font.version, font.licence, font.source, font.sha256
+        );
+    }
+    w(&mut out, "");
 
     // Packages sorted for the lists; texts grouped across both ecosystems.
     let rust_sorted = sorted(rust.iter().collect());
     let npm_sorted = sorted(npm.iter().collect());
     for (n, title, pkgs) in [
-        (3, "Rust packages", &rust_sorted),
-        (4, "JavaScript packages (interface bundle)", &npm_sorted),
+        (4, "Rust packages", &rust_sorted),
+        (5, "JavaScript packages (interface bundle)", &npm_sorted),
     ] {
         w(&mut out, &format!("{n}. {title}: {}", pkgs.len()));
         w(&mut out, &thin);
@@ -939,6 +1060,17 @@ fn notices(rust: &[Pkg], npm: &[Pkg]) -> Result<String, String> {
             }
         }
     }
+    // The fonts' licence texts, covering their files.
+    for font in FONTS {
+        for name in font.texts {
+            let path = root.join(FONTS_DIR).join(name);
+            let bytes = fs::read(&path).map_err(|e| format!("cannot read {FONTS_DIR}/{name}: {e}"))?;
+            texts
+                .entry(normalize_text(&bytes))
+                .or_default()
+                .insert(format!("{} (font)", font.file));
+        }
+    }
     let mut groups: Vec<(String, BTreeSet<String>)> = texts.into_iter().collect();
     groups.sort_by(|a, b| {
         a.1.iter()
@@ -947,7 +1079,7 @@ fn notices(rust: &[Pkg], npm: &[Pkg]) -> Result<String, String> {
             .then(a.0.cmp(&b.0))
     });
 
-    w(&mut out, &format!("5. Licence texts: {}", groups.len()));
+    w(&mut out, &format!("6. Licence texts: {}", groups.len()));
     w(&mut out, &thin);
     w(&mut out, "");
     w(
@@ -984,7 +1116,7 @@ fn notices(rust: &[Pkg], npm: &[Pkg]) -> Result<String, String> {
     w(
         &mut out,
         &format!(
-            "6. Packages that ship no licence text of their own: {}",
+            "7. Packages that ship no licence text of their own: {}",
             supplied.len()
         ),
     );
@@ -996,7 +1128,7 @@ fn notices(rust: &[Pkg], npm: &[Pkg]) -> Result<String, String> {
     );
     w(
         &mut out,
-        "section 5 (they are listed in the \"Covers\" lines); for MIT and BSD, its copyright",
+        "section 6 (they are listed in the \"Covers\" lines); for MIT and BSD, its copyright",
     );
     w(
         &mut out,
@@ -1046,10 +1178,10 @@ pub fn run(root: &Path, write: bool) -> bool {
 fn run_inner(root: &Path, write: bool) -> Result<bool, String> {
     let (rust_all, rust_shipped) = rust_packages(root)?;
     let (npm_all, npm_shipped) = npm_packages(root)?;
-    if !check_packages(&rust_all, &npm_all) {
+    if !check_packages(&rust_all, &npm_all) || !check_fonts(root) {
         return Ok(false);
     }
-    let content = notices(&rust_shipped, &npm_shipped)?;
+    let content = notices(root, &rust_shipped, &npm_shipped)?;
     let path = root.join(NOTICES_FILE);
     println!(
         "{NOTICES_FILE}: {} Rust and {} npm packages ship in the app",

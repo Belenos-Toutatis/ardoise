@@ -9,9 +9,11 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use super::*;
 use crate::note::{
-    A4_PORTRAIT, Background, BackgroundImage, ImageRect, Layer, Origin, Paper, Template, Timing,
+    A4_PORTRAIT, Background, BackgroundImage, ImageRect, Layer, ObjectBody, Origin, PageObject,
+    Paper, Template, TextBody, Timing,
 };
 use crate::testutil::{Lcg, blank_note};
+use ardoise_text::FontFamily;
 
 /// What a save/load cycle makes of a note: points snapped to the stored precision.
 fn stored(note: &Note) -> Note {
@@ -964,7 +966,88 @@ Le « g » de « longueur » est refait."
     file
 }
 
-fn fixtures() -> [(&'static str, NoteFile, FormatVersion); 5] {
+/// Format 1.4: page objects. Text frames in both families, one bold, turned and scaled with a key of
+/// a later version, on two layers; a text frame in a font this version does not know and an object
+/// of a kind it does not know, both kept as they are.
+fn fixture_objects_1_4() -> NoteFile {
+    let mut note = blank_note("00000000-0000-4000-8000-000000000006", "Texte tapé");
+    note.layers.push(Layer {
+        name: "Calque 2".to_owned(),
+        visible: true,
+    });
+    note.strokes = vec![Stroke {
+        tool: Tool::FeltTip,
+        color: Rgba::BLACK,
+        width: 60.0,
+        layer: 0,
+        points: vec![
+            Point {
+                x: 1000.0,
+                y: 5000.0,
+                pressure: 1.0,
+                t: 0,
+            },
+            Point {
+                x: 9000.0,
+                y: 5000.0,
+                pressure: 1.0,
+                t: 400,
+            },
+        ],
+    }];
+    let latin = PageObject::text(
+        "00000000-0000-4000-8000-0000000000a1",
+        0,
+        1000,
+        1000.0,
+        2000.0,
+        TextBody {
+            text: "Bonjour, élèves !
+œuvre « 12 € »"
+                .to_owned(),
+            font: FontFamily::LatinModern,
+            bold: false,
+            size: 600.0,
+            color: Rgba::BLACK,
+        },
+    );
+    let mut andika = PageObject::text(
+        "00000000-0000-4000-8000-0000000000a2",
+        1,
+        2500,
+        20_000.0,
+        3000.5,
+        TextBody {
+            text: "Andika gras".to_owned(),
+            font: FontFamily::Andika,
+            bold: true,
+            size: 900.0,
+            color: Rgba::rgb(0xd8, 0, 0),
+        },
+    );
+    andika.scale = 1.5;
+    andika.quarter_turns = 1;
+    andika
+        .extra
+        .insert("later".to_owned(), json!({"shadow": true}));
+    let equation = PageObject::from_value(json!({
+        "kind": "equation", "id": "00000000-0000-4000-8000-0000000000a3", "layer": 1,
+        "t": 3000, "x": 4000.0, "y": 15000.0, "scale": 1.0, "quarterTurns": 0,
+        "width": 2400.0, "height": 800.0, "latex": "E = mc^2", "paths": ["M0 0L10 0L10 10Z"]
+    }))
+    .unwrap();
+    let noto = PageObject::from_value(json!({
+        "kind": "text", "id": "00000000-0000-4000-8000-0000000000a4", "layer": 0, "t": 3500,
+        "x": 1000.0, "y": 18000.0, "scale": 1.0, "quarterTurns": 0, "width": 3000.0,
+        "height": 750.0, "text": "Police future", "font": "notoSans", "bold": false,
+        "size": 600.0, "color": {"r": 0, "g": 0, "b": 0, "a": 255}
+    }))
+    .unwrap();
+    note.objects = vec![latin, andika, equation, noto];
+    NoteFile::new(note)
+}
+
+fn fixtures() -> [(&'static str, NoteFile, FormatVersion); 6] {
     [
         (
             "minimal.ardoise",
@@ -990,6 +1073,11 @@ fn fixtures() -> [(&'static str, NoteFile, FormatVersion); 5] {
             "revision-1.3.ardoise",
             fixture_revision_1_3(),
             FormatVersion { major: 1, minor: 3 },
+        ),
+        (
+            "objects-1.4.ardoise",
+            fixture_objects_1_4(),
+            FormatVersion { major: 1, minor: 4 },
         ),
     ]
 }
@@ -1072,6 +1160,48 @@ fn v1_fixtures_are_read() {
     assert_eq!(revision.summary.len(), 2);
     assert_eq!(revision.summary[1].text, "Un mot déplacé.");
     assert!(revised.unknown_members.is_empty());
+
+    let objects = read_note(&dir.join("objects-1.4.ardoise")).unwrap();
+    let list = &objects.note.objects;
+    assert_eq!(list.len(), 4);
+    let latin = list[0].as_text().unwrap();
+    assert_eq!(
+        latin.text,
+        "Bonjour, élèves !
+œuvre « 12 € »"
+    );
+    assert_eq!(
+        (latin.font, latin.bold, latin.size),
+        (FontFamily::LatinModern, false, 600.0)
+    );
+    assert_eq!(
+        (list[0].x, list[0].y, list[0].t, list[0].layer),
+        (1000.0, 2000.0, 1000, 0)
+    );
+    assert!(list[0].width > 0.0 && list[0].height == 2.0 * 600.0 * 1.25);
+    let andika = list[1].as_text().unwrap();
+    assert_eq!((andika.font, andika.bold), (FontFamily::Andika, true));
+    assert_eq!(andika.color, Rgba::rgb(0xd8, 0, 0));
+    assert_eq!(
+        (list[1].scale, list[1].quarter_turns, list[1].y),
+        (1.5, 1, 3000.5)
+    );
+    assert_eq!(list[1].extra["later"], json!({"shadow": true}));
+    match &list[2].body {
+        ObjectBody::Unknown { kind, fields } => {
+            assert_eq!(kind, "equation");
+            assert_eq!(fields["latex"], "E = mc^2");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!((list[2].width, list[2].height), (2400.0, 800.0));
+    assert!(
+        list[3].as_text().is_none(),
+        "a font this version does not know"
+    );
+    assert_eq!(list[3].body.kind(), "text");
+    let rewritten = read_from_bytes(&to_bytes(&objects).unwrap()).unwrap();
+    assert_eq!(rewritten, objects);
 
     let future = read_note(&dir.join("future-minor.ardoise")).unwrap();
     assert_eq!(future.unknown_fields["stickers"][0]["kind"], "star");
@@ -1165,10 +1295,13 @@ fn revision_is_written_only_when_set_and_round_trips() {
     assert_eq!(json["summary"][0]["text"], "Lignes redressées");
     assert_eq!(json["summary"][1]["at"], 1_793_948_999_000_i64);
     assert_eq!(json["summary"][1]["text"], "Un mot recopié");
-    // It is not in note.json, and the version is 1.3.
+    // It is not in note.json (written as the current version, 1.3 or later).
     assert!(note_json_value(&file).get("revision").is_none());
-    assert_eq!(note_json_value(&file)["format"]["minor"], 3);
-    assert_eq!(FormatVersion::CURRENT.minor, 3);
+    assert_eq!(
+        note_json_value(&file)["format"]["minor"],
+        FormatVersion::CURRENT.minor
+    );
+    assert!(FormatVersion::CURRENT.minor >= 3);
 
     let reread = read_from_bytes(&bytes).unwrap();
     assert_eq!(reread, file);
@@ -1461,4 +1594,165 @@ fn a_revision_the_reader_would_treat_as_damaged_is_not_written() {
         matches!(&error, FormatError::TooLarge { what, .. } if what == REVISION_JSON),
         "{error}"
     );
+}
+
+// --- Page objects (format 1.4) ---------------------------------------------------------------
+
+fn text_frame(id: &str, layer: u32) -> PageObject {
+    PageObject::text(
+        id,
+        layer,
+        10,
+        500.0,
+        700.0,
+        TextBody {
+            text: "Texte".to_owned(),
+            font: FontFamily::Andika,
+            bold: false,
+            size: 400.0,
+            color: Rgba::BLACK,
+        },
+    )
+}
+
+#[test]
+fn objects_are_written_in_note_json_only_when_there_are_some() {
+    let plain = NoteFile::new(blank_note("a", "b"));
+    assert!(note_json_value(&plain).get("objects").is_none());
+
+    let mut note = blank_note("a", "b");
+    note.objects.push(text_frame("t1", 0));
+    let file = NoteFile::new(note);
+    let value = note_json_value(&file);
+    let object = &value["objects"][0];
+    assert_eq!(object["kind"], "text");
+    assert_eq!(object["font"], "andika");
+    assert_eq!(object["text"], "Texte");
+    assert_eq!(object["quarterTurns"], 0);
+    assert_eq!(object["scale"], 1.0);
+    assert!(object["width"].as_f64().unwrap() > 0.0);
+    let bytes = to_bytes(&file).unwrap();
+    assert_eq!(member_names(&bytes), [NOTE_JSON, STROKES_BIN]);
+    let read = read_from_bytes(&bytes).unwrap();
+    assert_eq!(read, file);
+    assert!(read.unknown_fields.is_empty());
+    // The listing reads them too (the library's search finds their text).
+    assert_eq!(
+        read_header_from_bytes(&bytes).unwrap().note.objects.len(),
+        1
+    );
+}
+
+#[test]
+fn the_box_of_a_text_frame_is_written_as_this_version_measures_it() {
+    let mut note = blank_note("a", "b");
+    let mut frame = text_frame("t1", 0);
+    let measured = (frame.width, frame.height);
+    frame.width = 1.0;
+    frame.height = 1.0;
+    note.objects.push(frame);
+    let value = note_json_value(&NoteFile::new(note));
+    let written = &value["objects"][0];
+    assert_eq!(
+        (
+            written["width"].as_f64().unwrap() as f32,
+            written["height"].as_f64().unwrap() as f32
+        ),
+        measured
+    );
+}
+
+/// A file whose `note.json` holds `objects` as given, written by hand.
+fn file_with_objects(objects: Value, layers: usize) -> Vec<u8> {
+    let mut note = blank_note("a", "b");
+    for i in 1..layers {
+        note.layers.push(Layer {
+            name: format!("Calque {}", i + 1),
+            visible: true,
+        });
+    }
+    let mut value = note_json_value(&NoteFile::new(note));
+    value["objects"] = objects;
+    let json = serde_json::to_vec(&value).unwrap();
+    let strokes = strokes::encode(&[]).unwrap();
+    raw_archive(&[(NOTE_JSON, &json), (STROKES_BIN, &strokes)])
+}
+
+#[test]
+fn a_list_of_objects_that_cannot_be_read_is_kept_verbatim_and_the_note_still_opens() {
+    let damaged = json!([{"kind": "text", "text": "ok"}, {"kind": "text", "x": "left"}]);
+    let read = read_from_bytes(&file_with_objects(damaged.clone(), 1)).unwrap();
+    assert!(read.note.objects.is_empty());
+    assert_eq!(read.unknown_fields["objects"], damaged);
+    // Written back as it was.
+    let again = read_from_bytes(&to_bytes(&read).unwrap()).unwrap();
+    assert_eq!(again.unknown_fields["objects"], damaged);
+    // Until the note is given objects of its own: the model's key wins.
+    let mut edited = again;
+    edited.note.objects.push(text_frame("new", 0));
+    let value: Value =
+        serde_json::from_slice(&member_bytes(&to_bytes(&edited).unwrap(), NOTE_JSON).unwrap())
+            .unwrap();
+    assert_eq!(value["objects"].as_array().unwrap().len(), 1);
+    assert_eq!(value["objects"][0]["id"], "new");
+}
+
+#[test]
+fn objects_read_from_a_file_are_repaired_to_fit_the_note() {
+    // On a layer the note no longer has (merged by a version that did not know objects), without
+    // ids or with the same id twice.
+    let objects = json!([
+        {"kind": "text", "id": "same", "layer": 5, "text": "a"},
+        {"kind": "text", "id": "same", "layer": 1, "text": "b"},
+        {"kind": "bookmark", "layer": 9, "label": "Plan"}
+    ]);
+    let read = read_from_bytes(&file_with_objects(objects, 2)).unwrap();
+    let list = &read.note.objects;
+    assert_eq!(list.iter().map(|o| o.layer).collect::<Vec<_>>(), [1, 1, 1]);
+    assert_eq!(list[0].id, "same");
+    assert_ne!(list[1].id, "same");
+    assert!(!list[2].id.is_empty());
+    assert!(list[0].width > 0.0, "a text frame is measured when read");
+    assert!(read.unknown_fields.is_empty());
+}
+
+#[test]
+fn objects_the_reader_would_refuse_or_misplace_are_not_written() {
+    let mut on_missing_layer = blank_note("a", "b");
+    on_missing_layer.objects.push(text_frame("t", 1));
+    let error = to_bytes(&NoteFile::new(on_missing_layer)).unwrap_err();
+    assert_eq!(error.code(), "noteInvalid");
+
+    for broken in [
+        |o: &mut PageObject| o.x = f32::NAN,
+        |o: &mut PageObject| o.scale = 0.0,
+        |o: &mut PageObject| o.scale = f32::INFINITY,
+        |o: &mut PageObject| {
+            if let ObjectBody::Text(body) = &mut o.body {
+                body.size = -1.0;
+            }
+        },
+    ] {
+        let mut note = blank_note("a", "b");
+        let mut frame = text_frame("t", 0);
+        broken(&mut frame);
+        note.objects.push(frame);
+        let error = to_bytes(&NoteFile::new(note)).unwrap_err();
+        assert!(matches!(error, FormatError::InvalidNote(_)), "{error}");
+    }
+}
+
+#[test]
+fn an_object_of_an_unknown_kind_survives_a_rewrite_with_all_its_keys() {
+    let objects = json!([{
+        "kind": "equation", "id": "e1", "layer": 0, "t": 5, "x": 10.5, "y": 20.0, "scale": 2.0,
+        "quarterTurns": 3, "width": 300.0, "height": 100.0, "latex": "x_1^2",
+        "paths": ["M0 0L1 1Z"], "nested": {"a": [1, 2]}
+    }]);
+    let read = read_from_bytes(&file_with_objects(objects.clone(), 1)).unwrap();
+    assert_eq!(read.note.objects.len(), 1);
+    let value: Value =
+        serde_json::from_slice(&member_bytes(&to_bytes(&read).unwrap(), NOTE_JSON).unwrap())
+            .unwrap();
+    assert_eq!(value["objects"], objects);
 }

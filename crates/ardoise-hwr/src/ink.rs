@@ -165,6 +165,7 @@ mod tests {
                 // A layer that does not exist is not drawn either.
                 stroke(Tool::Ballpoint, 7, 3),
             ],
+            objects: Vec::new(),
             timing: Timing::Recorded,
             origin: Origin::Tablet,
         };
@@ -200,6 +201,7 @@ mod tests {
                 visible: true,
             }],
             strokes,
+            objects: Vec::new(),
             timing: Timing::Recorded,
             origin: Origin::Tablet,
         }

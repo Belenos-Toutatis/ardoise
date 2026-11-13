@@ -1,0 +1,18 @@
+[package]
+name = "ardoise-text"
+description = "Text of the text frames: the two fonts shipped with Ardoise (Latin Modern Roman, Andika), line layout and glyph outlines, shared by the display (WebAssembly) and the exports."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+# Reads the fonts' tables (cmap, hmtx, hhea, glyf, CFF): pure Rust, no allocation of its own,
+# also built for the WebAssembly module of the interface. Only the core tables are needed: no
+# shaping (no kerning nor ligatures, see `layout`), no variable fonts, no glyph names.
+ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
+
+[lints]
+workspace = true

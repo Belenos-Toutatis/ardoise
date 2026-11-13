@@ -8,6 +8,8 @@
 
 use ardoise_ink::{Rgba, Stroke};
 
+pub use crate::objects::{ObjectBody, PageObject, TextBody};
+
 /// Page sizes of the Bamboo Slate Large (A4) in device units.
 pub const A4_LANDSCAPE: PageSize = PageSize {
     width: 29_700,
@@ -214,8 +216,24 @@ pub struct Note {
     /// At least one layer.
     pub layers: Vec<Layer>,
     pub strokes: Vec<Stroke>,
+    /// What the page holds besides its strokes: text frames (format 1.4; written only when there
+    /// is one). A list this version cannot read is kept as an unknown key of `note.json` and reads
+    /// as empty (`objects::deserialize_objects`).
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "crate::objects::deserialize_objects"
+    )]
+    pub objects: Vec<PageObject>,
     pub timing: Timing,
     pub origin: Origin,
+}
+
+impl Note {
+    /// Whether the page holds anything to draw: a stroke with a sample, or an object.
+    pub fn has_content(&self) -> bool {
+        !self.objects.is_empty() || self.strokes.iter().any(|s| !s.points.is_empty())
+    }
 }
 
 #[cfg(test)]

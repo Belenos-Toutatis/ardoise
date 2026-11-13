@@ -1,5 +1,6 @@
-//! WebAssembly entry points of `ardoise-ink`, so that the screen draws strokes with exactly the
-//! geometry of the exports (SPEC §6.2). Plain exported functions over the module's linear
+//! WebAssembly entry points of `ardoise-ink` (and, in [`text`], of `ardoise-text`), so that the
+//! screen draws strokes (and text frames) with exactly the geometry of the exports (SPEC §6.2).
+//! Plain exported functions over the module's linear
 //! memory, without wasm-bindgen (no extra build tool). The interface side is
 //! `app/ui/src/lib/ink.ts`.
 //!
@@ -24,6 +25,8 @@
 //! count, then for each group: source count, the sources (indices of the given strokes), shape
 //! code (index into Shape::ALL), stroke count, the strokes]`, the strokes encoded like the
 //! input.
+
+pub mod text;
 
 use std::cell::RefCell;
 

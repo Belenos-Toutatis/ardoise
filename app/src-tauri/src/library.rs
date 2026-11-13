@@ -262,6 +262,7 @@ pub fn blank_note(title: &str, layer_name: &str, now: i64) -> Note {
             visible: true,
         }],
         strokes: Vec::new(),
+        objects: Vec::new(),
         timing: Timing::Recorded,
         origin: Origin::Ardoise,
     }

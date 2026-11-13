@@ -7,7 +7,8 @@
 use ardoise_ink::{Point, Stroke};
 
 use crate::library::normalize_tags;
-use crate::note::{BackgroundImage, ImageRect, Layer, Note, Origin, PageSize, Timing};
+use crate::note::{BackgroundImage, ImageRect, Layer, Note, Origin, PageObject, PageSize, Timing};
+use crate::objects::{Affine, make_ids_unique};
 
 /// Longest side of a page [`merge`] accepts: 100 m, in device units (10 µm).
 pub const MAX_PAGE_SIDE: u32 = 10_000_000;
@@ -58,13 +59,14 @@ pub enum MergeLayout {
     EndToEnd,
 }
 
-/// First and last sample time of the note, in milliseconds since `created`; `None` without
-/// any sample.
+/// First and last time of the note's content, in milliseconds since `created`: its samples and
+/// the times its page objects appear at; `None` without either.
 pub fn time_range(note: &Note) -> Option<(u32, u32)> {
     let mut times = note
         .strokes
         .iter()
-        .flat_map(|stroke| stroke.points.iter().map(|p| p.t));
+        .flat_map(|stroke| stroke.points.iter().map(|p| p.t))
+        .chain(note.objects.iter().map(|o| o.t));
     let first = times.next()?;
     Some(times.fold((first, first), |(lo, hi), t| (lo.min(t), hi.max(t))))
 }
@@ -75,7 +77,13 @@ fn has_points(strokes: &[Stroke]) -> bool {
 
 /// The note made of what moved: a new, non-favourite note of this app, in the page, background,
 /// layers, tags and timing of `source`.
-fn extracted_note(source: &Note, new: NewNote, created: i64, strokes: Vec<Stroke>) -> Note {
+fn extracted_note(
+    source: &Note,
+    new: NewNote,
+    created: i64,
+    strokes: Vec<Stroke>,
+    objects: Vec<PageObject>,
+) -> Note {
     Note {
         id: new.id,
         title: new.title,
@@ -88,31 +96,35 @@ fn extracted_note(source: &Note, new: NewNote, created: i64, strokes: Vec<Stroke
         favorite: false,
         layers: source.layers.clone(),
         strokes,
+        objects,
         timing: source.timing,
         origin: Origin::Ardoise,
     }
 }
 
-fn kept_note(source: &Note, new_now: i64, strokes: Vec<Stroke>) -> Note {
+fn kept_note(source: &Note, new_now: i64, strokes: Vec<Stroke>, objects: Vec<PageObject>) -> Note {
     Note {
         modified: new_now.max(source.modified),
         strokes,
+        objects,
         ..source.clone()
     }
 }
 
 /// Splits at an instant: samples with `t < at_ms` stay, samples with `t >= at_ms` go to the
-/// new note. A stroke that spans the instant is cut into two strokes. The new note's `created`
-/// is `note.created` plus its first sample time, and its times are shifted to start at 0, so
-/// that its replay starts right away. Strokes without any sample stay where they are.
+/// new note, and so do the page objects that appear at or after it. A stroke that spans the
+/// instant is cut into two strokes. The new note's `created` is `note.created` plus its first
+/// time (sample or object), and its times are shifted to start at 0, so that its replay starts
+/// right away. Strokes without any sample stay where they are.
 ///
-/// Refused with [`OpsError::NothingToSplit`] when no sample is before the instant, or none is
-/// at or after it.
+/// Refused with [`OpsError::NothingToSplit`] when nothing (sample or object) is before the
+/// instant, or nothing is at or after it.
 pub fn split_at_time(note: &Note, at_ms: u32, new: NewNote) -> Result<Split, OpsError> {
     let first_moved = note
         .strokes
         .iter()
         .flat_map(|s| s.points.iter().map(|p| p.t))
+        .chain(note.objects.iter().map(|o| o.t))
         .filter(|&t| t >= at_ms)
         .min()
         .ok_or(OpsError::NothingToSplit)?;
@@ -142,14 +154,23 @@ pub fn split_at_time(note: &Note, at_ms: u32, new: NewNote) -> Result<Split, Ops
             });
         }
     }
-    if !has_points(&kept) {
+    let (kept_objects, moved_objects): (Vec<PageObject>, Vec<PageObject>) =
+        note.objects.iter().cloned().partition(|o| o.t < at_ms);
+    if !has_points(&kept) && kept_objects.is_empty() {
         return Err(OpsError::NothingToSplit);
     }
+    let moved_objects = moved_objects
+        .into_iter()
+        .map(|o| PageObject {
+            t: o.t - first_moved,
+            ..o
+        })
+        .collect();
     let created = note.created.saturating_add(i64::from(first_moved));
     let now = new.now;
     Ok(Split {
-        extracted: extracted_note(note, new, created, moved),
-        kept: kept_note(note, now, kept),
+        extracted: extracted_note(note, new, created, moved, moved_objects),
+        kept: kept_note(note, now, kept, kept_objects),
     })
 }
 
@@ -172,10 +193,12 @@ fn in_polygon(polygon: &[[f32; 2]], x: f64, y: f64) -> bool {
 /// Splits by a zone: a stroke on a visible layer goes to the new note when at least half of its
 /// samples (and at least one) are inside `polygon` — the rule of the editor's lasso
 /// (`selectInLasso`, `app/ui/src/lib/editor/hit.ts`), so that what the user sees highlighted is
-/// what moves. Positions and times are unchanged, and so is `created`.
+/// what moves; a page object on a visible layer goes when the centre of its box is inside (the
+/// lasso's rule for objects, `objectsInLasso` in `app/ui/src/lib/editor/objects.ts`). Positions
+/// and times are unchanged, and so is `created`.
 ///
-/// Refused with [`OpsError::NothingToSplit`] when no stroke moves (also for a polygon of fewer
-/// than three points), or when none would stay.
+/// Refused with [`OpsError::NothingToSplit`] when nothing moves (also for a polygon of fewer
+/// than three points), or when nothing would stay.
 pub fn split_by_zone(note: &Note, polygon: &[[f32; 2]], new: NewNote) -> Result<Split, OpsError> {
     if polygon.len() < 3 {
         return Err(OpsError::NothingToSplit);
@@ -204,13 +227,20 @@ pub fn split_by_zone(note: &Note, polygon: &[[f32; 2]], new: NewNote) -> Result<
             kept.push(stroke.clone());
         }
     }
-    if !has_points(&moved) || !has_points(&kept) {
+    let (moved_objects, kept_objects): (Vec<PageObject>, Vec<PageObject>) =
+        note.objects.iter().cloned().partition(|o| {
+            let [x, y] = o.page_centre();
+            visible(o.layer) && in_polygon(polygon, f64::from(x), f64::from(y))
+        });
+    if (!has_points(&moved) && moved_objects.is_empty())
+        || (!has_points(&kept) && kept_objects.is_empty())
+    {
         return Err(OpsError::NothingToSplit);
     }
     let now = new.now;
     Ok(Split {
-        extracted: extracted_note(note, new, note.created, moved),
-        kept: kept_note(note, now, kept),
+        extracted: extracted_note(note, new, note.created, moved, moved_objects),
+        kept: kept_note(note, now, kept, kept_objects),
     })
 }
 
@@ -252,7 +282,8 @@ fn overlay_layer_name(note: &Note, layer: &Layer) -> String {
 /// Times are made sequential: the first note
 /// keeps its times, each other note starts [`MERGE_GAP_MS`] after the previous one ends, so
 /// that the replay plays the notes in order. A stroke on a layer its note does not have is put
-/// on the note's last layer. The result is a new note of this app, not a favourite.
+/// on the note's last layer. Page objects follow their note like its strokes (layer, place on
+/// the page, time), their ids made unique. The result is a new note of this app, not a favourite.
 ///
 /// Fails with [`OpsError::NotEnough`] for fewer than two notes and [`OpsError::PageTooLarge`]
 /// when a side of the page would exceed [`MAX_PAGE_SIDE`].
@@ -312,6 +343,7 @@ pub fn merge(notes: &[Note], layout: MergeLayout, new: NewNote) -> Result<Note, 
     let last_layer = layers.len() - 1;
 
     let mut strokes = Vec::new();
+    let mut objects = Vec::new();
     let mut previous_end: Option<i64> = None;
     for (index, note) in notes.iter().enumerate() {
         let shift = match (time_range(note), previous_end) {
@@ -340,7 +372,20 @@ pub fn merge(notes: &[Note], layout: MergeLayout, new: NewNote) -> Result<Note, 
                 ..stroke.clone()
             });
         }
+        // Page objects move, change layer and time like the note's strokes.
+        for object in &note.objects {
+            let local = (object.layer as usize).min(own_last);
+            let mut object = PageObject {
+                layer: (layer_base[index] + local).min(last_layer) as u32,
+                t: (i64::from(object.t) + shift).clamp(0, i64::from(u32::MAX)) as u32,
+                ..object.clone()
+            };
+            object.transform(&Affine::translation(0.0, y_offset[index]));
+            objects.push(object);
+        }
     }
+    // Two copies of one note merged would bring the same ids twice.
+    make_ids_unique(&mut objects);
 
     let tags: Vec<String> = notes.iter().flat_map(|n| n.tags.iter().cloned()).collect();
     Ok(Note {
@@ -361,6 +406,7 @@ pub fn merge(notes: &[Note], layout: MergeLayout, new: NewNote) -> Result<Note, 
         favorite: false,
         layers,
         strokes,
+        objects,
         timing: if notes.iter().any(|n| n.timing == Timing::Synthesized) {
             Timing::Synthesized
         } else {

@@ -9,6 +9,8 @@ publish.workspace = true
 
 [dependencies]
 ardoise-ink = { path = "../ardoise-ink" }
+# Text frames: their fonts and layout, to measure a frame's box (page objects).
+ardoise-text = { path = "../ardoise-text" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 notify = "8.2"
 serde = { version = "1", features = ["derive"] }

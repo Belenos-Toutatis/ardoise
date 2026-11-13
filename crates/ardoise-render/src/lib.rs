@@ -392,6 +392,7 @@ pub(crate) mod tests {
                 },
             ],
             strokes,
+            objects: Vec::new(),
             timing: Timing::Recorded,
             origin: Origin::Ardoise,
         }

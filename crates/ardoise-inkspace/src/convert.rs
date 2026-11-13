@@ -297,6 +297,7 @@ pub(crate) fn convert_page(
         favorite: false,
         layers,
         strokes,
+        objects: Vec::new(),
         timing: stats.timing,
         origin: Origin::Inkspace { id: inkspace_id },
     };

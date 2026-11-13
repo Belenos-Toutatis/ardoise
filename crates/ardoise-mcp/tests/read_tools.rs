@@ -205,6 +205,7 @@ fn make_note(id: &str, title: &str, day: i64) -> Note {
             wave(0, Tool::Pencil, 9_000.0),
             wave(1, Tool::Ballpoint, 13_000.0),
         ],
+        objects: Vec::new(),
         timing: Timing::Recorded,
         origin: Origin::Ardoise,
     }

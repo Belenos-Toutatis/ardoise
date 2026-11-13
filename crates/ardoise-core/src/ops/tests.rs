@@ -897,3 +897,141 @@ fn merge_keeps_only_the_first_background_image_where_it_was() {
         assert_eq!(merged.background_image, None, "{layout:?}");
     }
 }
+
+// --- Page objects ---------------------------------------------------------------------------
+
+fn frame(id: &str, layer: u32, t: u32, x: f32, y: f32) -> PageObject {
+    PageObject::text(
+        id,
+        layer,
+        t,
+        x,
+        y,
+        crate::note::TextBody {
+            text: "Texte".to_owned(),
+            font: ardoise_text::FontFamily::LatinModern,
+            bold: false,
+            size: 400.0,
+            color: Rgba::BLACK,
+        },
+    )
+}
+
+fn ids(note: &Note) -> Vec<&str> {
+    note.objects.iter().map(|o| o.id.as_str()).collect()
+}
+
+#[test]
+fn time_range_counts_the_objects() {
+    let mut note = note_with("A", vec![stroke(0, &[(0.0, 0.0, 100), (1.0, 1.0, 200)])]);
+    note.objects.push(frame("o", 0, 5000, 0.0, 0.0));
+    assert_eq!(time_range(&note), Some((100, 5000)));
+    let mut only = note_with("B", vec![]);
+    only.objects.push(frame("o", 0, 70, 0.0, 0.0));
+    assert_eq!(time_range(&only), Some((70, 70)));
+}
+
+#[test]
+fn split_at_time_moves_the_objects_that_appear_after_the_instant() {
+    let mut note = note_with("A", vec![stroke(0, &[(0.0, 0.0, 100), (1.0, 1.0, 200)])]);
+    note.objects = vec![
+        frame("before", 0, 150, 0.0, 0.0),
+        frame("after", 0, 900, 0.0, 0.0),
+    ];
+    let split = split_at_time(&note, 500, new_note("B")).unwrap();
+    assert_eq!(ids(&split.kept), ["before"]);
+    assert_eq!(ids(&split.extracted), ["after"]);
+    // The new note starts with the object: its time is 0 and `created` moved by 900 ms.
+    assert_eq!(split.extracted.objects[0].t, 0);
+    assert_eq!(split.extracted.created, note.created + 900);
+    assert!(split.extracted.strokes.is_empty());
+
+    // Objects alone are enough on either side; nothing on one side is refused.
+    let mut objects_only = note_with("C", vec![]);
+    objects_only.objects = vec![frame("a", 0, 10, 0.0, 0.0), frame("b", 0, 20, 0.0, 0.0)];
+    let split = split_at_time(&objects_only, 15, new_note("D")).unwrap();
+    assert_eq!(
+        (ids(&split.kept), ids(&split.extracted)),
+        (vec!["a"], vec!["b"])
+    );
+    assert_eq!(
+        split_at_time(&objects_only, 5, new_note("E")),
+        Err(OpsError::NothingToSplit)
+    );
+    assert_eq!(
+        split_at_time(&objects_only, 50, new_note("E")),
+        Err(OpsError::NothingToSplit)
+    );
+}
+
+#[test]
+fn split_by_zone_moves_the_objects_whose_centre_is_inside_on_visible_layers() {
+    let mut note = note_with(
+        "A",
+        vec![stroke(0, &[(9000.0, 9000.0, 0), (9100.0, 9000.0, 5)])],
+    );
+    note.layers.push(layer("Caché", false));
+    let inside = frame("inside", 0, 0, 1000.0, 1000.0);
+    let hidden = frame("hidden", 1, 0, 1000.0, 1000.0);
+    let outside = frame("outside", 0, 0, 20_000.0, 1000.0);
+    note.objects = vec![inside, hidden, outside];
+    let zone = [[0.0, 0.0], [8000.0, 0.0], [8000.0, 8000.0], [0.0, 8000.0]];
+    let split = split_by_zone(&note, &zone, new_note("B")).unwrap();
+    assert_eq!(ids(&split.extracted), ["inside"]);
+    assert_eq!(ids(&split.kept), ["hidden", "outside"]);
+    assert_eq!(split.extracted.strokes.len(), 0);
+
+    // A zone around an object alone is a split; a zone around nothing is not.
+    let mut only = note_with("C", vec![]);
+    only.objects = vec![
+        frame("a", 0, 0, 1000.0, 1000.0),
+        frame("b", 0, 0, 20_000.0, 1000.0),
+    ];
+    assert!(split_by_zone(&only, &zone, new_note("D")).is_ok());
+    let far = [[50_000.0, 0.0], [60_000.0, 0.0], [60_000.0, 1.0]];
+    assert_eq!(
+        split_by_zone(&only, &far, new_note("D")),
+        Err(OpsError::NothingToSplit)
+    );
+}
+
+#[test]
+fn merge_carries_the_objects_with_their_note() {
+    let mut first = note_with("A", vec![stroke(0, &[(0.0, 0.0, 0), (1.0, 1.0, 1000)])]);
+    first.page = page(1000, 2000);
+    first.objects = vec![frame("same", 0, 500, 10.0, 20.0)];
+    let mut second = note_with("B", vec![stroke(0, &[(0.0, 0.0, 0), (1.0, 1.0, 100)])]);
+    second.page = page(1000, 3000);
+    second.layers.push(layer("Deux", true));
+    second.objects = vec![
+        frame("same", 1, 50, 10.0, 20.0),
+        frame("other", 7, 0, 0.0, 0.0),
+    ];
+
+    let overlay = merge(
+        &[first.clone(), second.clone()],
+        MergeLayout::Overlay,
+        new_note("M"),
+    )
+    .unwrap();
+    assert_eq!(overlay.objects.len(), 3);
+    // Layers follow the note's (appended after the first note's), a missing one is its last.
+    assert_eq!(
+        overlay.objects.iter().map(|o| o.layer).collect::<Vec<_>>(),
+        [0, 2, 2]
+    );
+    // Times follow the sequential times: the second note starts 1 s after the first ends.
+    assert_eq!(overlay.objects[0].t, 500);
+    assert_eq!(overlay.objects[1].t, 1000 + MERGE_GAP_MS + 50);
+    // Ids stay unique.
+    let mut seen = ids(&overlay);
+    seen.sort_unstable();
+    seen.dedup();
+    assert_eq!(seen.len(), 3);
+    assert_eq!(overlay.objects[0].id, "same");
+
+    let stacked = merge(&[first, second], MergeLayout::EndToEnd, new_note("M")).unwrap();
+    assert_eq!((stacked.objects[0].x, stacked.objects[0].y), (10.0, 20.0));
+    assert_eq!((stacked.objects[1].x, stacked.objects[1].y), (10.0, 2020.0));
+    assert_eq!(stacked.objects[1].layer, 1);
+}

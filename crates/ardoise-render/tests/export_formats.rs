@@ -152,6 +152,7 @@ fn reference_note() -> Note {
             },
         ],
         strokes,
+        objects: Vec::new(),
         timing: Timing::Recorded,
         origin: Origin::Ardoise,
     }

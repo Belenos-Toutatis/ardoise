@@ -327,6 +327,7 @@ impl<'n> Timeline<'n> {
             favorite: note.favorite,
             layers: note.layers.clone(),
             strokes,
+            objects: Vec::new(),
             timing: note.timing,
             origin: note.origin.clone(),
         }

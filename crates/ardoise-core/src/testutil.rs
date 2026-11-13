@@ -3,8 +3,11 @@
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
 
 use crate::note::{
-    A4_LANDSCAPE, Background, Layer, Note, Origin, PageSize, Paper, Template, Timing,
+    A4_LANDSCAPE, Background, Layer, Note, Origin, PageObject, PageSize, Paper, Template, TextBody,
+    Timing,
 };
+use crate::objects::TEXT_SIZES;
+use ardoise_text::FontFamily;
 
 /// Deterministic linear congruential generator (Knuth's MMIX constants), so that every
 /// "random" test is reproducible.
@@ -78,6 +81,41 @@ impl Lcg {
             .collect()
     }
 
+    /// Up to three text frames on `layers` layers, turned, scaled and placed anywhere.
+    pub fn objects(&mut self, layers: u32) -> Vec<PageObject> {
+        (0..self.below(4))
+            .map(|i| {
+                let text = [
+                    "",
+                    "Bonjour",
+                    "Élève
+« œuvre » 12 €",
+                    "α + β	γ",
+                    "a
+b",
+                ][self.below(5) as usize]
+                    .to_owned();
+                let body = TextBody {
+                    text,
+                    font: FontFamily::ALL[self.below(2) as usize],
+                    bold: self.below(2) == 0,
+                    size: if self.below(2) == 0 {
+                        TEXT_SIZES[self.below(3) as usize]
+                    } else {
+                        1.0 + self.unit() * 2000.0
+                    },
+                    color: Rgba::from_rgba_u32(self.next_u32()),
+                };
+                let (layer, t) = (self.below(u64::from(layers)) as u32, self.next_u32());
+                let (x, y) = (self.coord(), self.coord());
+                let mut object = PageObject::text(format!("object-{i}"), layer, t, x, y, body);
+                object.scale = 0.05 + self.unit() * 5.0;
+                object.quarter_turns = self.below(4) as u8;
+                object
+            })
+            .collect()
+    }
+
     pub fn note(&mut self) -> Note {
         let layers = 1 + self.below(8) as usize;
         let count = self.below(12) as usize;
@@ -147,6 +185,8 @@ impl Lcg {
                 },
                 _ => Origin::Ardoise,
             },
+            // Last, so that the fields above take the same values as before objects existed.
+            objects: self.objects(layers as u32),
         }
     }
 }
@@ -168,6 +208,7 @@ pub fn blank_note(id: &str, title: &str) -> Note {
             visible: true,
         }],
         strokes: Vec::new(),
+        objects: Vec::new(),
         timing: Timing::Recorded,
         origin: Origin::Ardoise,
     }

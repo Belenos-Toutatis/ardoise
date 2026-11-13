@@ -184,6 +184,7 @@ fn reference_note() -> Note {
             visible: true,
         }],
         strokes,
+        objects: Vec::new(),
         timing: Timing::Recorded,
         origin: Origin::Ardoise,
     }

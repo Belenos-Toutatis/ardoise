@@ -513,6 +513,7 @@ pub fn note_from_page(
             visible: true,
         }],
         strokes,
+        objects: Vec::new(),
         timing: Timing::Recorded,
         origin: Origin::Tablet,
     };
@@ -586,6 +587,7 @@ pub fn blackboard_note(
             visible: true,
         }],
         strokes,
+        objects: Vec::new(),
         timing: Timing::Synthesized,
         origin: Origin::Tablet,
     };

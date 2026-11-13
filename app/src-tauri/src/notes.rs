@@ -481,6 +481,7 @@ mod tests {
                 stroke(1, Rgba::BLACK),
                 stroke(0, Rgba::rgb(0xbb, 0x3e, 0x9a)),
             ],
+            objects: Vec::new(),
             timing: Timing::Recorded,
             origin: Origin::Ardoise,
         }

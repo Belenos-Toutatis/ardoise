@@ -72,6 +72,7 @@ fn note(background: Background, image: Option<BackgroundImage>, strokes: Vec<Str
             visible: true,
         }],
         strokes,
+        objects: Vec::new(),
         timing: Timing::Recorded,
         origin: Origin::Ardoise,
     }

@@ -8,6 +8,8 @@
 //! - `strokes.bin` (required): the strokes, see [`strokes`].
 //! - `original.bin`, `original.ardoise`, `thumb.png`, `audio.opus`, `background.<ext>`,
 //!   `text.json` (optional): opaque bytes.
+//! - page objects (format 1.4): the `objects` key of `note.json`, see [`crate::objects`]; a list
+//!   that cannot be read stays an unknown key, and the note reads without objects.
 //! - `revision.json` (optional, format 1.3): the note is a retouched copy of another, see
 //!   [`RevisionInfo`]. A damaged one (or one over [`MAX_REVISION_JSON_BYTES`]) is kept verbatim as
 //!   an unknown member and the note is not a revision.
@@ -93,7 +95,7 @@ pub struct FormatVersion {
 
 impl FormatVersion {
     /// The version this code writes, and the newest it reads.
-    pub const CURRENT: FormatVersion = FormatVersion { major: 1, minor: 3 };
+    pub const CURRENT: FormatVersion = FormatVersion { major: 1, minor: 4 };
 }
 
 impl fmt::Display for FormatVersion {
@@ -338,6 +340,17 @@ fn metadata_only(note: &Note) -> Note {
         favorite: note.favorite,
         layers: note.layers.clone(),
         strokes: Vec::new(),
+        // Page objects are part of `note.json`; their boxes are written as this version measures
+        // them.
+        objects: note
+            .objects
+            .iter()
+            .map(|object| {
+                let mut object = object.clone();
+                object.measure();
+                object
+            })
+            .collect(),
         timing: note.timing,
         origin: note.origin.clone(),
     }
@@ -411,8 +424,9 @@ fn parse_note_json(bytes: &[u8]) -> Result<ParsedJson, FormatError> {
     fields.remove("strokes");
     let mut with_strokes = fields.clone();
     with_strokes.insert("strokes".to_owned(), Value::Array(Vec::new()));
-    let note: Note = serde_json::from_value(Value::Object(with_strokes))
+    let mut note: Note = serde_json::from_value(Value::Object(with_strokes))
         .map_err(|e| FormatError::Metadata(e.to_string()))?;
+    repair_objects(&mut note);
 
     // Whatever the model does not serialise back is unknown to this version.
     let known: HashSet<String> = match serde_json::to_value(&note) {
@@ -429,6 +443,18 @@ fn parse_note_json(bytes: &[u8]) -> Result<ParsedJson, FormatError> {
         note,
         unknown_fields,
     })
+}
+
+/// Makes the page objects read from a file fit the note: an object on a layer the note does not
+/// have (a version before 1.4 merged layers without knowing objects) goes on the last layer, ids
+/// are made unique, and text frames are measured as this version lays them out.
+fn repair_objects(note: &mut Note) {
+    let last = note.layers.len().saturating_sub(1) as u32;
+    for object in &mut note.objects {
+        object.layer = object.layer.min(last);
+        object.measure();
+    }
+    crate::objects::make_ids_unique(&mut note.objects);
 }
 
 /// Checks the invariants the model documents and the rest of the code relies on.
@@ -450,6 +476,31 @@ fn validate(note: &Note) -> Result<(), FormatError> {
             "stroke {index} is on layer {} but the note has {layers} layer(s)",
             stroke.layer
         )));
+    }
+    for (index, object) in note.objects.iter().enumerate() {
+        if usize::try_from(object.layer).map_or(true, |l| l >= layers) {
+            return Err(FormatError::InvalidNote(format!(
+                "object {index} is on layer {} but the note has {layers} layer(s)",
+                object.layer
+            )));
+        }
+        let finite = [
+            object.x,
+            object.y,
+            object.width,
+            object.height,
+            object.scale,
+        ]
+        .iter()
+        .all(|v| v.is_finite());
+        let size_ok = object
+            .as_text()
+            .is_none_or(|text| text.size.is_finite() && text.size > 0.0);
+        if !finite || object.scale <= 0.0 || !size_ok {
+            return Err(FormatError::InvalidNote(format!(
+                "object {index} has a placement or a size that is not a finite positive number"
+            )));
+        }
     }
     Ok(())
 }

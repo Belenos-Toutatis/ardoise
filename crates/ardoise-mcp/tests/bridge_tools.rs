@@ -144,6 +144,7 @@ fn note(id: &str, title: &str) -> Note {
             visible: true,
         }],
         strokes: Vec::new(),
+        objects: Vec::new(),
         timing: Timing::Recorded,
         origin: Origin::Ardoise,
     }

@@ -280,6 +280,7 @@ fn base_note(
             })
             .collect(),
         strokes: Vec::new(),
+        objects: Vec::new(),
         timing: Timing::Recorded,
         origin,
     }

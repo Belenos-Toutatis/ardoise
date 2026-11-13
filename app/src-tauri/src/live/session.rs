@@ -1100,6 +1100,7 @@ impl LiveSession {
                 visible: true,
             }],
             strokes: Vec::new(),
+            objects: Vec::new(),
             timing: Timing::Recorded,
             origin: Origin::Live,
         };

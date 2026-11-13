@@ -222,6 +222,7 @@ pub fn create_note(host: &Host, args: CreateNoteArgs) -> ToolResult {
                 visible: true,
             }],
             strokes: Vec::new(),
+            objects: Vec::new(),
             timing: Timing::Recorded,
             origin: Origin::Ardoise,
         };
