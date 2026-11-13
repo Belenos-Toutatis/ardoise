@@ -727,7 +727,7 @@ change appears at once on the projector and on the share's screen, and it is sav
 - A page that has neither writing nor image is not saved, even if you changed its paper.
 
 **The image** (**Background** tab, **Background image or PDF** block): **Choose a PDF or an image…**, the PDF page if there
-are several, then **Put in the background**. The image (PNG or JPEG) or the PDF page goes *under* the writing of the
+are several (one thumbnail per page, as in the editor: see below), then **Put in the background**. The image (PNG or JPEG) or the PDF page goes *under* the writing of the
 current page, **Whole** (all of it visible, without distortion); **Placement** (**Whole**, **Fill the page**,
 **Stretched**), **Opacity**, **Turn the image alone**, **Replace…** and **Remove the image** then set it, as in the editor
 (chapter 8). Importing a PDF page can take a few seconds: the tablet goes on writing meanwhile.
@@ -1162,7 +1162,12 @@ The **Page** tab of the side panel sets up the sheet:
 
 In the **Background** tab of the side panel, the **Background image or PDF** section puts an image (PNG or JPEG) or a PDF page *under* the
 writing, to annotate a worksheet, a document or a photo: **Choose a PDF or an image…**, the PDF page if needed, then
-**Put in the background**. Set the **Placement** (**Whole**, **Fill the page**, **Stretched**) and the **Opacity**;
+**Put in the background**. For a PDF of several pages, Ardoise shows a **thumbnail of each page**, its number under it,
+so that you can tell which one you need: click the thumbnail you want (the first is chosen to begin with, the chosen
+page is framed), or, with the keyboard, `Tab` to enter the list, the arrows to move from page to page (`↑` and `↓` by a
+row, `←` and `→` by a page), `Home` and `End` for the first and the last page. The thumbnails are drawn as they come
+into view, so a PDF of several hundred pages opens at once; from eight pages, a **Page** field takes you straight to a
+number. A page that Windows cannot draw can still be chosen: its thumbnail says "Preview unavailable". Set the **Placement** (**Whole**, **Fill the page**, **Stretched**) and the **Opacity**;
 **Replace…** changes the file, **Remove the image** removes it, **Turn the image alone** turns the image without
 touching the sheet or the writing. If the image does not have the note's orientation, Ardoise offers to switch the note
 to the image's orientation. Everything can be undone. The image follows rotations, splits and assemblies and appears in

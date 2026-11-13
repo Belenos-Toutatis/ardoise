@@ -36,6 +36,7 @@ mod operations;
 mod organize;
 mod original;
 mod pdf_pages;
+mod pdf_preview;
 mod presentation;
 mod print;
 #[cfg(windows)]
@@ -406,6 +407,9 @@ pub fn run() {
             background::create_notes_from_file,
             background::cancel_create_notes,
             background::background_image_names,
+            pdf_preview::open_pdf_preview,
+            pdf_preview::render_pdf_thumbnail,
+            pdf_preview::close_pdf_preview,
             handwriting::handwriting_info,
             handwriting::set_handwriting_language,
             handwriting::handwriting_status,

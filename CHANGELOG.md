@@ -7,6 +7,9 @@
 - **Ctrl+A sélectionne toutes les notes affichées** où que soit le dernier clic (il sélectionnait le texte de la fenêtre quand aucune carte n'avait le focus), et **Échap désélectionne tout** de la même façon ; dans un champ de saisie, ces touches restent celles du champ.
 - **Maj+clic sur la case d'une carte** sélectionne la plage, comme Maj+clic sur la carte (il ne cochait que cette note). Sans note cochée auparavant, la plage part de la première note affichée, comme dans l'Explorateur. Maj+clic ne surligne plus le texte des cartes.
 - **Glisser une note vers un classeur** fonctionne dans l'application : la fenêtre refusait tout glisser parti de la page (curseur « interdit », rien au lâcher), parce que son propre traitement des fichiers déposés était actif.
+### Modifié (le choix de la page d'un PDF en fond)
+
+- **Choisir la page d'un PDF pour le fond se fait sur des vignettes** : au lieu d'une liste de numéros, un PDF de plusieurs pages montre une vignette de chaque page, son numéro dessous (éditeur et mode direct, onglet **Fond**). Elles se dessinent quand elles arrivent à l'écran, deux à la fois, avec le moteur de PDF de Windows déjà utilisé pour les fonds : un PDF de 200 pages s'ouvre tout de suite. Un clic, les flèches, `Début` et `Fin` choisissent la page ; un champ **Page** permet d'aller à un numéro à partir de huit pages ; une page qui ne se dessine pas reste choisissable.
 
 ### Modifié (le panneau Tablette en onglets, les quatre positions de la Xiaomi ; retour de l'utilisateur, Q17)
 

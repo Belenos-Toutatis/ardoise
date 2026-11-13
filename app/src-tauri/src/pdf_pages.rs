@@ -95,6 +95,8 @@ pub fn page_sizes(bytes: &[u8]) -> Result<Vec<PdfPageSize>, PdfError> {
 
 #[cfg(windows)]
 mod imp {
+    use std::sync::OnceLock;
+
     use windows::Data::Pdf::{PdfDocument, PdfPage, PdfPageRenderOptions};
     use windows::Storage::Streams::{DataReader, DataWriter, InMemoryRandomAccessStream};
     use windows::core::HRESULT;
@@ -111,8 +113,9 @@ mod imp {
         PdfError::Damaged(error.message())
     }
 
-    /// A loaded document.
-    pub(super) struct Document(PdfDocument);
+    /// A loaded document, and the display scale of its renders (measured by the first one: it belongs to
+    /// the screen, not to the page, and measuring it renders the page once more).
+    pub(super) struct Document(PdfDocument, OnceLock<f32>);
 
     impl Document {
         pub(super) fn load(bytes: &[u8]) -> Result<Document, PdfError> {
@@ -146,7 +149,7 @@ mod imp {
             if count > MAX_PDF_PAGES {
                 return Err(PdfError::TooLarge);
             }
-            Ok(Document(document))
+            Ok(Document(document, OnceLock::new()))
         }
 
         pub(super) fn page_sizes(&self) -> Result<Vec<PdfPageSize>, PdfError> {
@@ -175,7 +178,7 @@ mod imp {
                 return Err(PdfError::NoSuchPage(number));
             }
             let page = self.0.GetPage(number - 1).map_err(damaged)?;
-            let rendered = render_scaled(&page, width, height);
+            let rendered = render_scaled(&page, width, height, &self.1);
             let _ = page.Close();
             rendered
         }
@@ -186,12 +189,24 @@ mod imp {
 
     /// The page rendered `width × height` pixels. The renderer's sizes are in DIPs, which it
     /// multiplies by the display's scale (1.5 at 150 %): a small render first measures that
-    /// scale, so that the page comes out at the size asked whatever the screen.
-    fn render_scaled(page: &PdfPage, width: u32, height: u32) -> Result<Vec<u8>, PdfError> {
-        let probe = render(page, PROBE_DIPS, PROBE_DIPS)?;
-        let scale = match ardoise_render::picture::dimensions(&probe) {
-            Ok((w, _)) if w > 0 => w as f32 / PROBE_DIPS as f32,
-            _ => 1.0,
+    /// scale (once per document, in `known`), so that the page comes out at the size asked
+    /// whatever the screen.
+    fn render_scaled(
+        page: &PdfPage,
+        width: u32,
+        height: u32,
+        known: &OnceLock<f32>,
+    ) -> Result<Vec<u8>, PdfError> {
+        let scale = match known.get() {
+            Some(scale) => *scale,
+            None => {
+                let probe = render(page, PROBE_DIPS, PROBE_DIPS)?;
+                let scale = match ardoise_render::picture::dimensions(&probe) {
+                    Ok((w, _)) if w > 0 => w as f32 / PROBE_DIPS as f32,
+                    _ => 1.0,
+                };
+                *known.get_or_init(|| scale)
+            }
         };
         let dips = |px: u32| ((px as f32 / scale).round() as u32).max(1);
         render(page, dips(width), dips(height))

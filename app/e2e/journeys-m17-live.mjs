@@ -245,6 +245,15 @@ export const livePaperJourneys = [
         if (hint !== l('live.background.help')) throw new Error(`the Fond tab says ${j(hint)}`);
         await app.click(`${FOND} button[data-action="background-choose"]`);
         await app.waitFor(`document.querySelector(${j(`${FOND} [data-slot="background-pdf"]`)}) !== null`, 'the pages of the PDF');
+        // One thumbnail per page, the first chosen, its picture drawn by Windows (a real image, not the placeholder).
+        await app.waitFor(`document.querySelectorAll(${j(`${FOND} [role="radio"]`)}).length === 2`, 'a thumbnail for each of the two pages');
+        await app.waitFor(
+          `(() => { const img = document.querySelector(${j(`${FOND} [role="radio"] img`)}); return !!img && img.complete && img.naturalWidth > 0; })()`,
+          'the first thumbnail to be drawn',
+          30_000,
+        );
+        const chosenPage = await app.evaluate(`document.querySelector(${j(`${FOND} [role="radio"][aria-checked="true"]`)})?.dataset.page`);
+        if (chosenPage !== '1') throw new Error(`the page chosen to begin with is ${j(chosenPage)}, not 1`);
         await app.click(`${FOND} .pane-actions button.primary`);
         // A portrait PDF on the tablet's landscape page: no question about turning the page.
         await presentation.waitFor(`document.querySelector('canvas.live-canvas').dataset.image === ${j(PDF_NAME)}`, 'the PDF to be the page’s image', 30_000);
