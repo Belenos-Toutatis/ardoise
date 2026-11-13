@@ -244,7 +244,7 @@ Premiers essais de l'utilisateur avec la vraie tablette, puis mesures faites ave
 
 **À décider par l'utilisateur.**
 
-- d. Quand « Synchroniser automatiquement » ou « Effacer de la tablette après import » est désactivé et que la tablette contient des pages : lancer le direct quand même, avec un avertissement (effacer l'écran pendant le direct peut faire perdre la page de l'écran en cours), ou demander d'abord de les importer ?
+- d. **Tranché le 2026-11-13 : demander d'abord de les importer.** Quand « Synchroniser automatiquement » ou « Effacer de la tablette après import » est désactivé et que la tablette contient des pages, Ardoise ne lance pas le direct : elle demande d'abord de les importer (elles seront effacées de la tablette), puis lance le direct. SPEC §4.2 mis à jour avec l'accord de l'utilisateur.
 - e. **Tranché le 2026-11-13 : mettre à jour la première note.** Quand un écran est enregistré une seconde fois sans avoir été effacé, la nouvelle page contient l'ancienne, et la tablette donne l'heure de la version précédente. Ardoise met à jour la note de cette version si elle n'a pas été modifiée depuis son import (titre, mots-clés et classeur mis à part) et si la nouvelle page la contient en entier ; sinon elle ajoute une note. SPEC §4.1 mis à jour avec l'accord de l'utilisateur.
 
 **Pas encore mesuré** : une page dont le téléchargement est coupé en route est-elle retirée quand même ; un transfert s'arrête-t-il quand la liaison se ferme ; un appui sur le bouton d'enregistrement avec un écran vide ; ce que devient la page d'un écran non effacé quand on éteint la tablette ; l'unité (une règle).
