@@ -12,7 +12,8 @@ use std::path::Path;
 use ardoise_core::format::NoteFile;
 use ardoise_core::library::{self, Library};
 use ardoise_core::note::{
-    A4_LANDSCAPE, A4_PORTRAIT, Background, Layer, Note, Origin, PageSize, Paper, Template, Timing,
+    A4_LANDSCAPE, A4_PORTRAIT, Background, FontFamily, Layer, Note, Origin, PageObject, PageSize,
+    Paper, Template, TextBody, Timing,
 };
 use ardoise_hwr::synthetic::Hand as Writer;
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
@@ -294,6 +295,80 @@ fn background(paper: Paper, template: Template, texture: bool) -> Background {
     }
 }
 
+/// Ids of the text frames of the note "Idées pour Noël" (fixed: the end-to-end journeys and the
+/// screenshots name them).
+pub const FRAME_TITLE_ID: &str = "texte-titre";
+pub const FRAME_LIST_ID: &str = "texte-liste";
+pub const FRAME_HINT_ID: &str = "texte-note";
+
+/// A text frame of the demo (one style per frame).
+#[allow(clippy::too_many_arguments)]
+fn demo_frame(
+    id: &str,
+    t: u32,
+    (x, y): (f32, f32),
+    font: FontFamily,
+    bold: bool,
+    size: f32,
+    color: Rgba,
+    text: &str,
+) -> PageObject {
+    PageObject::text(
+        id,
+        0,
+        t,
+        x,
+        y,
+        TextBody {
+            text: text.to_owned(),
+            font,
+            bold,
+            size,
+            color,
+        },
+    )
+}
+
+/// The text frames typed on the note "Idées pour Noël" (the pencil notes stay on the page's left
+/// and the star on its right, the frames go where the page is empty): a bold Latin Modern title
+/// (9 mm, dark red), a three-line list in Andika (6 mm, dark blue; with French characters, a
+/// euro sign and guillemets) and a small Latin Modern reminder (4 mm, grey). Times are in
+/// milliseconds since the note's creation, early: the replay shows them with the first strokes.
+fn text_frames_of_ideas() -> Vec<PageObject> {
+    vec![
+        demo_frame(
+            FRAME_TITLE_ID,
+            600,
+            (17_000.0, 2200.0),
+            FontFamily::LatinModern,
+            true,
+            900.0,
+            Rgba::rgb(0x8a, 0x1c, 0x1c),
+            "Cadeaux de Noël",
+        ),
+        demo_frame(
+            FRAME_LIST_ID,
+            1800,
+            (2500.0, 16_000.0),
+            FontFamily::Andika,
+            false,
+            600.0,
+            Rgba::rgb(0x1a, 0x3a, 0x8a),
+            "« Cadeaux » : un livre pour Léa, 12,50 €\nDes chocolats à la crème, façon œuf\nÀ la maison : crème brûlée",
+        ),
+        demo_frame(
+            FRAME_HINT_ID,
+            3200,
+            (2500.0, 19_400.0),
+            FontFamily::LatinModern,
+            false,
+            400.0,
+            Rgba::rgb(0x44, 0x44, 0x44),
+            "À commander avant le 15 décembre",
+        ),
+    ]
+}
+
 /// The demo notes, always the same.
 fn demo_notes() -> Vec<DemoNote> {
     let mut notes = Vec::new();
@@ -510,6 +585,7 @@ fn demo_notes() -> Vec<DemoNote> {
         .collect();
     hand.polyline(pen(Tool::Brush, ORANGE, 240.0), &star);
     note.strokes = hand.strokes;
+    note.objects = text_frames_of_ideas();
     notes.push(DemoNote {
         binder: "Perso",
         note,
@@ -824,6 +900,84 @@ mod tests {
         let a: Vec<Note> = demo_notes().into_iter().map(|d| d.note).collect();
         let b: Vec<Note> = demo_notes().into_iter().map(|d| d.note).collect();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn one_demo_note_has_text_frames_in_both_fonts_where_the_page_is_empty() {
+        let notes = demo_notes();
+        let with_frames: Vec<&Note> = notes
+            .iter()
+            .map(|d| &d.note)
+            .filter(|n| !n.objects.is_empty())
+            .collect();
+        // Only one note: the other seven stay as the end-to-end journeys know them.
+        assert_eq!(with_frames.len(), 1);
+        let note = with_frames[0];
+        assert_eq!(note.title, "Idées pour Noël");
+        let ids: Vec<&str> = note.objects.iter().map(|o| o.id.as_str()).collect();
+        assert_eq!(ids, [FRAME_TITLE_ID, FRAME_LIST_ID, FRAME_HINT_ID]);
+
+        let texts: Vec<&TextBody> = note.objects.iter().filter_map(|o| o.as_text()).collect();
+        assert_eq!(texts.len(), 3);
+        let families: HashSet<FontFamily> = texts.iter().map(|t| t.font).collect();
+        assert_eq!(families.len(), 2);
+        assert_eq!(texts.iter().filter(|t| t.bold).count(), 1);
+        let sizes: HashSet<u32> = texts.iter().map(|t| t.size.to_bits()).collect();
+        let colours: HashSet<Rgba> = texts.iter().map(|t| t.color).collect();
+        assert!(sizes.len() >= 2 && colours.len() >= 2);
+        // One frame of several lines, with the French characters of the fonts.
+        let list = texts.iter().find(|t| t.text.lines().count() > 1).unwrap();
+        for character in ['é', 'è', 'à', 'ç', 'œ', '«', '»', '€'] {
+            assert!(list.text.contains(character), "{character}");
+        }
+
+        // Every frame is on the page and covers no stroke (nor the notes' title and star).
+        let page = note.page;
+        for object in &note.objects {
+            let [left, top, right, bottom] = object.page_bounds();
+            assert!(object.width > 0.0 && object.height > 0.0, "{}", object.id);
+            assert!(left >= 0.0 && top >= 0.0, "{}", object.id);
+            assert!(
+                right <= page.width as f32 && bottom <= page.height as f32,
+                "{}: {:?}",
+                object.id,
+                object.page_bounds()
+            );
+            let covered = note
+                .strokes
+                .iter()
+                .flat_map(|s| &s.points)
+                .filter(|p| p.x >= left && p.x <= right && p.y >= top && p.y <= bottom)
+                .count();
+            assert_eq!(covered, 0, "{} covers strokes", object.id);
+        }
+    }
+
+    #[test]
+    fn the_typed_text_of_the_demo_is_found_by_its_words_and_by_no_journey_search() {
+        let notes = demo_notes();
+        let note = notes
+            .iter()
+            .map(|d| &d.note)
+            .find(|n| n.title == "Idées pour Noël")
+            .unwrap();
+        let typed = ardoise_hwr::text::fold(&note.typed_text());
+        assert!(typed.contains("cadeaux") && typed.contains("creme brulee"));
+        // The words the journeys search for (library search, MCP) stay unique to their notes.
+        for query in [
+            "energie",
+            "lumiere",
+            "ligne",
+            "droite",
+            "optique",
+            "propage",
+            "electron",
+            "bout",
+            "journey",
+            "cinetique",
+        ] {
+            assert!(!typed.contains(query), "{query}");
+        }
     }
 
     #[test]
