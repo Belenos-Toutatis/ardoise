@@ -266,3 +266,23 @@ Retour de l'utilisateur après ses premiers essais : le panneau de la tablette e
 Avec les quatre positions (Q17), une page de la Xiaomi est en largeur quand la tablette est tenue boutons à droite ou à gauche. SPEC §4.2 (« Reprendre le direct sur une feuille ») dit encore « une page de la Xiaomi (environ 20 × 27 cm, en hauteur) » : il fallait « en hauteur ou en largeur ». **Décision** : l'utilisateur accepte (« Oui, écris-le ») ; SPEC §4.2 dit maintenant « en hauteur ou en largeur » et que la page doit être dans le même sens que la position réglée, sinon Ardoise refuse.
 
 **Fait le 2026-11-13** (`docs/design/blackboard.md`, « Positions, the Rust side », resuming a sheet) : une page de la Xiaomi, en hauteur ou en largeur, se reprend avec la Xiaomi seulement (jamais avec la Bamboo Slate). L'écriture ajoutée est redressée pour la position choisie au début du direct, comme une page neuve, et non pour celle avec laquelle la page a été faite (sinon, la tablette tenue dans l'autre sens, l'écriture ajoutée serait à l'envers). Si la page n'est pas dans le sens où la tablette est tenue (page en largeur, tablette tenue en hauteur, ou l'inverse), Ardoise refuse, sans rien écrire sur la note, et dit de choisir une position dans le sens de la page (code `sheetBoardPosition`).
+
+## Q20 — Fonctions d'un logiciel de prise de notes, décidées une par une (2026-11-13) — **tranchée le 2026-11-13**
+
+L'utilisateur a demandé ce qu'on pourrait ajouter à Ardoise, puis a tranché chaque proposition. SPEC §4.3, §4.4, §4.6 et §8 mis à jour avec son accord.
+
+**Retenu**
+
+1. **Dupliquer une note** : clic droit sur une carte et barre de sélection ; même classeur, **même date** que l'originale (son choix), titre suivi de « (copie) », pas en favori ; le son (Opus, environ 0,5 Mo par minute) et l'original de la tablette sont copiés. **« Changer la date… »** au clic droit : aujourd'hui, ou une date réglée.
+2. **Échap dans l'éditeur**, par étapes : action en cours, puis panneau ou outil ouvert, puis sélection, puis enregistrer et revenir à la bibliothèque ; pas pendant un enregistrement sonore.
+3. **Classeur à ordre libre** (à la place des notes de plusieurs pages, son idée) : tri « Ordre du classeur », glisser-déposer entre les cartes ; ordre rangé dans un fichier du classeur ; note qui arrive à la fin ; déposée sur un classeur elle change de classeur, entre deux cartes elle change de place ; chaque classeur a son ordre.
+4. **Outils de tracé** : ligne, rectangle, ellipse ; trois boutons à bascule (forme régulière, depuis le centre, aimanter), Maj et Alt au clavier ; **pas de redressement automatique** (« des fois on n'a pas envie que ce soit dressé ») ; la ligne régulière se cale sur l'horizontale, la verticale ou une diagonale ; aimantation selon le modèle de la page ; dans l'éditeur seulement.
+5. **Signets**, sous la forme d'un **sommaire du classeur** (« Ce serait utile si ça permettait de chercher dans un classeur entier ») : posés sur la page, trouvés par la recherche, signets du PDF du classeur, absents des exports image et vidéo.
+6. **Outil Texte** : deux polices fournies, **Latin Modern** (la police de LaTeX) et **Andika** (sa demande) ; accord donné pour télécharger leurs fichiers sur leurs sites officiels (GUST, SIL) et les inclure.
+7. **Outil Équation** en code LaTeX (son idée), rendu en dessin vectoriel gardé dans la note avec son code ; accord donné pour ajouter **MathJax** (Apache 2.0) au projet.
+8. **Exporter un classeur en PDF** au clic droit, et **impression** en 1, 2 ou 4 pages par feuille ; les sous-classeurs sont **une option** dans les deux cas (sa précision).
+9. **Limite de taille de l'exécutable : 40 Mo** au lieu de 30 (« On passe la limite à 40 mégaoctets »).
+
+**Écarté** : modèles de page (« Les modèles me conviennent très bien comme c'était maintenant »), liens entre notes, recherche dans le texte des PDF de fond, historique des versions, notes de plusieurs pages.
+
+**Corrigé au passage** (défauts qu'il a signalés) : Ctrl+A et Échap dans la bibliothèque où que soit le focus, Maj+clic sur les cases, et le glisser-déposer d'une note vers un classeur, refusé par la fenêtre.

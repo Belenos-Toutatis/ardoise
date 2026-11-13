@@ -417,7 +417,7 @@ fn run_inner(root: &Path, reuse: bool) -> Result<(), String> {
         })?
         .len();
     if size >= crate::MAX_EXE_BYTES {
-        return Err("ardoise.exe is 30 MB or larger".into());
+        return Err("ardoise.exe is 40 MB or larger".into());
     }
 
     let (entries, warnings) = collect(root, &exe, &version)?;

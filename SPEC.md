@@ -115,6 +115,9 @@ Priorités : **P1** = indispensable pour remplacer Inkspace, **P2** = proposé e
 - Grille de miniatures, tri par date ou titre, classeurs (sous-dossiers), déplacement par glisser-déposer.
 - Étiquettes de couleur, favoris, recherche par titre et étiquettes (P1), par texte manuscrit reconnu (P2, §4.7).
 - Sélection multiple : exporter, déplacer, supprimer, fusionner.
+- **Dupliquer une note** (ajout du 2026-11-13, Q20) : par le clic droit sur une carte ou pour la sélection ; la copie est dans le même classeur, à la même date, son titre suivi de « (copie) », avec son son et l'original de la tablette, sans le favori. **Changer la date** d'une note au clic droit : aujourd'hui, ou une date choisie.
+- **Ordre du classeur** (ajout du 2026-11-13, Q20) : un tri de plus, où l'on range les notes d'un classeur par glisser-déposer entre les cartes. L'ordre est enregistré dans le classeur (il suit la synchronisation) ; chaque classeur a le sien, et un classeur parent montre ses notes puis celles de ses sous-classeurs ; une note qui arrive se place à la fin. Les boutons note précédente et note suivante de l'éditeur et l'export de plusieurs notes suivent l'ordre affiché.
+- **Sommaire du classeur** (ajout du 2026-11-13, Q20) : la liste des signets (§4.4) de ses notes, dans l'ordre du classeur ; un clic ouvre la note à cet endroit. La recherche trouve aussi les signets.
 - Corbeille avec restauration.
 - **Import des notes Inkspace** existantes sur l'ordinateur (P1, cet ordinateur en a 22) : détection automatique de l'installation d'Inkspace, import sans rien modifier côté Inkspace (détails et limites en §6.3).
 
@@ -133,7 +136,11 @@ Priorités : **P1** = indispensable pour remplacer Inkspace, **P2** = proposé e
 - **Assembler des pages** : superposer plusieurs notes sur une seule page, ou les mettre bout à bout (page longue).
 - **Redresser les formes** : transformer un tracé à main levée en droite, cercle, rectangle, flèche (P2). Un réglage à côté du bouton (ajout du 2026-11-11, Q12) choisit la tolérance, de stricte à souple, la taille minimale des formes et l'alignement automatique (rendre horizontal ou vertical, faire un cercle ou un carré) ; tant qu'il est ouvert, la page montre ce qui serait redressé. Les valeurs sont retenues pour toutes les notes, et l'assistant redresse avec les mêmes.
 - **Fond image ou PDF** importé, à annoter (P2).
-- Zone de texte tapé au clavier (P3).
+- **Texte tapé au clavier** (décidé le 2026-11-13, Q20 ; était P3) : un outil Texte pose un cadre où l'on tape ; deux polices fournies avec l'application, Latin Modern (celle de LaTeX) et Andika ; trois tailles, la couleur de l'outil, gras ou non, sans mise en forme à l'intérieur d'un cadre. Le texte se déplace, se redimensionne et se sélectionne avec les traits ; il figure dans tous les exports et apparaît d'un coup dans la relecture.
+- **Équation** (ajout du 2026-11-13, Q20) : un outil où l'on tape du code LaTeX en mode mathématique (chimie `\ce{...}` comprise), avec l'aperçu en direct ; l'équation est posée sur la page comme un dessin vectoriel, la note garde son code, et un double-clic le rouvre. Ce n'est pas un LaTeX complet.
+- **Outils de tracé** (ajout du 2026-11-13, Q20) : ligne, rectangle, ellipse, avec trois boutons à bascule utilisables sans clavier : forme régulière (carré, cercle, ligne calée sur l'horizontale, la verticale ou une diagonale ; Maj le temps d'un tracé), depuis le centre (Alt), aimanter au modèle de la page (intersections du quadrillé, du millimétré et du pointillé ; lignes du ligné ; lignes et grands carreaux du Seyès). Rien n'est redressé sans qu'on le demande. Les formes sont des traits ordinaires. Dans l'éditeur seulement, pas pendant le direct.
+- **Signets** (ajout du 2026-11-13, Q20) : un mot ou une courte phrase tapés à un endroit de la page ; visibles dans l'éditeur, absents des exports image et vidéo ; ils font le sommaire du classeur (§4.3) et les signets du PDF d'un classeur (§4.6).
+- **Échap dans l'éditeur** (ajout du 2026-11-13, Q20) : annule l'action en cours ; sinon ferme le panneau ou l'outil ouvert ; sinon désélectionne ; sinon enregistre et revient à la bibliothèque, sauf pendant un enregistrement sonore.
 - **Revenir à l'original** de la tablette (P2).
 - **Projeter la note de l'éditeur** (ajout du 2026-11-11, Q13) : la page de l'éditeur en plein écran sur le vidéoprojecteur, mise à jour à chaque trait, avec le zoom de la zone projetée.
 
@@ -150,6 +157,7 @@ Priorités : **P1** = indispensable pour remplacer Inkspace, **P2** = proposé e
 - **Images** : PNG (fond transparent possible), JPG ; résolution au choix (P1).
 - **SVG** vectoriel, épaisseur variable fidèle à la pression, ouvrable dans Inkscape (P1).
 - **PDF** vectoriel, une ou plusieurs notes, format A4 ou taille réelle de la page (P1).
+- **Exporter un classeur en PDF** (ajout du 2026-11-13, Q20) : par le clic droit sur un classeur, toutes ses notes dans son ordre, avec ses signets comme signets du PDF ; les sous-classeurs en option. **Impression** : 1, 2 ou 4 pages par feuille, les sous-classeurs en option.
 - **Calques à l'export** (ajout du 2026-11-11, Q11) : pour le SVG et le PDF, au choix séparés (un calque du fichier par calque de la note, à afficher ou masquer dans Inkscape, Acrobat Reader ou Firefox) ou fusionnés ; une image (PNG, JPG, WebP) les fusionne toujours. Un calque masqué n'est jamais exporté.
 - **Copier** dans le presse-papiers pour coller directement dans Word ou OneNote (P1).
 - PSD avec un calque par calque de la note (P3, Inkspace le proposait).
@@ -304,7 +312,7 @@ testdata/private/   copies de notes personnelles pour les tests locaux — ignor
 - Démarrage en moins de 2 s ; bibliothèque de 1 000 notes fluide (miniatures en cache local).
 - Mode direct sans saccade à 60 images/s ou plus.
 - Export MP4 1080p d'une relecture de 2 min en moins de 2 min sur un portable récent. Le WebM (AV1) peut être nettement plus lent : la durée estimée est affichée avant de lancer l'export.
-- Exécutable de moins de 30 Mo (hors encodeur OpenH264 téléchargé).
+- Exécutable de moins de 40 Mo (hors encodeur OpenH264 téléchargé). La limite était de 30 Mo ; l'utilisateur l'a portée à 40 Mo le 2026-11-13 pour les polices du texte et les équations (`docs/questions.md` Q20).
 
 ## 9. Licence et vie privée
 

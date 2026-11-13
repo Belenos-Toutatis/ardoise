@@ -34,7 +34,7 @@ Commands:
                    table (--write puts it in docs/performance.md; run `cargo xtask check` first)";
 
 /// Maximum accepted size of the release executable, in bytes.
-const MAX_EXE_BYTES: u64 = 30 * 1024 * 1024;
+const MAX_EXE_BYTES: u64 = 40 * 1024 * 1024;
 /// Time allowed for `ardoise.exe --self-test`.
 const SELFTEST_TIMEOUT: Duration = Duration::from_secs(60);
 /// npm's launcher: a `.cmd` script on Windows, a plain program elsewhere (cloud sessions run Linux).
@@ -313,7 +313,7 @@ fn selftest() -> ExitCode {
         size as f64 / (1024.0 * 1024.0)
     );
     if size >= MAX_EXE_BYTES {
-        return fail("executable is 30 MB or larger");
+        return fail("executable is 40 MB or larger");
     }
 
     let mut child = match Command::new(&exe)

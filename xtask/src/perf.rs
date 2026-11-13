@@ -45,8 +45,8 @@ const EDITOR_PROJECTION_LATENCY_MS: f64 = 30.0;
 const EDITOR_PROJECTION_ACCEPTED_MS: f64 = 50.0;
 /// SPEC §8: MP4 1080p of a 2-minute replay in under 2 minutes.
 const EXPORT_SECONDS: f64 = 120.0;
-/// SPEC §8: executable under 30 MB (the same bound as `cargo xtask selftest`).
-const MAX_EXE_BYTES: u64 = 30 * 1024 * 1024;
+/// SPEC §8: executable under 40 MB (the same bound as `cargo xtask selftest`).
+const MAX_EXE_BYTES: u64 = 40 * 1024 * 1024;
 
 const PARTS: [&str; 9] = [
     "start",
@@ -781,8 +781,8 @@ fn build_rows(m: &Measures, lang: Lang) -> Vec<Row> {
     if let Some(bytes) = m.exe_bytes {
         rows.push(Row {
             target: t(
-                "Executable size (< 30 MB)",
-                "Taille de l'exécutable (< 30 Mo)",
+                "Executable size (< 40 MB)",
+                "Taille de l'exécutable (< 40 Mo)",
             ),
             measured: format!(
                 "{} {}",
