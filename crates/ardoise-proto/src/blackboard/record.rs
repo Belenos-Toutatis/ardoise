@@ -127,6 +127,52 @@ pub fn decode_records(bytes: &[u8]) -> DecodedRecords {
     }
 }
 
+/// What a received page is made of, in counts only ([`check_page`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PageShape {
+    /// Whole records.
+    pub records: usize,
+    /// Whole records whose status is not `a1`, `a0` or `c0`.
+    pub unknown_status: usize,
+    /// Bytes after the last whole record.
+    pub trailing: usize,
+}
+
+impl PageShape {
+    /// Whole records of a known status only, as every page of the captures is (research note
+    /// §3: every size a multiple of 7; statuses `a1`, `a0`, `c0`). Since x, y and pressure never
+    /// reach `a0` in their high byte (largest values seen: `4f`, `69`, `07`), a stream cut or
+    /// joined at another offset than a multiple of 7 fails this check with near certainty.
+    pub fn is_whole(&self) -> bool {
+        self.unknown_status == 0 && self.trailing == 0
+    }
+}
+
+impl std::fmt::Display for PageShape {
+    /// Counts only, never the bytes (a page is the user's handwriting).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} records, {} of an unknown status, {} bytes of a partial record",
+            self.records, self.unknown_status, self.trailing
+        )
+    }
+}
+
+/// The shape of a page's bytes: is it whole records of a known status? A page is accepted
+/// (kept, then deleted from the tablet) only when [`PageShape::is_whole`].
+pub fn check_page(bytes: &[u8]) -> PageShape {
+    let (records, rest) = bytes.as_chunks::<RECORD_LEN>();
+    PageShape {
+        records: records.len(),
+        unknown_status: records
+            .iter()
+            .filter(|record| ![TOUCH, HOVER, OUT].contains(&record[0]))
+            .count(),
+        trailing: rest.len(),
+    }
+}
+
 /// The bytes of `records`, as a page stores them.
 pub fn encode_records(records: &[Record]) -> Vec<u8> {
     records.iter().flat_map(Record::to_bytes).collect()
@@ -247,6 +293,39 @@ mod tests {
             y,
             pressure,
         }
+    }
+
+    #[test]
+    fn a_page_is_whole_records_of_a_known_status_or_refused() {
+        let page = encode_records(&[
+            rec(RecordStatus::Hover, 0x4f00, 0x6900, 0),
+            rec(RecordStatus::Touch, 20_401, 27_067, 2047),
+            rec(RecordStatus::Out, 1, 2, 0),
+        ]);
+        let shape = check_page(&page);
+        assert!(shape.is_whole());
+        assert_eq!(shape.records, 3);
+        assert!(
+            check_page(&[]).is_whole(),
+            "an empty page is whole (0 records)"
+        );
+        // A stream joined at another offset than a multiple of 7: misaligned statuses.
+        for cut in 1..RECORD_LEN {
+            let mut rotated = page[cut..].to_vec();
+            rotated.extend_from_slice(&page[..cut]);
+            assert!(!check_page(&rotated).is_whole(), "rotation by {cut}");
+        }
+        let short = check_page(&page[..20]);
+        assert_eq!((shape.records, short.records, short.trailing), (3, 2, 6));
+        assert!(!short.is_whole());
+        let mut unknown = page.clone();
+        unknown[7] = 0xb7;
+        assert_eq!(check_page(&unknown).unknown_status, 1);
+        // Counts only in the text.
+        assert_eq!(
+            check_page(&unknown).to_string(),
+            "3 records, 1 of an unknown status, 0 bytes of a partial record"
+        );
     }
 
     #[test]

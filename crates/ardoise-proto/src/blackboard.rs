@@ -24,7 +24,8 @@ pub mod record;
 use std::fmt;
 
 pub use record::{
-    DecodedPage, PageStroke, Record, RecordStatus, TimedPoint, decode_page, decode_records,
+    DecodedPage, PageShape, PageStroke, Record, RecordStatus, TimedPoint, check_page, decode_page,
+    decode_records,
 };
 
 /// Group of the device commands (battery, memory, clock).
