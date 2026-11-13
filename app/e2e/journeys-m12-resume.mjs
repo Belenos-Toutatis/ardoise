@@ -739,6 +739,7 @@ export const resumeJourneys = [
 
       await check('la tablette est tenue en portrait, bouton à gauche (réglage de la tablette)', async () => {
         await app.click(STATUS);
+        await app.click('.tablet-panel [role="tab"][data-tab="settings"]');
         await app.waitFor(`document.querySelectorAll('.tablet-panel input[data-option="orientation"]').length === 4`, 'the positions');
         await app.click('.tablet-panel input[data-option="orientation"][value="portraitLeft"]');
         await app.waitFor(`document.querySelector('.tablet-panel input[data-option="orientation"][value="portraitLeft"]').checked`, 'the setting');

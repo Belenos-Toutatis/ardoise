@@ -19,6 +19,7 @@ import { UNHANDLED, fileName, freshStamp, mockLibrary, notifyLibraryChanged } fr
 import { failure, freePath, mockLibraryInvoke } from './mock-library';
 import type { Note, Stroke, TabletInfo } from './note';
 import { setMockLiveOrientation, setMockLiveTablet } from './mock-live';
+import { DEFAULT_BOARD_POSITION, isBoardPosition } from './board-position';
 import { isOrientation, pageSizeFor, quarterTurns, turnStrokes, type Orientation } from './orientation';
 import type {
   Connection,
@@ -70,7 +71,13 @@ const DAY_MS = 86_400_000;
 /** Connections in which the status names the tablet it is about (`active`). */
 const LINKED: ReadonlySet<Connection> = new Set<Connection>(['connecting', 'connected', 'syncing', 'live']);
 
-const DEFAULT_OPTIONS: TabletOptions = { autoSync: true, deleteAfterImport: true, orientation: 'landscape', button: 'newPage' };
+const DEFAULT_OPTIONS: TabletOptions = {
+  autoSync: true,
+  deleteAfterImport: true,
+  orientation: 'landscape',
+  boardPosition: DEFAULT_BOARD_POSITION,
+  button: 'newPage',
+};
 
 interface Sim {
   status: TabletStatus;
@@ -716,7 +723,11 @@ export function mockTabletInvoke(command: string, args: Record<string, unknown>)
     case 'tablet_set_options': {
       const s = getSim();
       const options = args.options as TabletOptions;
-      if (!isOrientation(options.orientation) || !['newPage', 'newLayer'].includes(options.button)) {
+      if (
+        !isOrientation(options.orientation) ||
+        !isBoardPosition(options.boardPosition) ||
+        !['newPage', 'newLayer'].includes(options.button)
+      ) {
         failure('unexpected', 'invalid options');
       }
       update(s, { options: { ...options } });

@@ -351,6 +351,10 @@ export const api = {
   tabletRename: (name: string) => call<TabletStatus>('tablet_rename', { name }),
   /** Sets the tablet clock; returns the drift left in seconds. */
   tabletSetTime: () => call<number>('tablet_set_time'),
+  /**
+   * Saves the options (`[tablet]`), all of them at once: the Slate's `orientation` and `button`, the blackboard's
+   * `boardPosition` (docs/design/blackboard.md §9), and the two that both tablets share.
+   */
   tabletSetOptions: (options: TabletOptions) => call<TabletStatus>('tablet_set_options', { options }),
   /** The live window's quick switch: how the tablet is held, applied at once to the live page. */
   tabletSetOrientation: (orientation: Orientation) => call<void>('tablet_set_orientation', { orientation }),

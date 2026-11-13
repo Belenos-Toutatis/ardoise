@@ -7,7 +7,7 @@ import { mockLibrary, resetMockLibrary } from './mock-data';
 import { mockTablet, resetMockTablet } from './mock-tablet';
 import type { TabletOptions, TabletStatus } from './tablet';
 
-const OPTIONS: TabletOptions = { autoSync: true, deleteAfterImport: true, orientation: 'landscape', button: 'newPage' };
+const OPTIONS: TabletOptions = { autoSync: true, deleteAfterImport: true, orientation: 'landscape', boardPosition: 'buttonsBottom', button: 'newPage' };
 
 beforeEach(() => {
   vi.useFakeTimers();

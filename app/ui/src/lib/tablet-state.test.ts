@@ -5,7 +5,7 @@ import { setLocale } from './i18n.svelte';
 import { resetMockLibrary } from './mock-data';
 import { mockTablet, mockTabletPatch, resetMockTablet } from './mock-tablet';
 import type { TabletEvent, TabletOptions, TabletStatus } from './tablet';
-import { TabletState, isBusy, sizeInMillimetres, validTabletName } from './tablet-state.svelte';
+import { TabletState, isBusy, pagesOnTablet, sizeInMillimetres, validTabletName } from './tablet-state.svelte';
 
 let state: TabletState;
 
@@ -58,6 +58,25 @@ describe('helpers', () => {
     expect(isBusy('registering')).toBe(true);
     expect(isBusy('connected')).toBe(false);
     expect(isBusy('searching')).toBe(false);
+  });
+
+  it('counts the pages that wait on the connected tablet, and nothing in the other cases', () => {
+    const status = (change: Partial<TabletStatus>, device: Partial<NonNullable<TabletStatus['device']>> | null = {}) =>
+      ({
+        connection: 'connected',
+        active: 'slate',
+        device: device === null ? null : { kind: 'slate', storedPages: 3, ...device },
+        ...change,
+      }) as unknown as TabletStatus;
+    expect(pagesOnTablet(null)).toBe(0);
+    expect(pagesOnTablet(status({}))).toBe(3);
+    expect(pagesOnTablet(status({ connection: 'syncing' }))).toBe(3);
+    // Not read yet, searching, live mode (the number is stale), or the last reading is of the other tablet.
+    expect(pagesOnTablet(status({}, null))).toBe(0);
+    expect(pagesOnTablet(status({ connection: 'searching', active: null }))).toBe(0);
+    expect(pagesOnTablet(status({ connection: 'live' }))).toBe(0);
+    expect(pagesOnTablet(status({ active: 'blackboard' }))).toBe(0);
+    expect(pagesOnTablet(status({}, { storedPages: 0 }))).toBe(0);
   });
 });
 
@@ -195,7 +214,7 @@ describe('tablet state: actions', () => {
     // Shown before the service answered.
     expect(state.status?.options.deleteAfterImport).toBe(false);
     expect(await done).toBe(true);
-    expect(save).toHaveBeenCalledWith({ autoSync: true, deleteAfterImport: false, orientation: 'landscape', button: 'newPage' });
+    expect(save).toHaveBeenCalledWith({ autoSync: true, deleteAfterImport: false, orientation: 'landscape', boardPosition: 'buttonsBottom', button: 'newPage' });
     expect((await api.tabletStatus()).options.deleteAfterImport).toBe(false);
   });
 
@@ -209,9 +228,23 @@ describe('tablet state: actions', () => {
     expect(state.actionError).toContain('Problème avec la tablette : disk full');
   });
 
+  it('saves the position of the blackboard with the other options, and keeps that of the Slate', async () => {
+    await started();
+    const save = vi.spyOn(api, 'tabletSetOptions');
+    expect(await state.setOptions({ boardPosition: 'buttonsLeft' })).toBe(true);
+    expect(save).toHaveBeenCalledWith({
+      autoSync: true,
+      deleteAfterImport: true,
+      orientation: 'landscape',
+      boardPosition: 'buttonsLeft',
+      button: 'newPage',
+    });
+    expect((await api.tabletStatus()).options).toMatchObject({ boardPosition: 'buttonsLeft', orientation: 'landscape' });
+  });
+
   it('keeps every other option when one changes', async () => {
     await started();
-    const odd: TabletOptions = { autoSync: false, deleteAfterImport: true, orientation: 'landscapeFlipped', button: 'newLayer' };
+    const odd: TabletOptions = { autoSync: false, deleteAfterImport: true, orientation: 'landscapeFlipped', boardPosition: 'buttonsBottom', button: 'newLayer' };
     await state.setOptions(odd);
     await state.setOptions({ autoSync: true });
     expect(state.status?.options).toEqual({ ...odd, autoSync: true });

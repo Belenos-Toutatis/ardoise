@@ -67,7 +67,7 @@ afterEach(() => {
 /** Knows the blackboard (and the Slate unless `boardOnly`), and connected to it when `connect`. */
 async function knowBoard({ boardOnly = false, connect = true } = {}) {
   if (boardOnly) await api.forgetTablet();
-  await api.tabletSetOptions({ autoSync: false, deleteAfterImport: true, orientation: 'landscape', button: 'newPage' });
+  await api.tabletSetOptions({ autoSync: false, deleteAfterImport: true, orientation: 'landscape', boardPosition: 'buttonsBottom', button: 'newPage' });
   tablet.start();
   await api.tabletFindBlackboards();
   await vi.waitFor(() => expect(tablet.status?.boardSearch?.found.length).toBe(1));

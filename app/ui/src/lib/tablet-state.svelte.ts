@@ -60,6 +60,18 @@ export function blackboardNeedsConfirmation(status: TabletStatus | null): boolea
   return status !== null && status.active === 'blackboard' && !status.options.deleteAfterImport;
 }
 
+/**
+ * Pages that wait on the connected tablet: what it reported at its last reading, while it is connected or syncing (0
+ * when no tablet is linked, in live mode, or when the last reading is of another tablet). The number on the sync button
+ * and on the badge of the panel's « Use » tab.
+ */
+export function pagesOnTablet(status: TabletStatus | null): number {
+  if (status === null || status.device === null) return 0;
+  if (status.connection !== 'connected' && status.connection !== 'syncing') return 0;
+  if (status.active !== null && status.device.kind !== status.active) return 0;
+  return status.device.storedPages;
+}
+
 export class TabletState {
   /** Last status received; null until the first answer of the service. */
   status = $state<TabletStatus | null>(null);

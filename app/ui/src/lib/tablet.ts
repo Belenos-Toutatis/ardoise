@@ -26,6 +26,12 @@ import type { Orientation } from './orientation';
 
 export type { Orientation };
 
+/**
+ * How the Xiaomi blackboard is held: where its two buttons (erase, store) are. Held upright, they are at the bottom
+ * (the default). Contract: docs/design/blackboard.md §9.
+ */
+export type BoardPosition = 'buttonsBottom' | 'buttonsTop' | 'buttonsRight' | 'buttonsLeft';
+
 /** What the tablet's button does in live mode. */
 export type LiveButton = 'newPage' | 'newLayer';
 
@@ -34,8 +40,10 @@ export interface TabletOptions {
   autoSync: boolean;
   /** Delete each page from the tablet once its note is written and checked (on by default). */
   deleteAfterImport: boolean;
-  /** How the tablet is held (four positions; the live window switches it too). */
+  /** How the Slate is held (four positions; the live window switches it too). The blackboard's is `boardPosition`. */
   orientation: Orientation;
+  /** How the blackboard is held (four positions). Absent from an older Rust side: read it with `boardPositionOf`. */
+  boardPosition: BoardPosition;
   button: LiveButton;
 }
 

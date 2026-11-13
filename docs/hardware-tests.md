@@ -130,12 +130,12 @@ Ce test vérifie le travail courant : la tablette se connecte toute seule, ses p
 2. **Sur la tablette, avec une feuille posée dessus, dessiner 3 pages** reconnaissables (par exemple : un carré et un cercle ; le mot `Ardoise` ; trois traits horizontaux de pression différente). **Appuyer brièvement sur le bouton après chaque page** pour l'enregistrer dans la mémoire de la tablette.
    > Un appui bref seulement : maintenu 6 secondes, le bouton remettrait la tablette en mode enregistrement.
 3. Appuyer brièvement sur le bouton une dernière fois pour réveiller la tablette. Observer le bloc **Tablette** : « Recherche de la tablette… », puis « Connexion… », puis « Connectée ». **Noter le temps** entre l'appui et « Connectée ».
-4. Comme la synchro automatique est activée et que des pages attendent, la synchronisation démarre seule : barre de progression dans la barre latérale et dans le panneau (« Page 1 sur 3 »…). Si elle ne démarre pas au bout d'une minute, cliquer sur **Synchroniser maintenant** et le noter.
+4. Comme la synchro automatique est activée et que des pages attendent, la synchronisation démarre seule : barre de progression dans la barre latérale et dans le panneau (« Page 1 sur 3 »…). Si elle ne démarre pas au bout d'une minute, cliquer sur **Synchroniser** et le noter.
 5. **Vérifier** à la fin :
    - le panneau indique « 3 notes enregistrées. 3 pages effacées de la tablette. » et **Pages en mémoire : 0** ;
    - la grille de la bibliothèque contient **3 nouvelles notes** (sans titre, avec la date du jour) : les ouvrir et vérifier que les dessins sont reconnaissables, **à l'endroit**, et que la pression se voit (traits de plus en plus épais) ;
-   - un nouveau clic sur **Synchroniser maintenant** répond « Aucune nouvelle page. »
-6. **Annulation** : dessiner 3 nouvelles pages (bouton après chacune), reconnecter la tablette, et cliquer sur **Annuler** pendant la synchro. Les pages déjà reçues restent des notes, les autres restent sur la tablette (**Pages en mémoire** le montre) ; un clic sur **Synchroniser maintenant** récupère le reste, sans doublon.
+   - un nouveau clic sur **Synchroniser** répond « Aucune nouvelle page. »
+6. **Annulation** : dessiner 3 nouvelles pages (bouton après chacune), reconnecter la tablette, et cliquer sur **Annuler** pendant la synchro. Les pages déjà reçues restent des notes, les autres restent sur la tablette (**Pages en mémoire** le montre) ; un clic sur **Synchroniser** récupère le reste, sans doublon.
 7. **Sans effacement** : la tablette ne livre que sa page **la plus ancienne** ; la suivante n'est accessible qu'une fois la première effacée. Sans l'option d'effacement, **une seule page est donc lisible à la fois**. À vérifier :
    - décocher **Effacer de la tablette après import** : l'astuce sous l'option doit le dire (« La tablette ne livre que sa page la plus ancienne… ») ;
    - dessiner **2 pages** (bouton après chacune), reconnecter la tablette, synchroniser : **une seule** note apparaît (« 1 note enregistrée. »), **Pages en mémoire : 2**, et le panneau affiche le message « 2 pages attendent sur la tablette : seule la plus ancienne peut être lue tant qu'elle n'est pas effacée. Activez « Effacer de la tablette après import » pour les récupérer. » ;
@@ -202,7 +202,7 @@ Dans le panneau, section **Réglages de la tablette** (la tablette doit être «
 Le service de la tablette (connexion automatique, synchronisation, mode direct) tourne en permanence. Il est **mis en pause** pendant le test réel (**Tester la tablette…**, en bas du panneau) pour ne pas se disputer la liaison Bluetooth, puis **reprend** à la fin du test.
 
 1. Tablette « Connectée » et service actif, cliquer sur **Tester la tablette…** et lancer le test. Pendant le test, ne pas demander de synchronisation ni de mode direct. Noter si le bloc **Tablette** de la barre latérale change d'état.
-2. Terminer le test (ou **Arrêter le test**). Sans relancer Ardoise, le service doit **reprendre** : le bloc **Tablette** repasse par « Recherche de la tablette… » puis « Connectée » (au besoin après un appui bref sur le bouton), et **Synchroniser maintenant** fonctionne de nouveau. Noter le temps de reprise, ou si la tablette reste injoignable jusqu'au redémarrage d'Ardoise.
+2. Terminer le test (ou **Arrêter le test**). Sans relancer Ardoise, le service doit **reprendre** : le bloc **Tablette** repasse par « Recherche de la tablette… » puis « Connectée » (au besoin après un appui bref sur le bouton), et **Synchroniser** fonctionne de nouveau. Noter le temps de reprise, ou si la tablette reste injoignable jusqu'au redémarrage d'Ardoise.
 
 ### Ce qui revient par Nextcloud
 
@@ -742,10 +742,10 @@ Ce test vérifie SPEC §4.1 « Tablette Xiaomi » et §4.2 « Avec la tablette X
 #### C. Écrire une page, la récupérer
 
 1. Sur la tablette, **écrire une page d'essai** : quelques mots, un cercle, un trait appuyé et un trait léger, et **une ligne droite de 10 cm** repérée à la règle. Appuyer sur le **bouton d'enregistrement** de la tablette (celui qui range la page).
-2. Dans Ardoise, **Synchroniser maintenant** (avec **Effacer de la tablette après import** coché, la synchronisation part toute seule). Noter le temps du transfert et si la progression (**Page 1 sur …**) est juste.
+2. Dans Ardoise, **Synchroniser** (avec **Effacer de la tablette après import** coché, la synchronisation part toute seule). Noter le temps du transfert et si la progression (**Page 1 sur …**) est juste.
 3. Ouvrir la note : l'écriture est-elle fidèle (forme, épaisseur, pression) ? La **date** est-elle celle de l'enregistrement sur la tablette ? **Mesurer la ligne de 10 cm** dans la note (l'unité : exporter en PDF et mesurer sur papier ou à l'écran, ou comparer avec une règle posée sur l'écran) : noter la longueur obtenue.
 4. Le nombre de **pages en mémoire** est-il retombé à 0 ? **Ouvrir Mi Home** (après avoir remis le Bluetooth du téléphone) : la page a-t-elle bien **disparu de la tablette** ?
-5. *Option désactivée* : décocher **Effacer de la tablette après import**, écrire et enregistrer deux autres pages, reconnecter la tablette (l'éteindre et la rallumer). Le panneau dit-il « 2 pages attendent sur la tablette Xiaomi » et **rien** n'est-il importé tout seul ? **Synchroniser maintenant** demande-t-il de confirmer (**Synchroniser et effacer**) ? Les deux pages sont-elles importées puis effacées ? Recocher l'option.
+5. *Option désactivée* : décocher **Effacer de la tablette après import**, écrire et enregistrer deux autres pages, reconnecter la tablette (l'éteindre et la rallumer). Le panneau dit-il « 2 pages attendent sur la tablette Xiaomi » et **rien** n'est-il importé tout seul ? **Synchroniser** demande-t-il de confirmer (**Synchroniser et effacer**) ? Les deux pages sont-elles importées puis effacées ? Recocher l'option.
 
 #### C ter. Une page enregistrée pendant qu'Ardoise est connecté
 
@@ -762,7 +762,7 @@ Mesuré le 2026-11-13 : la tablette décrit autrement (12 octets au lieu de 8) u
 3. **Enregistrer une page avec le bouton** de la tablette pendant le direct : le direct continue-t-il sans coupure ni trait parasite ? Terminer le direct : la page enregistrée est-elle importée ensuite (doublon de la note du direct)?
 4. Relancer le direct, écrire quelques mots, puis **appuyer sur le bouton d'effacement de l'écran** de la tablette. Attendu (SPEC §4.2 ; la tablette signale l'effacement pendant le direct, mesuré le 2026-11-13) : le direct passe à une **nouvelle page**, et ce qu'on écrit ensuite s'y trace ; un second appui sans avoir écrit ne crée pas de page vide. Noter tout écart (rien ? trait parasite ? coupure ?), à chaque appui.
 5. **Couper puis rétablir le Bluetooth du PC** (ou s'éloigner de la tablette) pendant le direct : l'état dit-il **Reconnexion…**, et le direct reprend-il tout seul, sur la même tablette ? Noter le temps.
-6. **Annuler une synchronisation au milieu d'une grande page** (écrire une page très chargée, enregistrer, lancer **Synchroniser maintenant**, puis **Annuler** pendant le transfert), puis lancer le mode direct : **aucun trait parasite** ne doit apparaître. Noter le temps que prend la liaison à se rétablir (Ardoise ferme la liaison et la rouvre : c'est voulu).
+6. **Annuler une synchronisation au milieu d'une grande page** (écrire une page très chargée, enregistrer, lancer **Synchroniser**, puis **Annuler** pendant le transfert), puis lancer le mode direct : **aucun trait parasite** ne doit apparaître. Noter le temps que prend la liaison à se rétablir (Ardoise ferme la liaison et la rouvre : c'est voulu).
 
 #### C bis. Les cas limites du transfert
 

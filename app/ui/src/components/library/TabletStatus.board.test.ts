@@ -55,7 +55,7 @@ async function render(locale: 'fr' | 'en' = 'fr') {
 
 describe('sidebar tablet block with the blackboard', () => {
   it('shows both names while waiting, then the one that is connected, with its battery', async () => {
-    api.tabletSetOptions({ autoSync: false, deleteAfterImport: true, orientation: 'landscape', button: 'newPage' });
+    api.tabletSetOptions({ autoSync: false, deleteAfterImport: true, orientation: 'landscape', boardPosition: 'buttonsBottom', button: 'newPage' });
     const root = await render();
     await api.tabletFindBlackboards();
     await beat(1);

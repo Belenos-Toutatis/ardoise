@@ -409,6 +409,26 @@
     "title": "Tablet",
     "loading": "Reading the tablet status…",
     "unavailableStatus": "The tablet status is not available.",
+    "tablist": "Tablet panel sections",
+    "tabs": {
+      "use": "Use",
+      "settings": "Settings",
+      "tablets": "Tablets",
+      "waiting": {
+        "one": "{count} page waiting on the tablet",
+        "other": "{count} pages waiting on the tablet"
+      }
+    },
+    "use": {
+      "pages": {
+        "one": "{count} page in memory",
+        "other": "{count} pages in memory"
+      }
+    },
+    "settings": {
+      "choose": "Tablet to set up",
+      "none": "No tablet is known: add one in the \"Tablets\" tab."
+    },
     "simulated": "Simulated tablet: no real tablet is being used.",
     "simulatedButton": "Press the simulated tablet's button",
     "state": {
@@ -449,7 +469,11 @@
     },
     "sync": {
       "title": "Sync",
-      "now": "Sync now",
+      "now": "Sync",
+      "waiting": {
+        "one": "{count} page",
+        "other": "{count} pages"
+      },
       "cancel": "Cancel",
       "progress": "Page {current} of {total}",
       "progressLabel": "Sync progress",
@@ -466,9 +490,9 @@
       "boardTitle": "The pages will be deleted from the tablet",
       "boardConfirm": "The Xiaomi tablet hands over only its oldest page: to reach the next one, Ardoise has to delete each page from the tablet once its note is written and checked. Sync now and delete the pages?",
       "boardConfirmYes": "Sync and delete",
-      "boardWaitingOne": "1 page is waiting on the Xiaomi tablet: it is imported only on request, with \"Sync now\", and will be deleted from the tablet once its note is written.",
-      "boardWaitingMany": "{count} pages are waiting on the Xiaomi tablet: they are imported only on request, with \"Sync now\", and will be deleted from the tablet once their notes are written.",
-      "boardOnRequest": "The Xiaomi tablet imports its pages only on request: switch it on, then click \"Sync now\" once it is connected."
+      "boardWaitingOne": "1 page is waiting on the Xiaomi tablet: it is imported only on request, with \"Sync\", and will be deleted from the tablet once its note is written.",
+      "boardWaitingMany": "{count} pages are waiting on the Xiaomi tablet: they are imported only on request, with \"Sync\", and will be deleted from the tablet once their notes are written.",
+      "boardOnRequest": "The Xiaomi tablet imports its pages only on request: switch it on, then click \"Sync\" once it is connected."
     },
     "live": {
       "open": "Live mode",
@@ -485,7 +509,17 @@
       "buttonNewLayer": "New layer",
       "orientation": "Position of the tablet",
       "orientationHint": "Choose how you hold the tablet: Ardoise turns what you draw so that it appears upright. Upside down suits left-handed users; in portrait, the notes are portrait pages. The button is the one next to the tablet's light.",
-      "deleteAfterImportBoard": "Xiaomi tablet: without this option, its pages are imported only on request (\"Sync now\"), after a confirmation, and they are deleted from the tablet all the same: it is the only way to reach the next page."
+      "deleteAfterImportBoard": "Xiaomi tablet: without this option, its pages are imported only on request (\"Sync\"), after a confirmation, and they are deleted from the tablet all the same: it is the only way to reach the next page.",
+      "shared": "These two settings apply to all your tablets.",
+      "boardPosition": "Position of the tablet",
+      "boardPositionHint": "Ardoise turns what you write so that it appears upright.",
+      "more": "More details"
+    },
+    "boardPosition": {
+      "buttonsBottom": "Upright, buttons at the bottom",
+      "buttonsTop": "Upright, buttons at the top",
+      "buttonsRight": "Wide, buttons on the right",
+      "buttonsLeft": "Wide, buttons on the left"
     },
     "orientation": {
       "landscape": "Landscape, button at the bottom",
@@ -550,6 +584,7 @@
     "known": {
       "title": "Tablets",
       "notConnected": "Not connected",
+      "add": "Add a tablet",
       "forgetLabel": "Forget the tablet “{name}”"
     },
     "board": {
