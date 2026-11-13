@@ -314,3 +314,16 @@ L'utilisateur a demandé ce qu'on pourrait ajouter à Ardoise, puis a tranché c
 - *Ordre du classeur* : proposé seulement quand un classeur est affiché ; ailleurs, tri par date (la plus récente d'abord) ; pendant une recherche, l'ordre est montré mais les cartes ne se déplacent pas. Une carte ne se déplace qu'entre les notes de son propre classeur (dans la vue d'un classeur parent, déposer une note d'un sous-classeur à côté d'une note du classeur parent est refusé : pour changer de classeur, on la dépose sur la barre latérale). Fichier `_ardoise-order.json` dans le dossier du classeur.
 - *Exporter ou imprimer un classeur avec ses sous-classeurs* : case décochée au départ (le choix « option » de l'utilisateur), absente d'un classeur sans sous-classeur.
 - *Impression, notes par feuille* : la découpe en cases est faite par Ardoise (le pilote de l'imprimante ne peut pas le faire pour un travail dessiné par Ardoise) ; la fenêtre de Windows compte les feuilles.
+
+**Points laissés au développeur pour le point 6 (outil Texte), à confirmer** (conception : `docs/design/page-objects.md` §5) :
+
+- *Pas de retour à la ligne automatique* : seule la touche Entrée commence une ligne, le cadre s'élargit avec le texte. Ainsi le texte se place à l'identique sur tous les ordinateurs et dans tous les exports, et redimensionner un cadre l'agrandit ou le rapetisse, comme les traits.
+- *Ni crénage ni ligatures* (« fi » reste deux lettres) : c'est ce qui permet au curseur de la saisie de tomber exactement entre les lettres dessinées.
+- *Tailles* : Petit 4 mm, Moyen 6 mm (au départ), Grand 9 mm (hauteur du corps de la police). Un texte redimensionné avec la sélection prend une taille quelconque ; un clic sur une taille la lui rend.
+- *Polices complètes, non réduites* : les fichiers officiels (1,7 Mo en tout) ; les réduire aux lettres utiles obligerait à les renommer (licences GUST et SIL). Les lettres grecques absentes de Latin Modern viennent d'Andika, qui n'a que celles de la linguistique (α, β, γ, δ, θ, λ, μ, π, ρ, σ, φ, χ, ω, Δ, Ω… mais ni ε, η, ν, τ ni Σ).
+- *La gomme n'efface pas un texte* (on le sélectionne et on le supprime) ; après la saisie, le cadre reste sélectionné, pour que les couleurs et les options s'y appliquent tout de suite.
+- *« Revenir à l'original » d'une page de la tablette* enlève les textes tapés depuis (la page de la tablette n'en a pas).
+- *Recherche* : les textes des calques masqués ne sont pas cherchés, comme l'écriture manuscrite des calques masqués.
+- *Partage sur le réseau* : seuls les textes des calques affichés sont envoyés aux écrans.
+- *« Effacer la page » pendant le direct sur une feuille reprise* : les textes restent (ils font partie de la feuille, comme son papier et son image).
+- *PDF* : le texte est dessiné en contours (identique partout) et doublé d'un texte invisible pour la recherche et le copier-coller ; les caractères hors de l'alphabet latin d'Europe de l'Ouest (grec, symboles) sont dessinés mais pas cherchables.
