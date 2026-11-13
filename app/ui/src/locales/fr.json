@@ -910,8 +910,22 @@
       "label": "Outil",
       "select": "Sélection",
       "pen": "Stylo",
+      "line": "Ligne",
+      "rectangle": "Rectangle",
+      "ellipse": "Ellipse",
       "eraser": "Gomme",
       "pan": "Déplacer la page"
+    },
+    "shapeTools": {
+      "label": "Options des formes",
+      "regular": "Forme régulière",
+      "regularHint": "Carré, cercle ; une ligne se cale sur l'horizontale, la verticale ou une diagonale à 45°. La touche Maj inverse ce réglage le temps d'un tracé.",
+      "centre": "Depuis le centre",
+      "centreHint": "Le premier point est le centre de la forme (une ligne grandit des deux côtés). La touche Alt inverse ce réglage le temps d'un tracé.",
+      "snap": "Aimanter au quadrillage",
+      "snapHint": "Les points se calent sur le fond de la page : intersections du quadrillé, du millimétré et du pointillé ; lignes du ligné ; lignes et grands carreaux du Seyès.",
+      "snapDisabled": "Ce fond n'a pas de lignes sur lesquelles aimanter : choisissez un fond ligné, Seyès, quadrillé, millimétré ou pointillé (onglet Page).",
+      "snapNone": "Pas de quadrillage sur ce fond"
     },
     "eraser": {
       "label": "Mode de la gomme",

@@ -37,7 +37,7 @@ use ardoise_core::note::{Note, PageSize};
 use ardoise_ink::Stroke;
 use tiny_skia::Pixmap;
 
-pub use background::{Ruling, paper_color, ruling};
+pub use background::{Lattice, Ruling, SnapGrid, paper_color, ruling, snap_grid};
 pub use canvas::{Backdrop, PageCanvas, PixelRect, PreparedStroke, image_size};
 pub use clipboard::{ClipboardImage, clipboard_image, clipboard_image_at};
 pub use labels::{LABEL_HEIGHT_PX, LabelSpot, draw_labels};

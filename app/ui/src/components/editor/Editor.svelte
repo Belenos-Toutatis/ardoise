@@ -57,7 +57,8 @@
    *
    * Escape acts by steps, the smallest first (`lib/editor/escape.ts`, `onescape`): the gesture under way, then the panel
    * or the tool mode that is open, then the selection, then the note is saved and the editor goes back to the library
-   * (`leaveSaving`, which refuses while a narration is recorded).
+   * (`leaveSaving`, which refuses while a narration is recorded). The shape tools (`lib/editor/shape-tools.ts`) are the
+   * canvas's; the editor only gives it the snap grid of the page's template (`SnapGridWatch`).
    */
   import { tick, untrack } from 'svelte';
   import { api, errorMessage, onLibraryChanged, onSessionEnding, type AppState } from '../../lib/api';
@@ -73,6 +74,7 @@
   import type { Orientation } from '../../lib/editor/page-size';
   import { revertToOriginal } from '../../lib/editor/original';
   import { escapeStep } from '../../lib/editor/escape';
+  import { SnapGridWatch } from '../../lib/editor/shape-prefs.svelte';
   import { nextFrame, previewStraightening, straightenSelection, type StraightenPreview } from '../../lib/editor/shapes';
   import {
     DEFAULT_SHAPE_SETTINGS,
@@ -287,6 +289,13 @@
   let toolbar = $state<ReturnType<typeof Toolbar>>();
   /** The Fond tab, while it shows: Escape drops the question it may be asking (the PDF page, the orientation). */
   let backgroundSection = $state<ReturnType<typeof BackgroundImageSection>>();
+  /** The lines of the page's template the shape tools snap to (null: none, or not known yet). */
+  const snap = new SnapGridWatch();
+  $effect(() => {
+    const page = doc?.note.page;
+    const template = doc?.note.background.template;
+    if (page && template) untrack(() => snap.follow(page, template));
+  });
   /** Escape is saving the note to leave: a second press waits for it. */
   let escapeLeaving = false;
   /** What the video export dialog exports; null while it is closed. */
@@ -2284,6 +2293,7 @@
       onvideo={openVideo}
       onstraighten={straighten}
       {shapes}
+      snapAvailable={snap.grid !== null}
       shapesOpen={shapesPanel}
       shapesSelected={straightenPreview?.selected ?? doc.selection.length}
       shapesFound={straightenPreview?.groups.length ?? 0}
@@ -2315,6 +2325,7 @@
         oncropped={() => setMode('select')}
         onblocked={hiddenLayerNotice}
         straighten={straightenPreview}
+        snapGrid={snap.grid}
         split={split ? { preview, tracing: split.mode === 'zone' && !split.busy, zone: split.mode === 'zone' ? split.zone : null } : null}
         onzone={(polygon) => {
           if (split && split.mode === 'zone') {

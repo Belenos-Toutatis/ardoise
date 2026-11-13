@@ -1092,12 +1092,14 @@ without opening anything; `Enter` or `Space` opens the tab or collapses it.
 
 ### The tools
 
-The toolbar offers four tools (**Tool**):
+The toolbar offers these tools (**Tool**):
 
 - **Pen**: choose the **Ink** (**Ballpoint pen**, **Fountain pen**, **Felt-tip pen**, **Pencil**, **Brush**,
   **Highlighter**, **Chalk**), the **Colour** (**Black**, **Blue**, **Green**, **Purple**, **Red**, **Orange**, **Grey**,
   or **Choose another colour**; custom colours are remembered) and the **Width**. The stroke's width follows the pen's
   pressure. **Apply to the whole note:** **Colour**, **Ink** or **Width** changes all the strokes at once.
+- **Line**, **Rectangle**, **Ellipse**: clean shapes drawn with a drag (see **Drawing a line, a rectangle, an ellipse**,
+  below).
 - **Eraser**: **Whole strokes** or **Partial**, with its **Size**. It erases only on the chosen layer (see **Layers**).
 - **Select** (the lasso): draw around strokes of the chosen layer to select them; `Shift` + lasso adds, `Ctrl` + lasso removes. The
   **Selection** block, above the open tab of the side panel, offers **Copy**, **Cut**, **Paste**, **Duplicate**,
@@ -1114,6 +1116,32 @@ where digits need `Shift`: `Ctrl + à` and `Ctrl + é` are enough, without `Shif
 finger, then grabs the selection instead of drawing: put down inside the frame, it moves it; put down on a handle of the
 frame, it resizes it. This works with the **Pen** and **Eraser** tools: no need to go back to the **Select** tool.
 Outside the frame, the pen draws as usual, and `Esc` deselects.
+
+### Drawing a line, a rectangle, an ellipse
+
+The **Line**, **Rectangle** and **Ellipse** tools, next to the **Pen**, draw clean shapes: press (mouse, pen, or finger if
+**Draw with a finger** is on), drag, release. The shape shows as you drag; a simple click draws nothing; `Esc` during the
+drag drops it. The shape takes the chosen **Ink**, **Colour** and **Width** (at the width shown, whatever the pressure) and
+goes on the chosen layer.
+
+**Nothing is straightened unless you ask**: a line goes exactly from the first point to the last, a rectangle or an ellipse
+is inscribed in the box you drag. Three toggle buttons, under the toolbar while one of these tools is chosen, work by touch,
+pen or mouse, no keyboard needed:
+
+- **Regular shape**: a square, a circle; a line snaps to the nearest of horizontal, vertical or 45° diagonal. The `Shift`
+  key, held during a stroke, inverts this button for that stroke.
+- **From the centre**: the first point is the centre of the shape (a line grows both ways). The `Alt` key, held during a
+  stroke, inverts this button for that stroke.
+- **Snap to the grid**: the points you put down (the start and the end; for a rectangle or an ellipse, the corners of its
+  box) snap to the page's paper: the intersections of **Squared 5 mm**, **Millimetre** and **Dotted** paper; the rules of
+  **Ruled** paper (the horizontal only, the other way stays free); the rules and large squares of **Seyès** (not the thin
+  rules). The button is greyed out, with the reason, on paper without lines (plain, music). If the shape must stay regular and
+  the two ways do not have the same pitch (ruled paper), the regular shape wins.
+
+The three settings are kept while Ardoise is open, from one note to the next, and come back off at the next launch. A shape
+is an ordinary stroke: a rectangle or an ellipse is one closed stroke (the partial eraser can open it); the eraser, the
+lasso, **Undo**, the layers, the replay and every export treat it like any other stroke. These tools are not in live mode
+with a tablet.
 
 ### Straightening shapes
 
@@ -1701,6 +1729,7 @@ These shortcuts do nothing while you are typing in a text field, except those of
 | `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copy, cut, paste strokes |
 | `Delete` or `Backspace` | Delete the selection |
 | `Esc` | In steps, one press per step: drop the gesture under way; close the split, the replay, the crop or the **Straighten shapes** setting; deselect; save the note and go back to the library (never while a narration is being recorded) |
+| `Shift`, `Alt` (held while drawing a shape) | Invert **Regular shape** (`Shift`) or **From the centre** (`Alt`) for that stroke |
 | `Alt + ←`, `Alt + →` | **Previous page**, **Next page** (the note before, the note after in the library) |
 | `V`, `P`, `E`, `H` | Tools **Select**, **Pen**, **Eraser**, **Move the page** |
 | `Space` (held) | Move the page (unless a button has the focus: `Space` then works that button, a rail icon included) |

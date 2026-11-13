@@ -321,6 +321,7 @@ pub fn run() {
             notes::open_note,
             notes::save_note,
             notes::render_background,
+            notes::template_snap_grid,
             original::note_original,
             revision::revision_source,
             revision::note_picture,
