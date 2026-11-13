@@ -24,7 +24,7 @@ use ardoise_core::format::{FormatError, NoteFile};
 use ardoise_core::fsutil::write_atomic_new;
 use ardoise_core::library::{Library, LibraryError};
 use ardoise_core::note::{Background, BackgroundImage, Note, PageSize, Paper};
-use ardoise_core::settings::{LiveButton, Orientation};
+use ardoise_core::settings::{BoardPosition, LiveButton, Orientation};
 use ardoise_device::pages::oriented_size;
 use ardoise_device::service::{LiveInput, LiveSink, LiveState};
 use ardoise_media::replay::ReplayOptions;
@@ -1266,6 +1266,12 @@ impl LiveHub {
     #[cfg(test)]
     pub fn snapshot(&self) -> LiveSnapshot {
         self.shared.lock().session.snapshot()
+    }
+
+    /// The positions the blackboard may be set to now ([`LiveSession::board_positions`]): all
+    /// four unless the session that runs holds a page of the blackboard that keeps its shape.
+    pub fn board_positions(&self) -> Vec<BoardPosition> {
+        self.shared.lock().session.board_positions()
     }
 
     /// Several changes of the session under one hold of the lock (no pass of the saver between

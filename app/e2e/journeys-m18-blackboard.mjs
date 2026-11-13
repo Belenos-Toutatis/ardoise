@@ -166,18 +166,55 @@ export const blackboardJourneys = [
         await showTab(app, 'use');
       });
 
-      await check('mode direct : la page est en hauteur, sans choix de position, le tracé de la tablette arrive', async () => {
+      await check('mode direct : la page est en hauteur, les quatre boutons de position de la Xiaomi (pas ceux de la Bamboo), le tracé de la tablette arrive', async () => {
         await showTab(app, 'use');
         await app.waitFor(`document.querySelector(${j(`${PANEL} button[data-action="live"]:not([disabled])`)}) !== null`, 'the live button');
         await app.click(`${PANEL} button[data-action="live"]`);
         await app.waitFor(`document.querySelector('.live-view[data-state="live"]') !== null`, 'live mode', 30_000);
         await app.waitFor(`Number(${canvasData('strokes')}) > 0`, 'strokes on the live canvas', 20_000);
         await app.waitFor(`${canvasData('pageSize')} === '20500x27200'`, 'the portrait page of the blackboard');
-        if (await app.evaluate(`document.querySelector('[data-slot="orientation"]') !== null`)) {
-          throw new Error('the position switch is shown');
+        if (await app.evaluate(`document.querySelector('[data-slot="orientation"]') !== null || document.querySelector('.orientation-icon') !== null`)) {
+          throw new Error('the Slate position switch is shown for the blackboard');
         }
-        const note = await app.evaluate(`document.querySelector('[data-slot="xiaomi-note"]')?.textContent.trim()`);
-        if (note !== l('live.xiaomi.label')) throw new Error(`unexpected note "${note}"`);
+        const board = await app.evaluate(`(() => {
+          const group = document.querySelector('[data-slot="board-position"]');
+          const buttons = [...(group?.querySelectorAll('button') ?? [])];
+          return {
+            label: group?.getAttribute('aria-label'),
+            positions: buttons.map((b) => b.dataset.position).join(),
+            drawings: buttons.filter((b) => b.querySelector('svg.board-drawing')?.dataset.position === b.dataset.position).length,
+            pressed: buttons.filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.dataset.position).join(),
+          };
+        })()`);
+        if (board.label !== l('live.xiaomi.label')) throw new Error(`unexpected label "${board.label}"`);
+        if (board.positions !== 'buttonsBottom,buttonsTop,buttonsRight,buttonsLeft') throw new Error(`positions: ${board.positions}`);
+        if (board.drawings !== 4) throw new Error(`${board.drawings} drawings of the blackboard`);
+        if (board.pressed !== 'buttonsBottom') throw new Error(`pressed: ${board.pressed}`);
+      });
+
+      // Q19 (docs/design/blackboard.md §10, §11): the switch turns the page and its ink at once (a quarter turn swaps the
+      // page's shape) and saves the setting; back upright, as the next steps expect. The simulated hand keeps writing.
+      await check('mode direct : cliquer « boutons à gauche » tourne la page et ce qui y est écrit, et l’enregistre ; puis retour en hauteur', async () => {
+        const switchTo = (position) => app.click(`[data-slot="board-position"] button[data-position="${position}"]`);
+        const pressed = `document.querySelector('[data-slot="board-position"] button[aria-pressed="true"]')?.dataset.position`;
+        const saved = `window.__TAURI_INTERNALS__.invoke('tablet_status').then((status) => status.options.boardPosition)`;
+        const before = Number(await app.evaluate(canvasData('strokes')));
+        if (!(before > 0)) throw new Error('no ink to turn');
+        await switchTo('buttonsLeft');
+        await app.waitFor(`${canvasData('pageSize')} === '27200x20500'`, 'the page turned to landscape', 10_000);
+        await app.waitFor(`${pressed} === 'buttonsLeft'`, 'the position pressed');
+        const turned = Number(await app.evaluate(canvasData('strokes')));
+        if (turned < before) throw new Error(`${turned} strokes after the switch, ${before} before`);
+        await app.waitFor(`${saved}.then((position) => position === 'buttonsLeft')`, 'the position saved in the settings');
+        if (!(await app.evaluate(`document.querySelector('.live-view[data-state="live"]') !== null`))) {
+          throw new Error('live mode is no longer live');
+        }
+        await switchTo('buttonsBottom');
+        await app.waitFor(`${canvasData('pageSize')} === '20500x27200'`, 'the page upright again', 10_000);
+        await app.waitFor(`${pressed} === 'buttonsBottom'`, 'the position pressed again');
+        await app.waitFor(`${saved}.then((position) => position === 'buttonsBottom')`, 'the starting position saved again');
+        const back = Number(await app.evaluate(canvasData('strokes')));
+        if (back < turned) throw new Error(`${back} strokes after switching back, ${turned} before`);
       });
 
       // The store button is pressed inside this step on purpose: nothing the window shows changes when it is pressed (the
@@ -251,7 +288,7 @@ export const blackboardJourneys = [
       });
 
       // Q17 (docs/design/blackboard.md §11): the position is kept, a page stored in it is turned upright (landscape on the
-      // side), and so is the live page, which keeps the position it started with. Put back at the end, for the next steps.
+      // side), and so is the live page, which starts in it. Put back at the end, for the next steps.
       await check('position « boutons à gauche » : retenue, la page enregistrée devient une note en largeur, le direct aussi ; retour en position de départ', async () => {
         const radios = `${PANEL} input[data-option="boardPosition"]`;
         const chosen = `[...document.querySelectorAll(${j(radios)})].find((r) => r.checked)?.value`;
@@ -278,8 +315,8 @@ export const blackboardJourneys = [
         }
 
         // The screen erased first: the same screen stored again would only update the note of its earlier store, made
-        // upright. Live mode starts on the landscape page, still with no switch (the quarter turns are not the Slate's
-        // orientation), and the simulated pen writes the new screen.
+        // upright. Live mode starts on the landscape page, with the blackboard's switch on « buttons on the left », never
+        // the Slate's (the quarter turns are not the Slate's orientation), and the simulated pen writes the new screen.
         await showTab(app, 'use');
         await invoke(app, 'sim_blackboard_erase');
         await app.waitFor(`document.querySelector(${j(`${PANEL} button[data-action="live"]:not([disabled])`)}) !== null`, 'the live button');
@@ -290,6 +327,8 @@ export const blackboardJourneys = [
         if (await app.evaluate(`document.querySelector('[data-slot="orientation"]') !== null || document.querySelector('[data-slot="resume-hold"]') !== null`)) {
           throw new Error('the Slate position switch or its notice is shown for the blackboard');
         }
+        const pressedLeft = await app.evaluate(`document.querySelector('[data-slot="board-position"] button[aria-pressed="true"]')?.dataset.position`);
+        if (pressedLeft !== 'buttonsLeft') throw new Error(`the switch shows ${pressedLeft}`);
         await app.click('button[data-action="stop-live"]');
         await app.waitFor(`document.querySelector('.shell:not(.shell-hidden) input.search') !== null`, 'the library', 30_000);
 

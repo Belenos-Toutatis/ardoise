@@ -4,7 +4,7 @@ import { api } from './api';
 import { mockLibrary, mockOnLibraryChanged, resetMockLibrary } from './mock-data';
 import { mockTablet, mockTabletDraw, mockTabletPatch, resetMockTablet } from './mock-tablet';
 import type { Orientation } from './orientation';
-import type { TabletOptions, TabletStatus } from './tablet';
+import type { BoardPosition, TabletOptions, TabletStatus } from './tablet';
 
 const OPTIONS: TabletOptions = { autoSync: true, deleteAfterImport: true, orientation: 'landscape', boardPosition: 'buttonsBottom', button: 'newPage' };
 
@@ -264,6 +264,16 @@ describe('mock tablet: orientation', () => {
     await api.tabletSetOrientation('portraitRight');
     const options = (await api.tabletStatus()).options;
     expect(options.orientation).toBe('portraitRight');
+    expect(options.deleteAfterImport).toBe(false);
+  });
+
+  it('switches the position of the Xiaomi blackboard alone (Q19), and refuses a word it does not know', async () => {
+    await connectedWithoutSync({ deleteAfterImport: false });
+    expect((await failureOf(api.tabletSetBoardPosition('buttonsDiagonal' as BoardPosition))).code).toBe('unexpected');
+    await api.tabletSetBoardPosition('buttonsLeft');
+    const options = (await api.tabletStatus()).options;
+    expect(options.boardPosition).toBe('buttonsLeft');
+    expect(options.orientation).toBe('landscape');
     expect(options.deleteAfterImport).toBe(false);
   });
 });

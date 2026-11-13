@@ -334,6 +334,7 @@ pub fn run() {
             tablet::tablet_set_time,
             tablet::tablet_set_options,
             tablet::tablet_set_orientation,
+            tablet::tablet_set_board_position,
             tablet::sim_press_button,
             tablet::tablet_find_blackboards,
             tablet::tablet_add_blackboard,

@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use ardoise_ble::{AdapterInfo, AdapterStatus, BleError};
 use ardoise_core::library::Library;
-use ardoise_core::settings::{Language, Orientation, Settings, SettingsStore};
+use ardoise_core::settings::{BoardPosition, Language, Orientation, Settings, SettingsStore};
 use ardoise_device::identity::{self, IdentityError};
 use ardoise_device::pages::LibrarySink;
 use ardoise_device::service::{
@@ -42,6 +42,7 @@ use crate::AppContext;
 use crate::autoexport::{AutoExportReport, after_save_hook};
 use crate::commands::{CommandError, CommandResult, current_state};
 use crate::library::{first_layer_name, library_of, now_ms};
+use crate::live::{LiveHub, LiveRuntime};
 
 /// `TabletInfo` in `note.ts`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -548,12 +549,22 @@ pub fn tablet_set_time_in(runtime: &TabletRuntime) -> CommandResult<i64> {
 }
 
 /// Saves `[tablet]` in `ardoise.toml` (shared by every PC; unknown keys kept), then the
-/// service follows the new options.
+/// service follows the new options. A new position of the blackboard is refused as its switch
+/// refuses it while live mode holds a page of the blackboard that keeps its shape
+/// ([`board_position_allowed`]): nothing is saved then.
 pub fn tablet_set_options_in(
     runtime: &TabletRuntime,
     context: &AppContext,
+    hub: &LiveHub,
     options: TabletOptions,
 ) -> CommandResult<TabletStatus> {
+    let saved = crate::commands::store(context)?
+        .load()
+        .ok()
+        .map(|settings| settings.tablet.board_position);
+    if saved != Some(options.board_position) {
+        board_position_allowed(hub, options.board_position)?;
+    }
     crate::commands::update(context, |settings| {
         settings.tablet.auto_sync = options.auto_sync;
         settings.tablet.delete_after_import = options.delete_after_import;
@@ -580,6 +591,46 @@ pub fn tablet_set_orientation_in(
 ) -> CommandResult<()> {
     let settings =
         crate::commands::store(context)?.update(|s| s.tablet.orientation = orientation)?;
+    let options = TabletOptions::from(&settings.tablet);
+    let _ = runtime.with_service(|service| service.set_options(options));
+    Ok(())
+}
+
+/// Whether the Xiaomi blackboard may be held as `position` now (`docs/questions.md` Q19): always,
+/// unless the live session that runs holds a page of the blackboard that keeps its shape (a
+/// resumed sheet, a page written over an image: `LiveSession::board_positions`), whose way round
+/// the blackboard must keep. Then `boardPositionFixed`, and nothing is changed.
+pub fn board_position_allowed(hub: &LiveHub, position: BoardPosition) -> CommandResult<()> {
+    let allowed = hub.board_positions();
+    if allowed.contains(&position) {
+        return Ok(());
+    }
+    let names: Vec<&str> = allowed.iter().map(|position| position.name()).collect();
+    Err(CommandError::new(
+        "boardPositionFixed",
+        format!(
+            "live mode writes on a page of the blackboard that keeps its shape: {}, not {}",
+            names.join(" or "),
+            position.name()
+        ),
+    ))
+}
+
+/// The blackboard's position switch of the live window (Q19), as the Slate's
+/// [`tablet_set_orientation_in`]: saves how the blackboard is held in `[tablet]` (that key only)
+/// and tells the service, which turns the page of a blackboard run at once with its ink
+/// (`LiveInput::Reoriented`) and the records that follow. Refused, nothing saved, while live mode
+/// holds a page of the blackboard the other way round ([`board_position_allowed`]). Without a
+/// running service only the setting changes.
+pub fn tablet_set_board_position_in(
+    runtime: &TabletRuntime,
+    context: &AppContext,
+    hub: &LiveHub,
+    position: BoardPosition,
+) -> CommandResult<()> {
+    board_position_allowed(hub, position)?;
+    let settings =
+        crate::commands::store(context)?.update(|s| s.tablet.board_position = position)?;
     let options = TabletOptions::from(&settings.tablet);
     let _ = runtime.with_service(|service| service.set_options(options));
     Ok(())
@@ -736,9 +787,10 @@ pub async fn tablet_set_time(app: AppHandle) -> CommandResult<i64> {
 pub async fn tablet_set_options(
     runtime: State<'_, TabletRuntime>,
     context: State<'_, AppContext>,
+    live: State<'_, LiveRuntime>,
     options: TabletOptions,
 ) -> CommandResult<TabletStatus> {
-    tablet_set_options_in(&runtime, &context, options)
+    tablet_set_options_in(&runtime, &context, live.hub(), options)
 }
 
 #[tauri::command]
@@ -748,6 +800,18 @@ pub async fn tablet_set_orientation(
     orientation: Orientation,
 ) -> CommandResult<()> {
     tablet_set_orientation_in(&runtime, &context, orientation)
+}
+
+/// `tablet_set_board_position({ position })` (`lib/api.ts`): the blackboard's position switch of
+/// the live window.
+#[tauri::command]
+pub async fn tablet_set_board_position(
+    runtime: State<'_, TabletRuntime>,
+    context: State<'_, AppContext>,
+    live: State<'_, LiveRuntime>,
+    position: BoardPosition,
+) -> CommandResult<()> {
+    tablet_set_board_position_in(&runtime, &context, live.hub(), position)
 }
 
 /// Presses the simulated tablet's button (`--simulated-tablet` only, for the e2e journeys).
@@ -818,6 +882,16 @@ mod tests {
     use ardoise_device::service::{Connection, RegisterStep};
     use std::sync::mpsc;
     use std::time::Instant;
+
+    // In the tests' module: the contract tests read this file up to its first `#[cfg(test)]`.
+    impl TabletRuntime {
+        /// A runtime holding `service` (tests that start the service with hooks of their own).
+        pub(crate) fn holding(service: TabletService) -> TabletRuntime {
+            let runtime = TabletRuntime::default();
+            *lock(&runtime.service) = Some(Arc::new(service));
+            runtime
+        }
+    }
 
     #[test]
     fn shows_and_forgets_the_registered_tablet() {
@@ -1078,7 +1152,8 @@ mod tests {
             board_position: BoardPosition::ButtonsLeft,
             button: LiveButton::NewLayer,
         };
-        let status = tablet_set_options_in(&runtime, &context, options).unwrap();
+        let hub = LiveHub::new(crate::live::HubConfig::default());
+        let status = tablet_set_options_in(&runtime, &context, &hub, options).unwrap();
         assert_eq!(status.options, options);
         let saved = context.store.as_ref().unwrap().load().unwrap().tablet;
         assert_eq!(saved.orientation, Orientation::LandscapeFlipped);
@@ -1093,9 +1168,22 @@ mod tests {
         assert_eq!(saved.board_position, BoardPosition::ButtonsLeft);
         assert_eq!(saved.button, LiveButton::NewLayer);
         assert!(!saved.auto_sync);
+        // The blackboard's switch (Q19) changes its position only, and the service follows.
+        tablet_set_board_position_in(&runtime, &context, &hub, BoardPosition::ButtonsTop).unwrap();
+        let saved = context.store.as_ref().unwrap().load().unwrap().tablet;
+        assert_eq!(saved.board_position, BoardPosition::ButtonsTop);
+        assert_eq!(saved.orientation, Orientation::PortraitRight);
+        assert_eq!(saved.button, LiveButton::NewLayer);
+        assert!(!saved.auto_sync);
         // The worker publishes the new options a moment later.
         let deadline = Instant::now() + Duration::from_secs(10);
-        while runtime.status().unwrap().options.orientation != Orientation::PortraitRight {
+        while runtime.status().unwrap().options
+            != (TabletOptions {
+                orientation: Orientation::PortraitRight,
+                board_position: BoardPosition::ButtonsTop,
+                ..options
+            })
+        {
             assert!(Instant::now() < deadline, "the service did not follow");
             std::thread::sleep(Duration::from_millis(20));
         }

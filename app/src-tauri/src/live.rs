@@ -30,6 +30,9 @@ pub mod session;
 #[cfg(test)]
 pub(crate) mod tests;
 
+#[cfg(test)]
+mod board_tests;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -403,8 +406,9 @@ pub(crate) fn pages_first_now(tablet: &TabletRuntime) -> CommandResult<()> {
 /// ([`resume::sheet_refusal`]: the other tablet's sheet, `sheetOtherTablet`; a page of the
 /// blackboard the other way round than `board_position`, the blackboard's position set now,
 /// `sheetBoardPosition`): the resume is refused at once, nothing changed. One that connects later
-/// ends the resumed run the same way (the `refused` event), as does a blackboard whose position is
-/// changed before its run starts (the run takes the position set then).
+/// ends the resumed run the same way (the `refused` event), when the position set then is not of
+/// the sheet's way round (set so before the resume; once the session holds the sheet, a change to
+/// the other way round is refused, `boardPositionFixed`, Q19).
 fn refused_now(
     active: Option<TabletKind>,
     board_position: BoardPosition,

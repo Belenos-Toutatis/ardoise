@@ -1,11 +1,15 @@
 // The position of the Xiaomi blackboard in the live stand-in (Q17, docs/design/blackboard.md §11): the run has the page
-// of the position set when it starts, a change during the run applies to the next one, and a resumed sheet the other
-// way round is refused (`sheetBoardPosition`), after the other tablet's sheet (`sheetOtherTablet`).
+// of the position set when it starts, a change during the run turns the page with its ink at once (Q19, as the Slate's
+// switch), a resumed sheet the other way round is refused (`sheetBoardPosition`), after the other tablet's sheet
+// (`sheetOtherTablet`), and a run on a page that keeps its shape offers only the two positions of its way round.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BOARD_POSITIONS, boardRunOrientation, drawingTurns, type BoardPosition } from './board-position';
+import type { Stroke } from './note';
+import { turnsFrom, turnStrokes } from './orientation';
 import type { LiveBatch, LiveSnapshot } from './live';
 import { mockLibrary, resetMockLibrary } from './mock-data';
 import {
+  mockLiveBoardPositionRefusal,
   mockLiveConfig,
   mockLiveInvoke,
   mockLiveSubscribe,
@@ -91,15 +95,17 @@ describe('the blackboard run in the live stand-in', () => {
     }
   });
 
-  it('keeps its position when the setting or the Slate orientation change; the next run takes the new one', async () => {
+  it('takes a new position during the run (Q19), never the Slate orientation; the next run starts with it', async () => {
     setMockLiveTablet('blackboard');
     setMockLiveBoardPosition('buttonsLeft');
-    start();
+    expect(start().boardPosition).toBe('buttonsLeft');
     setMockLiveBoardPosition('buttonsBottom');
     setMockLiveOrientation('portraitRight');
     const snapshot = await snapshotNow();
-    expect(snapshot.page.page).toEqual(WIDE);
-    expect(snapshot.orientation).toBe('portraitLeft');
+    expect(snapshot.page.page).toEqual(UPRIGHT);
+    expect(snapshot.orientation).toBe('landscape');
+    expect(snapshot.boardPosition).toBe('buttonsBottom');
+    expect(snapshot.boardPositions).toEqual([...BOARD_POSITIONS]);
     invoke('live_stop');
     expect(start().page.page).toEqual(UPRIGHT);
   });
@@ -123,6 +129,86 @@ describe('the blackboard run in the live stand-in', () => {
     const snapshot = start();
     expect(snapshot.page.page).toEqual({ width: 21600, height: 29700 });
     expect(snapshot.orientation).toBe('portraitLeft');
+    expect(snapshot.boardPosition).toBeNull();
+    // The blackboard's position does not turn a Slate run.
+    setMockLiveBoardPosition('buttonsTop');
+    expect(start().page.page).toEqual({ width: 21600, height: 29700 });
+  });
+});
+
+describe('the blackboard switch during a run (Q19)', () => {
+  /** A run of the blackboard held as `position`, with some ink written: its finished strokes and their page. */
+  async function written(position: BoardPosition): Promise<{ strokes: Stroke[]; size: { width: number; height: number } }> {
+    mockLiveConfig.waitMs = 0;
+    mockLiveConfig.pen = false;
+    setMockLiveTablet('blackboard');
+    setMockLiveBoardPosition(position);
+    start();
+    await vi.advanceTimersByTimeAsync(5);
+    mockLiveTick(400);
+    const page = (await snapshotNow()).page;
+    expect(page.strokes.length).toBeGreaterThan(1);
+    return { strokes: page.strokes, size: page.page };
+  }
+
+  it.each([
+    ['buttonsBottom', 'buttonsLeft', 'a quarter turn: the page goes wide'],
+    ['buttonsLeft', 'buttonsBottom', 'a quarter turn back: the page goes upright'],
+    ['buttonsBottom', 'buttonsTop', 'a half turn: the page keeps its shape'],
+    ['buttonsRight', 'buttonsLeft', 'a half turn of a wide page'],
+  ] as const)('from %s to %s (%s), the page turns with what is written on it', async (from, to, _turn) => {
+    const before = await written(from);
+    const sub = await subscribe();
+    setMockLiveBoardPosition(to);
+    const snapshot = sub.snapshots().at(-1)!;
+    expect(snapshot.boardPosition).toBe(to);
+    expect(snapshot.orientation).toBe(boardRunOrientation(to));
+    expect(snapshot.page.page).toEqual(sizeOf(to));
+    const turns = turnsFrom(boardRunOrientation(to), boardRunOrientation(from));
+    const turned = turnStrokes(before.strokes, before.size.width, before.size.height, turns);
+    // The strokes written before, turned (the one in progress ended before the turn, and turned with them).
+    expect(snapshot.page.strokes.slice(0, before.strokes.length)).toEqual(turned);
+    // Back: the same ink as before, exactly.
+    setMockLiveBoardPosition(from);
+    const back = sub.snapshots().at(-1)!;
+    expect(back.page.page).toEqual(before.size);
+    expect(back.page.strokes.slice(0, before.strokes.length)).toEqual(before.strokes);
+  });
+
+  it('writes the strokes that follow the new way, inside the new page', async () => {
+    await written('buttonsBottom');
+    setMockLiveBoardPosition('buttonsRight');
+    mockLiveTick(600);
+    const page = (await snapshotNow()).page;
+    expect(page.page).toEqual(WIDE);
+    for (const p of page.strokes.flatMap((stroke) => stroke.points)) {
+      expect(p.x).toBeLessThanOrEqual(WIDE.width);
+      expect(p.y).toBeLessThanOrEqual(WIDE.height);
+    }
+  });
+
+  it('on a resumed sheet offers only the two positions of its way round, and the sheet never turns', async () => {
+    mockLiveConfig.waitMs = 0;
+    setMockLiveTablet('blackboard');
+    setMockLiveBoardPosition('buttonsRight');
+    const path = boardSheet(WIDE);
+    const resumed = invoke('live_resume', { path }) as LiveSnapshot;
+    expect(resumed.boardPositions).toEqual(['buttonsRight', 'buttonsLeft']);
+    expect(mockLiveBoardPositionRefusal('buttonsLeft')).toBeNull();
+    for (const position of ['buttonsBottom', 'buttonsTop'] as const) {
+      expect(mockLiveBoardPositionRefusal(position)).toMatchObject({ code: 'boardPositionFixed' });
+    }
+    const strokes = JSON.stringify(resumed.page.strokes);
+    setMockLiveBoardPosition('buttonsLeft');
+    const snapshot = await snapshotNow();
+    expect(snapshot.boardPosition).toBe('buttonsLeft');
+    expect(snapshot.page.page).toEqual(WIDE);
+    expect(JSON.stringify(snapshot.page.strokes)).toBe(strokes);
+    // A new page is the session's, but the session still holds the sheet: the same two positions.
+    invoke('live_command', { command: { kind: 'newPage' } });
+    expect((await snapshotNow()).boardPositions).toEqual(['buttonsRight', 'buttonsLeft']);
+    invoke('live_stop');
+    expect(mockLiveBoardPositionRefusal('buttonsBottom')).toBeNull();
   });
 });
 

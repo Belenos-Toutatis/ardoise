@@ -837,7 +837,8 @@
     "pageRescued": "Une page de la tablette Xiaomi n'a pas pu être écrite dans la bibliothèque, et la tablette ne la garde plus : Ardoise en a gardé une copie de secours (dossier _ardoise\\rescued-pages de la bibliothèque, ou dossier Ardoise\\blackboard-rescue des données locales de ce PC) et l'importera à la prochaine synchronisation. Vérifiez que la bibliothèque est accessible et qu'il reste de la place.",
     "pageDoubtful": "Une page de la tablette Xiaomi n'a pas été reçue proprement, et la tablette ne la garde peut-être plus : ce qui est arrivé est gardé à part (dossier _ardoise\\rescued-pages\\doubtful de la bibliothèque, ou dossier doubtful sous Ardoise\\blackboard-rescue dans les données locales de ce PC), sans en faire une note. Si une note de cette page a été faite, vérifiez-la, et gardez le journal de diagnostic.",
     "pageNotSaved": "Une page de la tablette Xiaomi n'a pu être écrite ni dans la bibliothèque ni sur ce PC, et la tablette ne la garde plus : Ardoise la garde en mémoire et réessaiera à la prochaine synchronisation. Ne fermez pas Ardoise d'ici là, rendez la bibliothèque accessible ou libérez de la place, puis synchronisez de nouveau.",
-    "sheetBoardPosition": "Cette page de la tablette Xiaomi n'est pas dans le même sens que la tablette telle que vous la tenez : une page en largeur se continue avec la tablette tenue en largeur (boutons à droite ou à gauche), une page en hauteur avec la tablette tenue en hauteur (boutons en bas ou en haut). Pour la continuer, choisissez dans les réglages de la tablette Xiaomi une position du même sens que la page, tenez la tablette ainsi, puis reprenez le direct ; ou reprenez le direct sur une autre feuille. Rien n'a été écrit sur la note."
+    "sheetBoardPosition": "Cette page de la tablette Xiaomi n'est pas dans le même sens que la tablette telle que vous la tenez : une page en largeur se continue avec la tablette tenue en largeur (boutons à droite ou à gauche), une page en hauteur avec la tablette tenue en hauteur (boutons en bas ou en haut). Pour la continuer, choisissez dans les réglages de la tablette Xiaomi une position du même sens que la page, tenez la tablette ainsi, puis reprenez le direct ; ou reprenez le direct sur une autre feuille. Rien n'a été écrit sur la note.",
+    "boardPositionFixed": "Ce direct écrit sur une page de la tablette Xiaomi qui garde sa forme (une feuille reprise, ou une page écrite sur une image) : seules les deux positions du même sens que cette page sont possibles jusqu'à la fin du direct. La position n'a pas changé."
   },
   "editor": {
     "back": "Bibliothèque",
@@ -1948,8 +1949,11 @@
       "help": "Sous l'écriture de la page en cours : une fiche ou un document à compléter devant la classe. La page suivante n'a pas d'image."
     },
     "xiaomi": {
-      "label": "Tablette Xiaomi : position des réglages",
-      "note": "Tablette Xiaomi : la page suit la position choisie dans les réglages de la tablette, il n'y a rien à choisir ici ; changer cette position pendant le direct ne vaut que pour le direct suivant. Son bouton enregistre la page sur la tablette sans arrêter le direct ; « Page suivante » se fait depuis l'ordinateur."
+      "label": "Position de la tablette Xiaomi",
+      "note": "Change aussitôt : la page en cours tourne avec ce qui y est déjà écrit, et la position choisie reste dans les réglages de la tablette Xiaomi. Son bouton enregistre la page sur la tablette sans arrêter le direct ; « Page suivante » se fait depuis l'ordinateur.",
+      "fixedPortrait": "Page en hauteur : boutons en bas ou en haut",
+      "fixedLandscape": "Page en largeur : boutons à droite ou à gauche",
+      "fixedHint": "Ce direct écrit sur une page qui garde sa forme (une feuille reprise, ou une page écrite sur une image) : la tablette Xiaomi se tient dans le même sens que cette page jusqu'à la fin du direct. Les deux autres positions écriraient de travers."
     }
   },
   "presentation": {

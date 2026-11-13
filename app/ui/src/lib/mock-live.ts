@@ -70,6 +70,7 @@ import type { Background, BackgroundImage, FileStamp, Note, PageSize, Paper, Rgb
 import { isPortrait, orientPoint, pageSizeFor, turnPoint, turnsFrom, turnStrokes, type Orientation } from './orientation';
 import {
   BOARD_PAGE,
+  BOARD_POSITIONS,
   boardPage,
   boardRunOrientation,
   DEFAULT_BOARD_POSITION,
@@ -211,8 +212,9 @@ interface Session {
   pen: PenScript;
   /**
    * The blackboard's position for this run, as the Slate's word for the same quarter turns: taken when the run starts
-   * (the tablet connects) and kept to its end, a change of `boardPosition` in between applies to the next run
-   * (docs/design/blackboard.md §11). Null for a Slate run, whose orientation is the setting and may change.
+   * (the tablet connects), then each position set during the run (its switch, `tablet_set_board_position`, or the
+   * settings: the page in progress turns with its ink, as in Rust; `docs/questions.md` Q19). Null for a Slate run, whose
+   * orientation is the setting.
    */
   run: Orientation | null;
   /** What can be undone on each page, by note id. */
@@ -319,9 +321,48 @@ let heldAs: Orientation = 'landscape';
 /** How the (simulated) blackboard is held (`[tablet] board_position`): a run takes it when it starts. */
 let boardPosition: BoardPosition = DEFAULT_BOARD_POSITION;
 
-/** The blackboard is held another way (`tablet_set_options`): the next run takes it, one under way keeps its own. */
+/**
+ * The blackboard is held another way (`tablet_set_board_position`, `tablet_set_options`). A run of the blackboard takes it
+ * at once, as in Rust (`board_repositioned`, `LiveSession::hold`): the stroke in progress ends, the page on screen turns with
+ * its ink (its shape swaps for a quarter turn), blank pages take the new size, a page that keeps its shape stays as it is,
+ * and the pen's points come the new way from here. Without such a run, the next one takes it. The caller checked it first
+ * (`mockLiveBoardPositionRefusal`).
+ */
 export function setMockLiveBoardPosition(position: BoardPosition): void {
   boardPosition = position;
+  const s = session;
+  if (!s?.run) return;
+  const held = boardRunOrientation(position);
+  if (held === s.run) return;
+  holdSession(s, held, BOARD_PAGE, () => (s.run = held));
+}
+
+/**
+ * As `LiveSession::board_positions`: the positions the blackboard may be set to while a session runs, every one unless a
+ * page of the session keeps its shape and is the blackboard's (a resumed sheet, a page written over an image); then only
+ * the two of its way round.
+ */
+function boardPositionsOf(s: Session | null): BoardPosition[] {
+  if (!s) return [...BOARD_POSITIONS];
+  const fixed = s.pages.find((page) => heldFixed(s, page) && isBoardPage(page.page));
+  if (!fixed) return [...BOARD_POSITIONS];
+  const wide = fixed.page.width > fixed.page.height;
+  return BOARD_POSITIONS.filter((position) => isLandscapePosition(position) === wide);
+}
+
+/** Why the blackboard may not be set to `position` now (`board_position_allowed`): null when it may. */
+export function mockLiveBoardPositionRefusal(position: BoardPosition): { code: string; message: string } | null {
+  const allowed = boardPositionsOf(session);
+  if (allowed.includes(position)) return null;
+  return {
+    code: 'boardPositionFixed',
+    message: `live mode writes on a page of the blackboard that keeps its shape: ${allowed.join(' or ')}, not ${position}`,
+  };
+}
+
+/** The blackboard's position whose quarter turns a run holds under the Slate's name. */
+function boardPositionOfRun(run: Orientation): BoardPosition {
+  return BOARD_POSITIONS.find((position) => boardRunOrientation(position) === run) ?? DEFAULT_BOARD_POSITION;
 }
 
 /** What a run that starts now with the blackboard has: its page held as the position says (`Started`). */
@@ -485,6 +526,8 @@ function snapshot(): LiveSnapshot {
       canRedo: false,
       pagePaper: 'white',
       imagePixels: null,
+      boardPosition: null,
+      boardPositions: [...BOARD_POSITIONS],
     } satisfies LiveSnapshot);
   }
   const history = historyOf(s, s.pages[s.pageIndex]);
@@ -509,6 +552,8 @@ function snapshot(): LiveSnapshot {
     canRedo: history.redo.length > 0,
     pagePaper: ownPaper(s, s.pages[s.pageIndex]),
     imagePixels: s.images.get(s.pages[s.pageIndex].id) ?? null,
+    boardPosition: s.tablet === 'blackboard' && s.run ? boardPositionOfRun(s.run) : null,
+    boardPositions: boardPositionsOf(s),
   } satisfies LiveSnapshot);
 }
 
@@ -1918,18 +1963,25 @@ function followTablet(page: Note): void {
  */
 export function setMockLiveOrientation(orientation: Orientation): void {
   if (orientation === heldAs) return;
-  // The Slate's setting does not turn a blackboard run: it keeps the position it started with.
-  if (session?.run) {
+  // The Slate's setting does not turn a blackboard run: it has its own position (`setMockLiveBoardPosition`).
+  const s = session;
+  if (!s || s.run) {
     heldAs = orientation;
     return;
   }
-  const s = session;
-  const before = s ? { ...s.pages[s.pageIndex].page } : null;
-  const turns = s && !heldFixed(s, s.pages[s.pageIndex]) ? turnsFrom(orientation, pageOrientation.get(s.pages[s.pageIndex].id) ?? 'landscape') : 0;
+  holdSession(s, orientation, PAGE, () => (heldAs = orientation));
+}
+
+/**
+ * The session `s` is held as `held` from now, on a tablet whose area is `area`; `take` makes it so (the Slate's setting, or
+ * the blackboard's run). As `LiveSession::hold`.
+ */
+function holdSession(s: Session, held: Orientation, area: { width: number; height: number }, take: () => void): void {
+  const before = { ...s.pages[s.pageIndex].page };
+  const turns = !heldFixed(s, s.pages[s.pageIndex]) ? turnsFrom(held, pageOrientation.get(s.pages[s.pageIndex].id) ?? 'landscape') : 0;
   // Both strokes in progress end (kept) before the page turns, so that it turns with their ink.
-  const events = s ? [...endStroke(s), ...endComputer(s)] : [];
-  heldAs = orientation;
-  if (!s || !before) return;
+  const events = [...endStroke(s), ...endComputer(s)];
+  take();
   s.hover = null;
   s.pages.forEach((page, index) => {
     const { undo, redo } = historyOf(s, page);
@@ -1938,8 +1990,8 @@ export function setMockLiveOrientation(orientation: Orientation): void {
     const blank = page.strokes.length === 0 && !s.resumed.has(page.id) && undo.length === 0 && redo.length === 0;
     if (blank && (page.backgroundImage !== undefined || !s.saved.has(page.id))) {
       const old = page.page;
-      page.page = pageSizeFor(orientation, PAGE.width, PAGE.height);
-      pageOrientation.set(page.id, orientation);
+      page.page = pageSizeFor(held, area.width, area.height);
+      pageOrientation.set(page.id, held);
       const image = page.backgroundImage;
       const pixels = s.images.get(page.id);
       if (image && pixels) {
