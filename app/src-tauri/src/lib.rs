@@ -449,6 +449,10 @@ pub fn run() {
                     .inner_size(1200.0, 800.0)
                     .min_inner_size(800.0, 560.0)
                     .center()
+                    // The page handles its own drags (a note dragged onto a binder): with the window's
+                    // file-drop handler on, WebView2 refuses every drag started in the page (the
+                    // "forbidden" cursor, no drop). Ardoise takes no file dropped on its window.
+                    .disable_drag_drop_handler()
                     .visible(!cli.self_test);
             if let Some(dir) = webview_data_dir() {
                 window = window.data_directory(dir);

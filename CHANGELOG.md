@@ -6,6 +6,7 @@
 
 - **Ctrl+A sélectionne toutes les notes affichées** où que soit le dernier clic (il sélectionnait le texte de la fenêtre quand aucune carte n'avait le focus), et **Échap désélectionne tout** de la même façon ; dans un champ de saisie, ces touches restent celles du champ.
 - **Maj+clic sur la case d'une carte** sélectionne la plage, comme Maj+clic sur la carte (il ne cochait que cette note). Sans note cochée auparavant, la plage part de la première note affichée, comme dans l'Explorateur. Maj+clic ne surligne plus le texte des cartes.
+- **Glisser une note vers un classeur** fonctionne dans l'application : la fenêtre refusait tout glisser parti de la page (curseur « interdit », rien au lâcher), parce que son propre traitement des fichiers déposés était actif.
 
 ### Modifié (le panneau Tablette en onglets, les quatre positions de la Xiaomi ; retour de l'utilisateur, Q17)
 
