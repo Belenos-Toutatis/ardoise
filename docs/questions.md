@@ -283,6 +283,8 @@ Cela revient sur le choix fait en construisant Q17 : un direct gardait la positi
 - §4.2, reprendre une feuille : la phrase « Une page de la Xiaomi doit aussi être dans le même sens que la position réglée pour la tablette (…) ; sinon Ardoise refuse de même, et dit de choisir la position qui correspond » reste vraie au départ. Proposition d'ajout juste après : « Pendant ce direct, la feuille garde sa forme : seules les deux positions de son sens sont proposées (Q19). »
 - §4.1, limites de la Xiaomi : « la page fait environ 20 × 27 cm, en hauteur » (ancien, d'avant Q17). Proposition : « la page fait environ 20 × 27 cm, en hauteur ou en largeur selon la position ».
 
+**SPEC mis à jour le 2026-11-13** avec l'accord de l'utilisateur (« Oui, écris-les ») : §4.1 (les quatre boutons du direct, la page en hauteur ou en largeur) et §4.2 (la feuille reprise garde sa forme).
+
 ## Q20 — Fonctions d'un logiciel de prise de notes, décidées une par une (2026-11-13) — **tranchée le 2026-11-13**
 
 L'utilisateur a demandé ce qu'on pourrait ajouter à Ardoise, puis a tranché chaque proposition. SPEC §4.3, §4.4, §4.6 et §8 mis à jour avec son accord.
