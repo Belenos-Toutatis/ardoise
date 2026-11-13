@@ -2655,8 +2655,13 @@ fn the_tablet_is_never_slowed_by_the_paper_and_the_image_of_the_page() {
 #[test]
 fn a_resume_is_refused_at_once_when_the_tablet_connected_cannot_write_on_the_sheet() {
     use ardoise_core::note::A4_PORTRAIT;
-    use ardoise_device::pages::BLACKBOARD_PAGE;
-    let refused = |active, sheet| super::refused_now(active, sheet).err().map(|e| e.code());
+    use ardoise_core::settings::BoardPosition;
+    use ardoise_device::pages::{BLACKBOARD_PAGE, board_page};
+    let refused = |active, sheet| {
+        super::refused_now(active, BoardPosition::ButtonsBottom, sheet)
+            .err()
+            .map(|e| e.code())
+    };
     assert_eq!(
         refused(Some(TabletKind::Blackboard), A4_PORTRAIT),
         Some("sheetOtherTablet")
@@ -2670,4 +2675,58 @@ fn a_resume_is_refused_at_once_when_the_tablet_connected_cannot_write_on_the_she
     // Nothing connected yet: the tablet that connects decides.
     assert_eq!(refused(None, BLACKBOARD_PAGE), None);
     assert_eq!(refused(None, A4_PORTRAIT), None);
+
+    // A landscape page of the blackboard (held on a side when it was made) is the blackboard's
+    // too, never the Slate's; the blackboard writes on a page of its own held the same way round
+    // only.
+    let landscape = board_page(BoardPosition::ButtonsLeft);
+    assert_eq!(
+        refused(Some(TabletKind::Slate), landscape),
+        Some("sheetOtherTablet")
+    );
+    for (position, sheet, code) in [
+        (
+            BoardPosition::ButtonsBottom,
+            landscape,
+            Some("sheetBoardPosition"),
+        ),
+        (
+            BoardPosition::ButtonsTop,
+            landscape,
+            Some("sheetBoardPosition"),
+        ),
+        (BoardPosition::ButtonsLeft, landscape, None),
+        (BoardPosition::ButtonsRight, landscape, None),
+        (
+            BoardPosition::ButtonsLeft,
+            BLACKBOARD_PAGE,
+            Some("sheetBoardPosition"),
+        ),
+        (
+            BoardPosition::ButtonsRight,
+            BLACKBOARD_PAGE,
+            Some("sheetBoardPosition"),
+        ),
+        (BoardPosition::ButtonsTop, BLACKBOARD_PAGE, None),
+        (
+            BoardPosition::ButtonsLeft,
+            A4_PORTRAIT,
+            Some("sheetOtherTablet"),
+        ),
+    ] {
+        assert_eq!(
+            super::refused_now(Some(TabletKind::Blackboard), position, sheet)
+                .err()
+                .map(|e| e.code()),
+            code,
+            "{position:?} on {sheet:?}"
+        );
+        // The Slate's sheets do not depend on the blackboard's position.
+        assert_eq!(
+            super::refused_now(Some(TabletKind::Slate), position, A4_PORTRAIT)
+                .err()
+                .map(|e| e.code()),
+            None
+        );
+    }
 }

@@ -68,7 +68,7 @@ app/src-tauri               tablet_find_blackboards, tablet_add_blackboard, tabl
   kind), `find_blackboards(timeout)` (every blackboard heard), `connect_blackboard(address)` (link + clock). The log
   transport describes frames in the protocol of the tablet it connects to (`LoggingTransport::for_tablet`).
 - `pages.rs`: `DownloadedPage::kind`; `note_from_page` reads a blackboard page with `blackboard_note` (its own page,
-  never turned, `Timing::Synthesized`); `page_kind(bytes)` recognises kept bytes (`original.bin`) so that "back to the
+  turned for the position, « Positions, the Rust side », `Timing::Synthesized`); `page_kind(bytes)` recognises kept bytes (`original.bin`) so that "back to the
   original" works for blackboard notes; `BLACKBOARD_PAGE` (the size it writes now), `BLACKBOARD_PAGES` and
   `is_blackboard_page(size)` (every size it ever wrote with, §3).
 - `service/worker/board.rs`: the blackboard's half of the worker (search to add, connection, sync, live mode, the
@@ -185,7 +185,7 @@ Taken while building:
    live mode or a sync), so a page stored during live mode is imported afterwards (a safe duplicate of the live note).
 10. **Live mode** on the blackboard: `Started { width: 20 500, height: 27 200, orientation: landscape }` (landscape
     means "not turned" in the hub); orientation changes are ignored while the blackboard holds the link or its live
-    mode waits for it; records are never turned. **A live run belongs to the tablet it started on** and never changes
+    mode waits for it; records are never turned (since « Positions, the Rust side »: turned for the run's position). **A live run belongs to the tablet it started on** and never changes
     tablets (its page has that tablet's size and way of holding; second review of M18, R1):
     - after a lost link only that tablet is looked for and accepted, the other one is ignored until live mode ends;
     - the Slate's registration is refused (`tabletBusy`) while live mode runs (as before) or waits for the
@@ -263,7 +263,7 @@ Taken while building:
     Any other pair: `live_resume` returns
     `sheetOtherTablet` at once when that tablet is connected; otherwise the run ends when it connects (`refused` event,
     state `idle`), the tablet leaves live mode, nothing is written to the note. A blackboard note turned in the
-    editor is a sheet like any other (the Slate's).
+    editor is a sheet like any other (the Slate's). (Changed by « Positions, the Rust side »: a landscape page of the blackboard is its own.)
 21. **Deletion is by time** (`12 05 06 <time>`): two pages stored within the same second are assumed impossible (the
     tablet's clock has seconds; the simulator keeps one second between pages). If the real tablet allowed it, one
     delete could remove both, the second never downloaded: to look at in H8.
@@ -465,13 +465,16 @@ the last connected tablet said (check `device.kind`); `lastSync` is the last syn
 - `pageDoubtful` (H8, §9.2): a page the tablet may no longer hold was not received cleanly; what came is kept apart,
   never made into a note. Can end a sync that read every page.
 - `pageNotSaved` (H8, §9.2): such a page could be written nowhere; Ardoise holds it in memory until the next sync.
+- `sheetBoardPosition` (H8, « Positions, the Rust side »): `live_resume` refused at once, or the `refused` live event, for a page of the
+  blackboard held the other way round than the blackboard's position (a landscape page, the blackboard set upright, or
+  the reverse); nothing written on the note.
 - Already translated, also used: `tabletTimeout`, `tabletNotConnected`, `tabletBusy`, `tabletNotRegistered` (no tablet
   known at all), `noLibrary`, `libraryAccess`, `bluetoothOff`, `bluetoothMissing`, `tablet` (an unexpected failure;
   the internal "dirty stream" state never reaches it), `simulationOnly`.
 
 ### 5.5 Live mode
 
-Same commands and events as for the Slate. The live page is portrait (20 500 × 27 200). Hovering records drive the
+Same commands and events as for the Slate. The live page is portrait (20 500 × 27 200; landscape in a landscape position, « Positions, the Rust side »). Hovering records drive the
 laser pointer. Live mode resumes only on the tablet it started on (the other one is not connected while it waits).
 
 `LiveSnapshot` (`lib/live.ts`) has one more field, `tablet: 'slate' | 'blackboard' | null`: the tablet this live session
@@ -740,7 +743,7 @@ lists again. The earlier page still counts as imported: `ImportedPages::find` al
 note created at that page's time whose `original.bin` starts with the page's bytes (a rescue copy of it found later
 does not come back). Not covered: a page of a clock never set (its note is dated by the import), and the middle page
 of three stores found again later (a duplicate note, nothing lost).
-## 10. The four positions of the blackboard (Q17, interface done, Rust to do)
+## 10. The four positions of the blackboard: the interface (Q17; the Rust side is §11)
 
 The user may hold the blackboard in any of four positions, and Ardoise turns what it writes so that the page is upright
 (SPEC §4.1; `docs/questions.md` Q17). The interface (`TabletOptions.svelte`, `BoardDrawing.svelte`, `lib/board-position.ts`,
@@ -774,3 +777,161 @@ the mock in `lib/mock-tablet.ts`) is done; this section is the contract for the 
   Slate (the `live.resume.hold` notice), once the position is applied.
 - **Tests to add on the Rust side**: the default and an unknown value in `settings.rs`; `tablet_set_options` keeping the
   field; a blackboard page imported in each position (golden strokes turned back); the file without the key.
+
+## 11. Positions, the Rust side (Q17)
+
+Source: SPEC §4.1 as amended on 2026-11-13 (« Comme la Bamboo, elle se tient dans quatre positions… »),
+`docs/questions.md` Q17, the interface's contract (`app/ui/src/lib/board-position.ts`, `tablet.ts`, `mock-tablet.ts` and
+its section "The four positions of the blackboard", from the interface's branch). Named, not numbered: the
+sections of the interface's branch and of this one are numbered at their merge.
+
+### Positions: the setting
+
+| | |
+|---|---|
+| Rust | `ardoise_core::settings::BoardPosition` (`ButtonsBottom`, the default, `ButtonsTop`, `ButtonsRight`, `ButtonsLeft`), `TabletSettings::board_position`, `TabletOptions::board_position`, `PageContext::board_position` |
+| `ardoise.toml` | `[tablet] board_position = "buttonsLeft"`: the key in snake_case like every key of the file (`auto_sync`, `delete_after_import`), the value one of the four words of the wire. Absent (older files) or unknown (a newer version): `buttonsBottom`. An older Ardoise keeps the key verbatim (its unknown keys), so a file shared by two PCs keeps it |
+| Wire | `boardPosition` in `TabletOptions` (`tablet_status`, the status events, `tablet_set_options`), next to the Slate's `orientation`, independent of it. Strict: an unknown word, or options without the field, are refused when the command's arguments are read (`errorCodes.unexpected`), as the interface's stand-in refuses them (`invalid options`). `tablet_set_options` saves it with the other fields |
+| Not added | a quick switch for the live window (`tablet_set_board_position`): a blackboard run keeps the position it started with (below, live mode) |
+
+### Positions: the convention, one function
+
+The blackboard's own frame: portrait, 20 500 × 27 200, origin at the top left of the screen of the tablet held upright,
+x to the right, y downwards (measured: research note §3, the diagonal drawn from the top left corner), its two buttons
+on the band under the screen (the interface's pictures: erase at its left end, store at its right end).
+
+The positions are named after where the buttons end up for the user, so each one is a rotation of the tablet from
+upright: `buttonsLeft` is the tablet turned a quarter turn **clockwise** (its bottom edge moves to the left),
+`buttonsRight` a quarter turn anticlockwise, `buttonsTop` half a turn. What the pen writes in the tablet's frame is
+then seen by the user turned the same way, so its points are turned the same way to be upright on the page:
+
+| Position | Clockwise quarter turns (`BoardPosition::quarter_turns`, = `drawingTurns`) | Point `(x, y)` → page | Page |
+|---|---|---|---|
+| `buttonsBottom` | 0 | `(x, y)` | 20 500 × 27 200 |
+| `buttonsLeft` | 1 | `(H − y, x)` | 27 200 × 20 500 |
+| `buttonsTop` | 2 | `(W − x, H − y)` | 20 500 × 27 200 |
+| `buttonsRight` | 3 | `(y, W − x)` | 27 200 × 20 500 |
+
+(`W` = 20 500, `H` = 27 200.) Check by a corner: held with the buttons on the left, the tablet's bottom left corner
+(the erase button's end of the band) is at the top left for the user, and `(0, H)` → `(0, 0)`. The numbers are those
+of the Slate's positions for the same turn (`Orientation::quarter_turns`, `pages::orient`: `portraitLeft` is also its
+button on the left after a quarter turn clockwise), and those of the interface's pictures (`drawingTurns`: the upright
+picture turned that many quarter turns clockwise). One function turns every point of the blackboard:
+`pages::orient_board(x, y, position)` (with `orient_board_record` for a live record and `board_page(position)` for the
+page), on the same arithmetic as the Slate's `orient` (`turn_area_point`). A coordinate beyond the area gives 0, never a
+negative one.
+
+Measured: the frame (origin, axes). **Supposed**, to check at H8 (« C quinquies » of `docs/hardware-tests.md`, an
+arrow pointing up written in each position, stored and live): that "upright" in the research note is the tablet with
+its buttons at the bottom, as the interface draws it. If the real tablet were the other way, only the frame changes:
+`orient_board` and its tests, nothing else.
+
+### Positions: stored pages
+
+Where the turn happens: **when the note is made** (`pages::blackboard_note(page, id, layer, now, position)`, through
+`note_from_page`, `LibrarySink::with_board_position`), the only place where a note is made from the tablet's bytes, for
+the sync, the rescue copies and `--import-blackboard-pages` alike. Not in the session, the worker or the rescue store:
+`original.bin`, the rescue copies and `page_note_id` stay the tablet's raw bytes, which the "screen stored again" rule
+compares as prefixes (§9.6) and from which the note's id comes. The note's page is `board_page(position)` (landscape for
+`buttonsLeft` and `buttonsRight`).
+
+- **The position in force**: the sync takes `options.board_position` when it starts (`SyncRun::context`, like the
+  Slate's orientation), for all its pages, the rescue copies imported first included; `--import-blackboard-pages` takes
+  the settings' (and prints it).
+- **Recorded in the note**: `note.json` gets the top-level key `boardPosition` (`pages::BOARD_POSITION_FIELD`), the
+  word of the position its `original.bin` was turned for. The Slate's notes record nothing (their "back to the
+  original" uses today's orientation, `original.rs`). A top-level key the format does not know (`docs/file-format.md`):
+  every reader keeps it as it is, an older Ardoise included, and it stays true whatever is edited, since `original.bin`
+  never changes (only an update of §9.6 replaces both together). Not inside `origin` (a new key inside a known object is
+  a major version of the format). `pages::board_position_of(file)`: absent = `buttonsBottom` (the notes made before,
+  2026-11), an unknown word = `Err`.
+- **"Back to the original"** of a blackboard note decodes `original.bin` in the note's own position (an unknown word:
+  upright), whatever is set now.
+- **A screen stored again (§9.6)**: "unedited" rebuilds the note from its `original.bin` **in the note's own position**
+  (a note made held on a side is not taken for edited, an upright one is not rebuilt turned), and the update makes the
+  new page **in that same position** and records it, whatever is set now: it is the same screen, written on in the same
+  frame, and the note keeps the way up the user saw it with. A note made before the positions is updated upright and
+  gets the key. A note whose key holds an unknown word is not updated: a new note (in the position set now), the reason
+  in the log. A page that adds a note instead (edited, no earlier note…) is made in the position set now, like any page.
+- **Recognition** (`ImportedPages`): by id and bytes, as before, whatever the position; the second rule (a note created
+  at the page's time whose `original.bin` starts with the page) accepts a page of the blackboard either way round
+  (`is_blackboard_page`), so a landscape note holds its earlier pages too.
+- `is_blackboard_page(size)` is true for every size of `BLACKBOARD_PAGES`, upright or swapped.
+
+### Positions: live mode
+
+- The worker turns each record as it arrives (`Worker::board_forward`, `orient_board_record`), as it turns the Slate's
+  (`forward`, `orient_record`): the hub receives the points upright.
+- **The position in force when the run starts holds for the run** (`LiveRun::board_position`, taken when its `Started`
+  is sent): `Started { width: 20 500, height: 27 200, orientation, kind: Blackboard }` gives the position's quarter turns
+  as the Slate's position of the same turn (`Orientation::from_quarter_turns`: the hub's "orientation" counts quarter
+  turns from the tablet's own frame), so the live page has the turned size (`oriented_size`). After a lost link the run
+  keeps it (`Started` is sent once per run). What the Slate does when its orientation changes during live mode: the
+  service sends `Reoriented` and the hub turns the page with its ink. The blackboard does not: a change of
+  `boardPosition` during its run is only written in the log ("this live run keeps …") and applies to the next run and
+  the next sync. Simplest and safe: no ink turned under the user's hand, no page that changes size in the middle of a
+  lesson; the interface has no position switch in the live window for the blackboard anyway. A run waiting for the
+  blackboard (not started yet) takes the position set when it starts.
+- `LiveSnapshot.orientation` of a blackboard session is therefore the Slate's word for its quarter turns
+  (`portraitLeft` for `buttonsLeft`…): the interface must not read it as the Slate's (it does not: no switch and no
+  "hold" notice for the blackboard, `LiveView.svelte`).
+
+### Positions: resuming a sheet
+
+- A page of the blackboard is one of its sizes **upright or swapped** (`is_blackboard_page`): a landscape page (made
+  held on a side, or turned in the editor) is the blackboard's, never the Slate's (`sheetOtherTablet` with the Slate, as
+  before). SPEC §4.2 still says « en hauteur » for this rule: `docs/questions.md`, entry of 2026-11-13 below Q17.
+- **The transform of a resumed sheet is the run's position**, as for a new page, never the position the sheet was made
+  in: two positions of the same way round are half a turn apart, and the position set now is how the user holds the
+  tablet; the sheet's own would write upside down whenever the user holds it the other way from when the sheet was made.
+  Written as they come (the worker turned them), the points then land 1:1 on the sheet, upright for the user. The
+  sheet's recorded position plays no part in live mode (a live note records none: it has no `original.bin`).
+- **A sheet the other way round** (a landscape page with the blackboard held upright, a portrait page with it held on a
+  side) is **refused**, never turned or shrunk: turning the tablet's points a quarter turn would write sideways for a
+  user who holds it as set (the blackboard has no "hold it so" notice, unlike the Slate's `hold_for`), and fitting the
+  area in the sheet would shrink the ink (§2.20). `resume::sheet_refusal(kind, sheet, held)`, `SheetRefusal`:
+  `sheetOtherTablet` (the other tablet's sheet), `sheetBoardPosition` (new code, texts at the end of `errorCodes` in
+  `fr.json` and `en.json`): at once from `live_resume` when the blackboard is connected (with the position set now), or
+  as the `refused` live event when its run starts (`LiveSession::refusal`, with the run's position: also a position
+  changed in between), the session `idle`, the note untouched, the tablet leaving live mode, as for
+  `sheetOtherTablet` (§5.5). The interface shows `errorCodes.sheetBoardPosition` (the user chooses a position of the
+  sheet's way round and resumes again).
+
+### Positions: tests
+
+- `ardoise-core` `settings.rs`: the file without the key, an unknown word, a number, every word; written next to the
+  Slate's `orientation`, which it leaves alone, unknown keys kept; read by an older Ardoise as an unknown key; quarter
+  turns (the table of `drawingTurns`), names, the wire refusing unknown words.
+- `ardoise-device` `pages.rs`: the four corners of each position, the bottom band on the edge the position is named
+  after, a round trip, the formulas, a live record; an asymmetric stroke (from the erase button along the band, then up
+  the screen) where the user sees it in each position, the page swapped, `original.bin` raw, the key written and read
+  back; the sink in each position, recognised by `ImportedPages`; `update_tests`: stored in one position, stored again
+  in another (four pairs, then a third store), the note's own position kept; a note made before the positions updated
+  upright and given the key; an unknown word: a new note.
+- `ardoise-device` `service/tests.rs`: the options on the wire with `boardPosition`.
+- `ardoise-sim/tests/blackboard.rs` (through the service, the simulated blackboard): the user's "up" and "right" in the
+  tablet's frame for each position, from the buttons' place (`user_axes`, not from the code under test), a "Γ" written
+  so: stored, it goes up then right on the note in every position, the page swapped for a landscape one; live, the same,
+  `Started` with the position's quarter turns, a change of position during the run ignored, the next run held as set
+  then; a screen stored held on the left, the position set to the right, stored again: one note, still turned for the
+  left, and a new screen then made for the right.
+- `app/src-tauri`: `contract_tests.rs` (`TabletOptions` with `boardPosition`, an unknown word and a missing field
+  refused; the quarter turns read from `drawingTurns` of `board-position.ts` when the interface's file is there; the new
+  code has its texts); `tablet.rs` (the option saved by `tablet_set_options`, kept by the Slate's quick switch; the
+  simulated blackboard of the app synced held on the left: landscape notes that say so); `blackboard_import.rs` (each
+  position, recognised again in any; a later store keeps the earlier note's position); `original/tests.rs` (back to the
+  original in the note's position, whatever is set now; a note without the key: upright); `live/tests.rs`
+  (`refused_now`: the eight cases of position and way round); `live/resume/tests.rs` (a landscape page with the
+  blackboard held on either side: its records 1:1; the eight pairs of the sheet's position and the run's through the
+  hub: accepted, ink as it came, or `sheetBoardPosition`, the note byte for byte the same).
+- Mutations tried on 2026-11-13, each run against the tests named and reverted:
+  - `orient_board` returning the point as it came, or `(y, x)` for `buttonsLeft` (a mirror): the two `pages.rs`
+    transform tests and the three `ardoise-sim` position tests fail;
+  - the quarter turns of `buttonsLeft` and `buttonsRight` swapped (the turn the other way): the `settings.rs` table,
+    the two `pages.rs` tests, the three `ardoise-sim` tests and the contract test reading `drawingTurns` fail (the
+    import test, which compares with `orient_board` itself, passes, as expected);
+  - the update made in the position set now: both `update_tests` of positions and the `ardoise-sim` screen stored again
+    fail; the "unedited" check rebuilt upright as before: the four-pairs update test and the `ardoise-sim` one fail;
+  - the live records not turned, or turned for the setting instead of the run's position: the `ardoise-sim` live test
+    fails;
+  - `sheet_refusal` ignoring the way round: the hub's eight-pairs resume test and `refused_now`'s test fail.

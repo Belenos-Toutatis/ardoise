@@ -31,7 +31,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime};
 
 use ardoise_core::note::PageSize;
-use ardoise_core::settings::{LiveButton, Orientation, TabletSettings};
+use ardoise_core::settings::{BoardPosition, LiveButton, Orientation, TabletSettings};
 use ardoise_proto::live::LiveRecord;
 use serde::{Deserialize, Serialize};
 
@@ -214,7 +214,11 @@ impl StatusError {
 pub struct TabletOptions {
     pub auto_sync: bool,
     pub delete_after_import: bool,
+    /// How the Slate is held.
     pub orientation: Orientation,
+    /// How the blackboard is held (`boardPosition`; any other word is refused): its pages and
+    /// its live page are turned upright for it (docs/design/blackboard.md, « Positions »).
+    pub board_position: BoardPosition,
     pub button: LiveButton,
 }
 
@@ -230,6 +234,7 @@ impl From<&TabletSettings> for TabletOptions {
             auto_sync: settings.auto_sync,
             delete_after_import: settings.delete_after_import,
             orientation: settings.orientation,
+            board_position: settings.board_position,
             button: settings.button,
         }
     }
@@ -349,7 +354,12 @@ pub type StatusCallback = Box<dyn Fn(&TabletStatus) + Send + Sync>;
 pub struct PageContext {
     /// Drawing area of the tablet.
     pub size: PageSize,
+    /// How the Slate is held (its pages are turned for it).
     pub orientation: Orientation,
+    /// How the blackboard is held (its pages are turned for it): the position in force when
+    /// the sync started. A page that updates the note of an earlier store of its screen keeps
+    /// that note's own position instead (docs/design/blackboard.md, « Positions »).
+    pub board_position: BoardPosition,
 }
 
 /// Writes a downloaded page as a note of the library (`&Path`, its root) and checks it reads back

@@ -163,6 +163,7 @@ fn options_are_followed_and_shown() {
         auto_sync: false,
         delete_after_import: false,
         orientation: Orientation::LandscapeFlipped,
+        board_position: BoardPosition::ButtonsRight,
         button: LiveButton::NewLayer,
     };
     service.set_options(options);
@@ -173,6 +174,7 @@ fn options_are_followed_and_shown() {
             "autoSync": false,
             "deleteAfterImport": false,
             "orientation": "landscapeFlipped",
+            "boardPosition": "buttonsRight",
             "button": "newLayer",
         })
     );

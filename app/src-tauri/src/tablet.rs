@@ -261,6 +261,7 @@ pub fn store_stored_page_in(
     let saved = {
         let mut sink = LibrarySink::new(&library, "", context.size, layer, now_ms)
             .with_orientation(context.orientation)
+            .with_board_position(context.board_position)
             .with_thumbnail(crate::thumbnails::thumbnail_png)
             .with_after_save(after_save_hook(
                 &settings.auto_export,
@@ -557,6 +558,7 @@ pub fn tablet_set_options_in(
         settings.tablet.auto_sync = options.auto_sync;
         settings.tablet.delete_after_import = options.delete_after_import;
         settings.tablet.orientation = options.orientation;
+        settings.tablet.board_position = options.board_position;
         settings.tablet.button = options.button;
     })?;
     let mut status = runtime.with_service(|service| {
@@ -787,7 +789,9 @@ mod tests {
     use super::*;
     use crate::library::tests::library;
     use ardoise_core::note::A4_LANDSCAPE;
-    use ardoise_core::settings::{AutoExport, AutoExportFormat, LiveButton, Orientation};
+    use ardoise_core::settings::{
+        AutoExport, AutoExportFormat, BoardPosition, LiveButton, Orientation,
+    };
     use ardoise_device::identity::{DEVICE_FORMAT, DeviceRecord, HostId};
     use ardoise_device::service::{Connection, RegisterStep};
     use std::sync::mpsc;
@@ -917,6 +921,7 @@ mod tests {
         let page_context = PageContext {
             size: A4_LANDSCAPE,
             orientation: Orientation::Landscape,
+            board_position: BoardPosition::ButtonsBottom,
         };
         let path = store_page_in(
             Some(store),
@@ -1048,18 +1053,22 @@ mod tests {
             auto_sync: false,
             delete_after_import: true,
             orientation: Orientation::LandscapeFlipped,
+            board_position: BoardPosition::ButtonsLeft,
             button: LiveButton::NewLayer,
         };
         let status = tablet_set_options_in(&runtime, &context, options).unwrap();
         assert_eq!(status.options, options);
         let saved = context.store.as_ref().unwrap().load().unwrap().tablet;
         assert_eq!(saved.orientation, Orientation::LandscapeFlipped);
+        assert_eq!(saved.board_position, BoardPosition::ButtonsLeft);
         assert_eq!(saved.button, LiveButton::NewLayer);
         assert!(!saved.auto_sync);
-        // The live window's quick switch changes the position only, and the service follows.
+        // The live window's quick switch changes the Slate's position only, and the service
+        // follows.
         tablet_set_orientation_in(&runtime, &context, Orientation::PortraitRight).unwrap();
         let saved = context.store.as_ref().unwrap().load().unwrap().tablet;
         assert_eq!(saved.orientation, Orientation::PortraitRight);
+        assert_eq!(saved.board_position, BoardPosition::ButtonsLeft);
         assert_eq!(saved.button, LiveButton::NewLayer);
         assert!(!saved.auto_sync);
         // The worker publishes the new options a moment later.
@@ -1123,9 +1132,11 @@ mod tests {
     /// The blackboard through the app's commands, with the simulated one of
     /// `--simulated-blackboard` (real time, three reference pages): found, added, its pages
     /// synced into three dated notes and deleted from it, forgotten; the library's own files are
-    /// never touched by the simulation.
+    /// never touched by the simulation. Held with its buttons on the left (`board_position` of the
+    /// settings), its notes are landscape and say so.
     #[test]
     fn app_commands_add_the_simulated_blackboard_and_sync_it() {
+        use ardoise_device::pages::{board_page, board_position_of};
         use ardoise_device::service::BLACKBOARD_NAME;
         use ardoise_device::transport::TabletKind;
         let settings = tempfile::tempdir().unwrap();
@@ -1134,6 +1145,12 @@ mod tests {
         ardoise_core::library::init(throwaway.path()).unwrap();
         let context = context(settings.path());
         crate::commands::choose_library(&context, &notes_dir.path().display().to_string()).unwrap();
+        context
+            .store
+            .as_ref()
+            .unwrap()
+            .update(|s| s.tablet.board_position = BoardPosition::ButtonsLeft)
+            .unwrap();
         let runtime = TabletRuntime::default();
         let board = app_board(None);
         let simulation = Simulation {
@@ -1181,7 +1198,9 @@ mod tests {
         for note in &library.list().notes {
             let read = library.read(&note.path).unwrap().file;
             assert!(read.thumbnail.is_some());
-            assert_eq!(read.note.page, ardoise_device::pages::BLACKBOARD_PAGE);
+            assert_eq!(read.note.page, board_page(BoardPosition::ButtonsLeft));
+            assert!(read.note.page.width > read.note.page.height, "landscape");
+            assert_eq!(board_position_of(&read), Ok(BoardPosition::ButtonsLeft));
             assert_eq!(read.note.layers[0].name, "Calque 1");
         }
         // The blackboard has no name to change; its clock is set again.

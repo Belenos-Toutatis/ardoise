@@ -18,13 +18,16 @@
 //!   from the page's time and bytes (`page_note_id`, the sync's), and a page whose note is in the
 //!   library, or complete in its trash (the user deleted it), is skipped ([`ImportedPages`]), as
 //!   the sync skips a page it already imported.
+//! - The pages are turned for the blackboard's position of the settings (`[tablet]
+//!   board_position`), as the sync turns them; a page that updates the note of an earlier store
+//!   keeps that note's position (docs/design/blackboard.md, « Positions »).
 //! - The library is LIB, else this PC's library (the settings); its `device.json` and
 //!   `blackboard.json` are not touched.
 
 use std::path::{Path, PathBuf};
 
 use ardoise_core::library::Library;
-use ardoise_core::settings::{Orientation, SettingsStore};
+use ardoise_core::settings::{BoardPosition, Orientation, SettingsStore};
 use ardoise_device::pages::{BLACKBOARD_PAGE, ImportedPages, page_kind};
 use ardoise_device::rescue::read_page_file;
 use ardoise_device::service::{PageContext, Stored, StoredPage};
@@ -82,10 +85,12 @@ fn page_files(dir: &Path) -> Result<Vec<(u32, PathBuf)>, String> {
 }
 
 /// Imports every page of `dir` into the library at `root` with `store` (the app's
-/// [`store_stored_page_in`]), skipping the pages already imported.
+/// [`store_stored_page_in`]), turned for the blackboard held as `position`, skipping the pages
+/// already imported.
 pub fn import_pages(
     dir: &Path,
     root: &Path,
+    position: BoardPosition,
     store: &mut dyn FnMut(&Path, DownloadedPage, &PageContext) -> Result<StoredPage, String>,
 ) -> Result<ImportSummary, String> {
     let library = Library::open(root).map_err(|e| e.to_string())?;
@@ -93,6 +98,7 @@ pub fn import_pages(
     let context = PageContext {
         size: BLACKBOARD_PAGE,
         orientation: Orientation::Landscape,
+        board_position: position,
     };
     let mut summary = ImportSummary::default();
     for (time, path) in page_files(dir)? {
@@ -158,12 +164,21 @@ pub fn run_cli(args: &BlackboardImportArgs) -> i32 {
             }
         }
     };
+    let position = store
+        .as_ref()
+        .and_then(|store| store.load().ok())
+        .map(|settings| settings.tablet.board_position)
+        .unwrap_or_default();
     println!("Pages : {}", args.pages.display());
     println!("Bibliothèque : {}", root.display());
+    println!(
+        "Position de la tablette Xiaomi : {}",
+        position_text(position)
+    );
     let mut save = |root: &Path, page: DownloadedPage, context: &PageContext| {
         store_stored_page_in(store.as_ref(), locale.as_deref(), root, page, context)
     };
-    match import_pages(&args.pages, &root, &mut save) {
+    match import_pages(&args.pages, &root, position, &mut save) {
         Ok(summary) => {
             for note in &summary.imported {
                 if summary.updated.contains(note) {
@@ -187,6 +202,16 @@ pub fn run_cli(args: &BlackboardImportArgs) -> i32 {
             println!("Échec de l'import : {error}");
             1
         }
+    }
+}
+
+/// How the report names a position (the words of the interface's settings).
+fn position_text(position: BoardPosition) -> &'static str {
+    match position {
+        BoardPosition::ButtonsBottom => "en hauteur, boutons en bas",
+        BoardPosition::ButtonsTop => "en hauteur, boutons en haut",
+        BoardPosition::ButtonsRight => "en largeur, boutons à droite",
+        BoardPosition::ButtonsLeft => "en largeur, boutons à gauche",
     }
 }
 
@@ -224,7 +249,13 @@ mod tests {
             store_stored_page_in(None, Some("fr-FR"), root, page, context)
         };
 
-        let first = import_pages(pages.path(), library.path(), &mut store).unwrap();
+        let first = import_pages(
+            pages.path(),
+            library.path(),
+            BoardPosition::ButtonsBottom,
+            &mut store,
+        )
+        .unwrap();
         assert_eq!(first.imported.len(), 2);
         assert_eq!(first.skipped, 0);
         assert_eq!(first.failed.len(), 2);
@@ -251,10 +282,22 @@ mod tests {
         assert_eq!(created, times);
 
         // Again: nothing new. A note the user deleted does not come back either.
-        let second = import_pages(pages.path(), library.path(), &mut store).unwrap();
+        let second = import_pages(
+            pages.path(),
+            library.path(),
+            BoardPosition::ButtonsBottom,
+            &mut store,
+        )
+        .unwrap();
         assert_eq!((second.imported.len(), second.skipped), (0, 2));
         opened.trash(&first.imported[0]).unwrap();
-        let third = import_pages(pages.path(), library.path(), &mut store).unwrap();
+        let third = import_pages(
+            pages.path(),
+            library.path(),
+            BoardPosition::ButtonsBottom,
+            &mut store,
+        )
+        .unwrap();
         assert_eq!((third.imported.len(), third.skipped), (0, 2));
         assert_eq!(Library::open(library.path()).unwrap().list().notes.len(), 1);
         // The library's tablets are not touched.
@@ -268,7 +311,15 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        assert!(import_pages(&pages.path().join("missing"), library.path(), &mut store).is_err());
+        assert!(
+            import_pages(
+                &pages.path().join("missing"),
+                library.path(),
+                BoardPosition::ButtonsBottom,
+                &mut store
+            )
+            .is_err()
+        );
     }
 
     /// The rescue copies of the sync (docs/design/blackboard.md §9.2) are such files, a later
@@ -298,7 +349,13 @@ mod tests {
         copies
             .save(&as_page(first.time, &first.bytes, None), RescueKind::Clean)
             .unwrap();
-        let summary = import_pages(pages.path(), library.path(), &mut store).unwrap();
+        let summary = import_pages(
+            pages.path(),
+            library.path(),
+            BoardPosition::ButtonsRight,
+            &mut store,
+        )
+        .unwrap();
         assert_eq!((summary.imported.len(), summary.updated.len()), (1, 0));
         let note = summary.imported[0].clone();
 
@@ -312,7 +369,13 @@ mod tests {
                 RescueKind::Clean,
             )
             .unwrap();
-        let summary = import_pages(pages.path(), library.path(), &mut store).unwrap();
+        let summary = import_pages(
+            pages.path(),
+            library.path(),
+            BoardPosition::ButtonsBottom,
+            &mut store,
+        )
+        .unwrap();
         assert_eq!(summary.skipped, 1, "the earlier page counts as imported");
         assert_eq!(summary.updated, std::slice::from_ref(&note));
         let opened = Library::open(library.path()).unwrap();
@@ -320,8 +383,79 @@ mod tests {
         let file = opened.read(&note).unwrap().file;
         assert_eq!(file.original.as_deref(), Some(second.bytes.as_slice()));
         assert_eq!(file.note.created, i64::from(first.time) * 1000);
+        // Imported held with the buttons on the right, stored again set upright: the same screen
+        // keeps the way up of its note.
+        assert_eq!(
+            ardoise_device::pages::board_position_of(&file),
+            Ok(BoardPosition::ButtonsRight)
+        );
+        assert_eq!(
+            file.note.page,
+            ardoise_device::pages::board_page(BoardPosition::ButtonsRight)
+        );
         // Again: both pages are recognised.
-        let again = import_pages(pages.path(), library.path(), &mut store).unwrap();
+        let again = import_pages(
+            pages.path(),
+            library.path(),
+            BoardPosition::ButtonsBottom,
+            &mut store,
+        )
+        .unwrap();
         assert_eq!((again.imported.len(), again.skipped), (0, 2));
+    }
+
+    /// The pages are turned for the position given (the settings'): landscape held on a side,
+    /// recognised again whatever the position of the next run.
+    #[test]
+    fn pages_are_turned_for_the_position_and_recognised_in_any() {
+        use ardoise_device::pages::{board_page, board_position_of, orient_board};
+        let board = SimBoard::blackboard();
+        board.draw_page(&reference_board_pages()[0]);
+        let stored = board.stored_pages()[0].clone();
+        let mut store = |root: &Path, page: DownloadedPage, context: &PageContext| {
+            store_stored_page_in(None, Some("fr-FR"), root, page, context)
+        };
+        for position in BoardPosition::ALL {
+            let pages = tempfile::tempdir().unwrap();
+            let library = tempfile::tempdir().unwrap();
+            ardoise_core::library::init(library.path()).unwrap();
+            std::fs::write(
+                pages.path().join(format!("page-{}.bin", stored.time)),
+                &stored.bytes,
+            )
+            .unwrap();
+            let summary = import_pages(pages.path(), library.path(), position, &mut store).unwrap();
+            assert_eq!(summary.imported.len(), 1, "{position:?}");
+            let file = Library::open(library.path())
+                .unwrap()
+                .read(&summary.imported[0])
+                .unwrap()
+                .file;
+            assert_eq!(file.note.page, board_page(position), "{position:?}");
+            assert_eq!(board_position_of(&file), Ok(position));
+            assert_eq!(file.original.as_deref(), Some(stored.bytes.as_slice()));
+            let raw = ardoise_proto::blackboard::decode_page(&stored.bytes);
+            let first = raw
+                .strokes
+                .iter()
+                .find(|s| !s.points.is_empty())
+                .unwrap()
+                .points[0];
+            let (x, y) = orient_board(first.x, first.y, position);
+            let point = file.note.strokes[0].points[0];
+            assert_eq!(
+                (point.x, point.y),
+                (f32::from(x), f32::from(y)),
+                "{position:?}"
+            );
+            for other in BoardPosition::ALL {
+                let again = import_pages(pages.path(), library.path(), other, &mut store).unwrap();
+                assert_eq!((again.imported.len(), again.skipped), (0, 1));
+            }
+        }
+        assert_eq!(
+            position_text(BoardPosition::ButtonsLeft),
+            "en largeur, boutons à gauche"
+        );
     }
 }

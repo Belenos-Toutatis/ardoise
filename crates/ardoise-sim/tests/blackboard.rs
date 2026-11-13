@@ -20,12 +20,14 @@ use std::time::{Duration, Instant};
 
 use ardoise_core::library::Library;
 use ardoise_core::note::Timing;
-use ardoise_core::settings::Orientation;
+use ardoise_core::settings::{BoardPosition, Orientation};
 use ardoise_device::blackboard::{BoardSync, PageKeeper, PageStep, Rescued};
 use ardoise_device::identity::{self, DEVICE_FORMAT, DeviceRecord, HostId};
 use ardoise_device::log::DiagnosticLog;
 use ardoise_device::manager::Manager;
-use ardoise_device::pages::{BLACKBOARD_PAGE, LibrarySink, page_note_id};
+use ardoise_device::pages::{
+    BLACKBOARD_PAGE, LibrarySink, board_page, board_position_of, page_note_id,
+};
 use ardoise_device::rescue::{RescueKind, RescueStore};
 use ardoise_device::service::{
     Connection, LastSync, LiveInput, LiveSink, LiveState, PageContext, PageStore, ServiceConfig,
@@ -97,7 +99,8 @@ fn library_store(
             }
             let library = Library::open(root).map_err(|e| e.to_string())?;
             let mut sink = LibrarySink::new(&library, "", context.size, "Calque 1", || NOW_MS)
-                .with_orientation(context.orientation);
+                .with_orientation(context.orientation)
+                .with_board_position(context.board_position);
             sink.store_page(page)
         },
     )
@@ -432,7 +435,7 @@ fn live_mode_gives_the_strokes_written_and_goes_on_when_a_page_is_stored() {
         vec![SimDevice::Board(board.clone())],
         library.path(),
         TabletOptions {
-            // Not used by the blackboard: its page is never turned.
+            // The Slate's: not used by the blackboard (its own position is upright).
             orientation: Orientation::PortraitLeft,
             ..TabletOptions::default()
         },
@@ -655,7 +658,8 @@ fn store_with(before: impl Fn(u16) -> Result<(), String> + Send + 'static) -> Pa
             before(n)?;
             let library = Library::open(root).map_err(|e| e.to_string())?;
             let mut sink = LibrarySink::new(&library, "", context.size, "Calque 1", || NOW_MS)
-                .with_orientation(context.orientation);
+                .with_orientation(context.orientation)
+                .with_board_position(context.board_position);
             sink.store_page(page)
         },
     )
@@ -2867,4 +2871,308 @@ fn second_screen(earlier: &[u8]) -> Vec<u8> {
     bytes.extend_from_slice(&earlier[..7]);
     bytes.extend_from_slice(earlier);
     bytes
+}
+
+// --- Positions (H8, Q17): the blackboard held four ways (docs/design/blackboard.md, « Positions ») ---
+
+/// Where the user's "up" and "right" point in the blackboard's own frame (x across its screen, y
+/// down to its buttons), held as `position`: from where its buttons are, not from the code that
+/// turns its points. Held with the buttons on the left, the tablet was turned a quarter turn
+/// clockwise: its left edge is at the top, its top edge on the right.
+fn user_axes(position: BoardPosition) -> ((i32, i32), (i32, i32)) {
+    match position {
+        // (up, right)
+        BoardPosition::ButtonsBottom => ((0, -1), (1, 0)),
+        BoardPosition::ButtonsTop => ((0, 1), (-1, 0)),
+        BoardPosition::ButtonsLeft => ((-1, 0), (0, -1)),
+        BoardPosition::ButtonsRight => ((1, 0), (0, 1)),
+    }
+}
+
+/// What the user holding the blackboard as `position` writes: a "Γ", up from the middle of the
+/// screen then to the right, as two point lists in the tablet's own frame. A wrong turn or a
+/// mirror sends one of its two strokes the wrong way.
+fn gamma(position: BoardPosition) -> [Vec<Point>; 2] {
+    let ((ux, uy), (rx, ry)) = user_axes(position);
+    let (cx, cy) = (10_000_i32, 13_000_i32);
+    let at = |x: i32, y: i32| Point {
+        x: u16::try_from(x).unwrap(),
+        y: u16::try_from(y).unwrap(),
+        pressure: 900,
+    };
+    let up: Vec<Point> = (0..20)
+        .map(|i| at(cx + ux * i * 200, cy + uy * i * 200))
+        .collect();
+    let (tx, ty) = (cx + ux * 19 * 200, cy + uy * 19 * 200);
+    let right: Vec<Point> = (0..10)
+        .map(|i| at(tx + rx * i * 200, ty + ry * i * 200))
+        .collect();
+    [up, right]
+}
+
+fn stroke_of(points: Vec<Point>) -> ardoise_proto::stroke::Stroke {
+    ardoise_proto::stroke::Stroke {
+        time: ardoise_proto::stroke::StrokeTime::Unknown,
+        pen: None,
+        points,
+        lost_points: 0,
+    }
+}
+
+/// The direction a list of page points goes, as (sign of dx, sign of dy).
+fn heading(points: &[(f32, f32)]) -> (i32, i32) {
+    let (first, last) = (points[0], points[points.len() - 1]);
+    let sign = |d: f32| {
+        if d.abs() < 1.0 {
+            0
+        } else if d > 0.0 {
+            1
+        } else {
+            -1
+        }
+    };
+    (sign(last.0 - first.0), sign(last.1 - first.1))
+}
+
+/// The page points of each stroke of a note.
+fn page_points(note: &ardoise_core::note::Note) -> Vec<Vec<(f32, f32)>> {
+    note.strokes
+        .iter()
+        .map(|s| s.points.iter().map(|p| (p.x, p.y)).collect())
+        .collect()
+}
+
+/// SPEC §4.1 (Q17): a page written with the blackboard held in each position becomes an upright
+/// note: its "Γ" goes up then right on the page, which is landscape for a landscape position; the
+/// note keeps the tablet's bytes and says the position.
+#[test]
+fn in_each_position_a_stored_page_becomes_an_upright_note() {
+    let _report = common::report("blackboard: the four positions, stored pages");
+    for position in BoardPosition::ALL {
+        let library = new_library();
+        let board = SimBoard::blackboard();
+        added_beforehand(&board, library.path());
+        let [up, right] = gamma(position);
+        board.draw_page(&[stroke_of(up), stroke_of(right)]);
+        let stored = board.stored_pages()[0].clone();
+        let mut run = Running::start(
+            vec![SimDevice::Board(board.clone())],
+            library.path(),
+            TabletOptions {
+                board_position: position,
+                // The Slate's own setting plays no part.
+                orientation: Orientation::PortraitRight,
+                ..TabletOptions::default()
+            },
+            Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+            store_with(|_| Ok(())),
+        );
+        let status = run.wait(|s| s.last_sync.is_some());
+        assert_eq!(status.last_sync.unwrap().error, None);
+        let (_, file) = the_note(library.path());
+        let page = file.note.page;
+        assert_eq!(page, board_page(position), "{position:?}");
+        assert_eq!(page.width > page.height, position.is_landscape());
+        let strokes = page_points(&file.note);
+        assert_eq!(strokes.len(), 2, "{position:?}");
+        assert_eq!(heading(&strokes[0]), (0, -1), "{position:?}: up the page");
+        assert_eq!(heading(&strokes[1]), (1, 0), "{position:?}: then right");
+        for &(x, y) in strokes.iter().flatten() {
+            assert!(
+                x <= page.width as f32 && y <= page.height as f32,
+                "{position:?}"
+            );
+        }
+        assert_eq!(file.original.as_deref(), Some(stored.bytes.as_slice()));
+        assert_eq!(board_position_of(&file), Ok(position));
+        say!("{position:?}: {} × {}", page.width, page.height);
+        run.service.shutdown();
+    }
+}
+
+/// Touching live records as page points, until `n` of them came.
+fn touching_points(inputs: &Receiver<LiveInput>, n: usize) -> Vec<(f32, f32)> {
+    let mut received = Vec::new();
+    while touching(&received).len() < n {
+        match inputs.recv_timeout(WAIT).expect("records in time") {
+            LiveInput::Records { records, .. } => received.extend(records),
+            LiveInput::State(LiveState::Stopped) => panic!("live mode stopped"),
+            _ => {}
+        }
+    }
+    touching(&received)
+        .into_iter()
+        .map(|(x, y, _)| (f32::from(x), f32::from(y)))
+        .collect()
+}
+
+/// A script writing the "Γ" of `position`.
+fn gamma_script(position: BoardPosition) -> PenScript {
+    let [up, right] = gamma(position);
+    PenScript::new()
+        .near(up)
+        .away(Duration::from_millis(300))
+        .near(right)
+        .away(Duration::from_millis(300))
+}
+
+/// The "Γ" received live goes up then right on a page of `size`.
+fn upright_gamma(points: &[(f32, f32)], size: ardoise_core::note::PageSize, what: &str) {
+    let (up, right) = points.split_at(20);
+    assert_eq!(heading(up), (0, -1), "{what}: up the page");
+    assert_eq!(heading(right), (1, 0), "{what}: then right");
+    for &(x, y) in points {
+        assert!(x <= size.width as f32 && y <= size.height as f32, "{what}");
+    }
+}
+
+/// SPEC §4.2 (Q17): in live mode each record is turned as it arrives, for the position set when
+/// the run starts: `Started` gives its quarter turns (the live page's size follows), the "Γ" goes
+/// up then right on the page. Changing the position during the run changes nothing to it; the next
+/// run takes the new one.
+#[test]
+fn in_each_position_live_mode_is_upright_and_a_run_keeps_its_position() {
+    let _report = common::report("blackboard: the four positions, live mode");
+    for position in BoardPosition::ALL {
+        let library = new_library();
+        let board = SimBoard::blackboard();
+        added_beforehand(&board, library.path());
+        let options = TabletOptions {
+            board_position: position,
+            ..TabletOptions::default()
+        };
+        let mut run = Running::start(
+            vec![SimDevice::Board(board.clone())],
+            library.path(),
+            options,
+            Arc::new(Writer {
+                board: board.clone(),
+                script: gamma_script(position),
+            }),
+            store_with(|_| Ok(())),
+        );
+        run.wait(|s| s.connection == Connection::Connected);
+        let (sender, inputs) = mpsc::channel();
+        run.service.start_live(Box::new(ChannelSink(sender)));
+        let (started, _) = records_until(&inputs, |i| matches!(i, LiveInput::Started { .. }));
+        assert_eq!(
+            started,
+            LiveInput::Started {
+                width: 20_500,
+                height: 27_200,
+                orientation: Orientation::from_quarter_turns(position.quarter_turns()),
+                kind: TabletKind::Blackboard,
+            },
+            "{position:?}"
+        );
+        let what = format!("{position:?}");
+        upright_gamma(&touching_points(&inputs, 30), board_page(position), &what);
+
+        // Set to another position during the run: the run keeps its own.
+        let other = BoardPosition::ALL
+            .into_iter()
+            .find(|p| p.quarter_turns() == (position.quarter_turns() + 1) % 4)
+            .unwrap();
+        run.service.set_options(TabletOptions {
+            board_position: other,
+            ..options
+        });
+        run.wait(|s| s.options.board_position == other);
+        board.draw_live(gamma_script(position));
+        let what = format!("{position:?} kept after {other:?} was set");
+        upright_gamma(&touching_points(&inputs, 30), board_page(position), &what);
+        run.service.stop_live();
+        records_until(&inputs, |i| *i == LiveInput::State(LiveState::Stopped));
+
+        // The next run is held as set now.
+        let (sender, inputs) = mpsc::channel();
+        run.service.start_live(Box::new(ChannelSink(sender)));
+        let (started, _) = records_until(&inputs, |i| matches!(i, LiveInput::Started { .. }));
+        let LiveInput::Started { orientation, .. } = started else {
+            unreachable!()
+        };
+        assert_eq!(
+            orientation.quarter_turns(),
+            other.quarter_turns(),
+            "{other:?}"
+        );
+        // The hand of the hook writes as before, holding the tablet as `position`: what it writes
+        // comes turned a quarter turn clockwise more, the tablet being set to `other` now.
+        let points = touching_points(&inputs, 30);
+        let (up, right) = points.split_at(20);
+        assert_eq!(heading(up), (1, 0), "{other:?}: the old hand's up");
+        assert_eq!(heading(right), (0, 1), "{other:?}: the old hand's right");
+        board.draw_live(gamma_script(other));
+        let what = format!("{other:?}, the next run");
+        upright_gamma(&touching_points(&inputs, 30), board_page(other), &what);
+        run.service.stop_live();
+        run.service.shutdown();
+    }
+}
+
+/// SPEC §4.1 (Q17): a screen stored with the blackboard held on its left side, the position then
+/// set to the right, the same screen written on and stored again: its note is updated and stays
+/// the way up it was made in (the same screen), through the service and its sync. A new screen
+/// then comes the way it is set now.
+#[test]
+fn a_screen_stored_again_after_the_position_changed_keeps_the_way_up_of_its_note() {
+    let _report = common::report("blackboard: a screen stored again in another position");
+    let library = new_library();
+    let board = SimBoard::blackboard();
+    added_beforehand(&board, library.path());
+    let options = TabletOptions {
+        board_position: BoardPosition::ButtonsLeft,
+        ..TabletOptions::default()
+    };
+    let mut run = Running::start(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        options,
+        Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+        store_with(|_| Ok(())),
+    );
+    run.wait(|s| s.connection == Connection::Connected);
+    let [up, right] = gamma(BoardPosition::ButtonsLeft);
+    board.write(&[stroke_of(up)]);
+    board.press_store();
+    let status = run.wait(|s| s.last_sync.is_some());
+    let (path, file) = the_note(library.path());
+    assert_eq!(board_position_of(&file), Ok(BoardPosition::ButtonsLeft));
+
+    run.service.set_options(TabletOptions {
+        board_position: BoardPosition::ButtonsRight,
+        ..options
+    });
+    run.wait(|s| s.options.board_position == BoardPosition::ButtonsRight);
+    board.write(&[stroke_of(right)]);
+    board.press_store();
+    let second = board.stored_pages()[0].clone();
+    let status = run.wait(|s| synced_after(s, &status.last_sync));
+    assert_eq!(status.last_sync.as_ref().unwrap().error, None);
+    let (again, file) = the_note(library.path());
+    assert_eq!(again, path, "the same note");
+    assert_eq!(file.original.as_deref(), Some(second.bytes.as_slice()));
+    assert_eq!(board_position_of(&file), Ok(BoardPosition::ButtonsLeft));
+    assert_eq!(file.note.page, board_page(BoardPosition::ButtonsLeft));
+    let strokes = page_points(&file.note);
+    assert_eq!(heading(&strokes[0]), (0, -1), "up the page");
+    assert_eq!(heading(&strokes[1]), (1, 0), "then right");
+
+    // A new screen comes the way it is set now.
+    board.erase();
+    let [up, _] = gamma(BoardPosition::ButtonsRight);
+    board.draw_page(&[stroke_of(up)]);
+    let status = run.wait(|s| synced_after(s, &status.last_sync));
+    let last = status.last_sync.unwrap();
+    assert_eq!((last.error, last.saved.len()), (None, 1));
+    let newest = PathBuf::from(&last.saved[0]);
+    assert_ne!(newest, path);
+    let file = Library::open(library.path())
+        .unwrap()
+        .read(&newest)
+        .unwrap()
+        .file;
+    assert_eq!(board_position_of(&file), Ok(BoardPosition::ButtonsRight));
+    assert_eq!(heading(&page_points(&file.note)[0]), (0, -1));
+    run.service.shutdown();
 }

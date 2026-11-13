@@ -18,7 +18,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use ardoise_core::library::Library;
 use ardoise_core::note::PageSize;
-use ardoise_core::settings::Orientation;
+use ardoise_core::settings::{BoardPosition, Orientation};
 use ardoise_proto::live::{self, LivePacket};
 use ardoise_proto::sysevent::{self, SysEvent};
 
@@ -152,6 +152,11 @@ struct LiveRun {
     /// The blackboard's stored pages were looked at before this run first streams (SPEC §4.2:
     /// fetched first, or the run refused).
     pages_checked: bool,
+    /// How the blackboard is held for this run: the position set when its `Started` was sent,
+    /// kept for the whole run, reconnections included (its page has that size and way up;
+    /// docs/design/blackboard.md, « Positions »). The Slate's runs follow their orientation
+    /// instead.
+    board_position: BoardPosition,
 }
 
 /// Why a synced page is not stored.
@@ -785,6 +790,7 @@ impl Worker {
         let context = PageContext {
             size: self.page_size(),
             orientation: self.config.options.orientation,
+            board_position: self.config.options.board_position,
         };
         self.note(format!(
             "sync: {total} pages on the tablet, {to_read} to read, delete after import: {delete}"
@@ -1097,6 +1103,7 @@ impl Worker {
             notifications: 0,
             kind,
             pages_checked: active,
+            board_position: self.config.options.board_position,
         };
         if active {
             // Live mode already streams (another sink before): the new one starts at once.
@@ -1117,10 +1124,12 @@ impl Worker {
     fn started(&self, run: &mut LiveRun) -> bool {
         if !run.started {
             let (width, height) = self.tablet_size();
+            // The blackboard's position holds for the whole run from here.
+            run.board_position = self.config.options.board_position;
             run.sink.input(LiveInput::Started {
                 width,
                 height,
-                orientation: self.holding(),
+                orientation: self.holding(run.board_position),
                 kind: self.link_kind().unwrap_or(TabletKind::Slate),
             });
             run.started = true;
@@ -1146,8 +1155,9 @@ impl Worker {
     /// oriented the old way, the ones after the new way.
     fn reoriented(&mut self) {
         if self.board.is_some() || self.live_kind() == Some(TabletKind::Blackboard) {
-            // The blackboard has no orientation: its page stays upright (also while its live
-            // mode waits for it).
+            // The Slate's orientation is not the blackboard's (its own is `board_position`, set
+            // for a live run when it starts): nothing turns (also while its live mode waits for
+            // it).
             self.note("orientation changed: not used by the blackboard");
             return;
         }
@@ -1500,6 +1510,26 @@ impl Worker {
         if options.orientation != before.orientation {
             self.reoriented();
         }
+        if options.board_position != before.board_position {
+            // A blackboard run keeps the position it started with (its page has that size and
+            // way up); the next run, and the next sync, take the new one.
+            let held = self
+                .live
+                .as_ref()
+                .filter(|run| run.started && run.kind == Some(TabletKind::Blackboard))
+                .map(|run| run.board_position);
+            match held {
+                Some(held) => self.note(format!(
+                    "blackboard position changed to {}: this live run keeps {}",
+                    options.board_position.name(),
+                    held.name()
+                )),
+                None => self.note(format!(
+                    "blackboard position changed to {}",
+                    options.board_position.name()
+                )),
+            }
+        }
         // The blackboard's pages are imported automatically only when they may be deleted.
         let may_sync =
             self.session.is_some() || (self.board.is_some() && options.delete_after_import);
@@ -1729,11 +1759,13 @@ impl Worker {
         }
     }
 
-    /// How the tablet of the link is held: as the settings say for a Slate; the blackboard has
-    /// no orientation (its page is upright, never turned).
-    fn holding(&self) -> Orientation {
+    /// How the tablet of the link is held, as the live hub counts it (the clockwise quarter
+    /// turns from the tablet's own frame to the page, named as the Slate's positions): as the
+    /// settings say for a Slate; for the blackboard, the quarter turns of `board` (the run's
+    /// position), whose records [`board_forward`](Self::board_forward) turns that way.
+    fn holding(&self, board: BoardPosition) -> Orientation {
         if self.board.is_some() {
-            Orientation::Landscape
+            Orientation::from_quarter_turns(board.quarter_turns())
         } else {
             self.config.options.orientation
         }

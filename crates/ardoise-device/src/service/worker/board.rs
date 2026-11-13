@@ -51,7 +51,7 @@ use crate::blackboard::{
 use crate::identity::{
     self, BLACKBOARD_FORMAT, BLACKBOARD_PROTOCOL, BlackboardRecord, DeviceRecord,
 };
-use crate::pages::BLACKBOARD_PAGE;
+use crate::pages::{BLACKBOARD_PAGE, orient_board_record};
 use crate::rescue::{self, RescueKind, RescueStore};
 use crate::service::{
     BLACKBOARD_MODEL_NAME, BLACKBOARD_NAME, BOARD_SEARCH, BOARD_SEARCH_SLICE, BoardSearch,
@@ -643,9 +643,12 @@ impl Worker {
             delete: true,
             saved: Vec::new(),
             deleted: 0,
+            // The position in force when the sync starts holds for its pages (each new note
+            // records it).
             context: PageContext {
                 size: BLACKBOARD_PAGE,
                 orientation: Orientation::Landscape,
+                board_position: self.config.options.board_position,
             },
             permission,
             board: BoardSync::default(),
@@ -1001,14 +1004,24 @@ impl Worker {
         self.publisher.update(|status| status.pending = pending);
     }
 
-    /// Hands the records of a notification to the sink (the blackboard's page is never turned).
-    /// Records of an unknown status, or bytes of a partial record, are noted and keep the log.
+    /// Hands the records of a notification to the sink, turned upright for the run's position
+    /// ([`orient_board_record`]: the position set when the run started, which its `Started`
+    /// gave the hub). Records of an unknown status, or bytes of a partial record, are noted and
+    /// keep the log.
     pub(super) fn board_forward(&mut self, notification: LiveNotification) {
         match notification.channel {
             Channel::BoardData => {
                 let decoded = decode_records(&notification.data);
-                let records: Vec<LiveRecord> =
-                    decoded.records.iter().filter_map(Record::to_live).collect();
+                let position = self
+                    .live
+                    .as_ref()
+                    .map_or(self.config.options.board_position, |run| run.board_position);
+                let records: Vec<LiveRecord> = decoded
+                    .records
+                    .iter()
+                    .filter_map(Record::to_live)
+                    .map(|record| orient_board_record(record, position))
+                    .collect();
                 let unknown = decoded.records.len() - records.len();
                 if unknown > 0 || decoded.trailing > 0 {
                     self.note(format!(

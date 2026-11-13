@@ -253,6 +253,91 @@ impl From<Orientation> for String {
     }
 }
 
+/// How the Xiaomi blackboard is held (SPEC §4.1, `docs/questions.md` Q17): four positions, named
+/// after where its two buttons end up for the user (they are on the bottom band of the tablet
+/// held upright, under its screen). Ardoise turns what the blackboard writes back to the way up
+/// of the page, by [`quarter_turns`](Self::quarter_turns) clockwise quarter turns, and a
+/// landscape position makes landscape pages (width and height swapped). The blackboard's own
+/// counterpart of the Slate's [`Orientation`], independent of it.
+///
+/// **Physical meaning** (docs/design/blackboard.md, « Positions »): `ButtonsLeft` is the tablet
+/// turned a quarter turn clockwise from upright (its bottom edge, where the buttons are, moves
+/// to the left); its pen then writes in its own frame turned a quarter turn clockwise for the
+/// user, so its points are turned a quarter turn clockwise to be upright. `ButtonsRight` is the
+/// quarter turn anticlockwise (three clockwise), `ButtonsTop` the half turn. The same numbers as
+/// `drawingTurns` of `app/ui/src/lib/board-position.ts` (the pictures of the settings).
+///
+/// Stored as `"buttonsBottom"`, `"buttonsTop"`, `"buttonsRight"` or `"buttonsLeft"` (the same
+/// words on the wire, where any other value is refused). In `ardoise.toml`, a file without it
+/// (older Ardoise) or with another value loads as [`ButtonsBottom`](Self::ButtonsBottom).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BoardPosition {
+    /// Upright, as the tablet is drawn: portrait, the buttons on the bottom band. The tablet's
+    /// own frame.
+    #[default]
+    ButtonsBottom,
+    /// Half a turn from upright: portrait, the buttons at the top.
+    ButtonsTop,
+    /// A quarter turn anticlockwise from upright: landscape, the buttons on the right.
+    ButtonsRight,
+    /// A quarter turn clockwise from upright: landscape, the buttons on the left.
+    ButtonsLeft,
+}
+
+impl BoardPosition {
+    /// Every position, in the order the interface lists them.
+    pub const ALL: [BoardPosition; 4] = [
+        BoardPosition::ButtonsBottom,
+        BoardPosition::ButtonsTop,
+        BoardPosition::ButtonsRight,
+        BoardPosition::ButtonsLeft,
+    ];
+
+    /// How many clockwise quarter turns bring the blackboard's own coordinates to the page's
+    /// (and the upright picture of the tablet to this position).
+    pub fn quarter_turns(self) -> u8 {
+        match self {
+            BoardPosition::ButtonsBottom => 0,
+            BoardPosition::ButtonsLeft => 1,
+            BoardPosition::ButtonsTop => 2,
+            BoardPosition::ButtonsRight => 3,
+        }
+    }
+
+    /// The tablet is held wider than tall (its buttons on a side).
+    pub fn is_landscape(self) -> bool {
+        self.quarter_turns() % 2 == 1
+    }
+
+    /// Size of the page for the tablet's area of `width` × `height` (its own portrait frame;
+    /// swapped in a landscape position).
+    pub fn page_size(self, width: u32, height: u32) -> (u32, u32) {
+        if self.is_landscape() {
+            (height, width)
+        } else {
+            (width, height)
+        }
+    }
+
+    /// The word stored for this position (settings, the wire, the notes).
+    pub fn name(self) -> &'static str {
+        match self {
+            BoardPosition::ButtonsBottom => "buttonsBottom",
+            BoardPosition::ButtonsTop => "buttonsTop",
+            BoardPosition::ButtonsRight => "buttonsRight",
+            BoardPosition::ButtonsLeft => "buttonsLeft",
+        }
+    }
+
+    /// The position stored as `name`; `None` for any other word.
+    pub fn from_name(name: &str) -> Option<BoardPosition> {
+        BoardPosition::ALL
+            .into_iter()
+            .find(|position| position.name() == name)
+    }
+}
+
 /// What the tablet's button does in live mode (SPEC §4.2). Stored as `"newPage"` or
 /// `"newLayer"`; any other value loads as a new page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -299,8 +384,11 @@ pub struct TabletSettings {
     pub auto_sync: bool,
     /// Delete each page from the tablet once its note is written and checked.
     pub delete_after_import: bool,
-    /// How the tablet is held.
+    /// How the tablet is held (the Slate).
     pub orientation: Orientation,
+    /// How the Xiaomi blackboard is held (`board_position`): its own setting, independent of
+    /// the Slate's `orientation`.
+    pub board_position: BoardPosition,
     /// What the tablet's button does in live mode.
     pub button: LiveButton,
     /// Keys this version does not know about, kept verbatim.
@@ -318,6 +406,10 @@ struct RawTabletSettings {
     orientation: Option<Orientation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     hand: Option<String>,
+    /// Read as any value, so that one this version does not know (another word, a number) loads as
+    /// the default instead of making the file unreadable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    board_position: Option<toml::Value>,
     #[serde(default)]
     button: LiveButton,
     #[serde(flatten)]
@@ -332,6 +424,12 @@ impl From<RawTabletSettings> for TabletSettings {
             orientation: raw
                 .orientation
                 .or_else(|| raw.hand.map(Orientation::from))
+                .unwrap_or_default(),
+            board_position: raw
+                .board_position
+                .as_ref()
+                .and_then(toml::Value::as_str)
+                .and_then(BoardPosition::from_name)
                 .unwrap_or_default(),
             button: raw.button,
             extra: raw.extra,
@@ -352,6 +450,9 @@ impl From<TabletSettings> for RawTabletSettings {
             delete_after_import: settings.delete_after_import,
             orientation: Some(settings.orientation),
             hand: Some(hand.to_owned()),
+            board_position: Some(toml::Value::String(
+                settings.board_position.name().to_owned(),
+            )),
             button: settings.button,
             extra: settings.extra,
         }
@@ -364,6 +465,7 @@ impl Default for TabletSettings {
             auto_sync: true,
             delete_after_import: true,
             orientation: Orientation::Landscape,
+            board_position: BoardPosition::ButtonsBottom,
             button: LiveButton::NewPage,
             extra: toml::Table::new(),
         }
@@ -1900,5 +2002,112 @@ button = \"newLayer\"
             Orientation::LandscapeFlipped.turns_from(Orientation::PortraitLeft),
             1
         );
+    }
+
+    #[test]
+    fn the_blackboard_position_is_its_own_setting_and_unknown_words_load_as_upright() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        let position = |toml: &str| {
+            fs::write(store.path(), toml).unwrap();
+            store.load().unwrap().tablet.board_position
+        };
+        // An older file, an empty one, a word of a newer version: upright.
+        assert_eq!(position(""), BoardPosition::ButtonsBottom);
+        assert_eq!(
+            position("[tablet]\norientation = \"portraitLeft\"\n"),
+            BoardPosition::ButtonsBottom
+        );
+        assert_eq!(
+            position("[tablet]\nboard_position = \"buttonsDiagonal\"\n"),
+            BoardPosition::ButtonsBottom
+        );
+        assert_eq!(
+            position("[tablet]\nboard_position = 3\n"),
+            BoardPosition::ButtonsBottom
+        );
+        for known in BoardPosition::ALL {
+            let text = format!("[tablet]\nboard_position = \"{}\"\n", known.name());
+            assert_eq!(position(&text), known);
+        }
+
+        // Written next to the Slate's orientation, which it leaves alone; other keys stay.
+        fs::write(
+            store.path(),
+            "[tablet]\norientation = \"portraitRight\"\nfuture = 1\n",
+        )
+        .unwrap();
+        let updated = store
+            .update(|s| s.tablet.board_position = BoardPosition::ButtonsLeft)
+            .unwrap();
+        assert_eq!(updated.tablet.orientation, Orientation::PortraitRight);
+        let text = fs::read_to_string(store.path()).unwrap();
+        assert!(text.contains("board_position = \"buttonsLeft\""), "{text}");
+        assert!(text.contains("orientation = \"portraitRight\""), "{text}");
+        assert!(text.contains("future = 1"), "{text}");
+        let loaded = store.load().unwrap().tablet;
+        assert_eq!(loaded.board_position, BoardPosition::ButtonsLeft);
+        assert_eq!(loaded.orientation, Orientation::PortraitRight);
+        assert!(!loaded.extra.contains_key("board_position"));
+
+        // An older Ardoise (no such field) keeps the key in its unknown keys.
+        #[derive(Deserialize)]
+        struct OlderTablet {
+            #[serde(flatten)]
+            rest: toml::Table,
+        }
+        #[derive(Deserialize)]
+        struct OlderFile {
+            tablet: OlderTablet,
+        }
+        let older: OlderFile = toml::from_str(&text).unwrap();
+        assert_eq!(
+            older.tablet.rest.get("board_position"),
+            Some(&toml::Value::String("buttonsLeft".into()))
+        );
+    }
+
+    #[test]
+    fn blackboard_positions_are_quarter_turns_named_on_the_wire_as_in_the_file() {
+        assert_eq!(BoardPosition::default(), BoardPosition::ButtonsBottom);
+        // The table of `drawingTurns` (app/ui/src/lib/board-position.ts).
+        let turns: Vec<(BoardPosition, u8)> = BoardPosition::ALL
+            .into_iter()
+            .map(|p| (p, p.quarter_turns()))
+            .collect();
+        assert_eq!(
+            turns,
+            [
+                (BoardPosition::ButtonsBottom, 0),
+                (BoardPosition::ButtonsTop, 2),
+                (BoardPosition::ButtonsRight, 3),
+                (BoardPosition::ButtonsLeft, 1),
+            ]
+        );
+        for position in BoardPosition::ALL {
+            assert_eq!(BoardPosition::from_name(position.name()), Some(position));
+            assert_eq!(
+                serde_json::to_value(position).unwrap(),
+                serde_json::Value::String(position.name().into())
+            );
+            assert_eq!(
+                serde_json::from_value::<BoardPosition>(position.name().into()).unwrap(),
+                position
+            );
+            let (width, height) = position.page_size(20_500, 27_200);
+            assert_eq!(position.is_landscape(), width > height, "{position:?}");
+        }
+        assert!(!BoardPosition::ButtonsBottom.is_landscape());
+        assert!(!BoardPosition::ButtonsTop.is_landscape());
+        assert!(BoardPosition::ButtonsLeft.is_landscape());
+        assert!(BoardPosition::ButtonsRight.is_landscape());
+        // On the wire, a word it does not know is refused (the interface's own check).
+        for bad in ["buttonsDiagonal", "ButtonsBottom", "landscape", ""] {
+            assert!(
+                serde_json::from_value::<BoardPosition>(bad.into()).is_err(),
+                "{bad}"
+            );
+            assert_eq!(BoardPosition::from_name(bad), None, "{bad}");
+        }
     }
 }

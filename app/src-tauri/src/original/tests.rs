@@ -107,6 +107,7 @@ fn a_tablet_note_goes_back_to_what_the_tablet_sent() {
         let context = PageContext {
             size: SLATE,
             orientation,
+            board_position: Default::default(),
         };
         let path = store_page_in(
             Some(&store),
@@ -546,11 +547,14 @@ fn a_split_keeps_the_original_of_the_note_and_none_for_the_new_one() {
     );
 }
 
-/// A page of the Xiaomi blackboard comes back on the blackboard's own page, never turned,
-/// whatever this PC's orientation and registered tablet (its bytes say what they are).
+/// A page of the Xiaomi blackboard comes back on the blackboard's own page, turned as its note
+/// was made (the position it records), whatever this PC's orientation, registered tablet and
+/// blackboard position now (its bytes say what they are). A note made before the positions comes
+/// back upright.
 #[test]
 fn a_blackboard_note_goes_back_to_what_the_blackboard_sent() {
-    use ardoise_device::pages::BLACKBOARD_PAGE;
+    use ardoise_core::settings::BoardPosition;
+    use ardoise_device::pages::{BLACKBOARD_PAGE, BOARD_POSITION_FIELD, board_page};
     use ardoise_device::transport::TabletKind;
     let board = ardoise_sim::SimBoard::blackboard();
     board.draw_page(&ardoise_sim::reference_board_pages()[0]);
@@ -562,28 +566,69 @@ fn a_blackboard_note_goes_back_to_what_the_blackboard_sent() {
         kind: TabletKind::Blackboard,
         previous: None,
     };
+    for (made, now) in [
+        (BoardPosition::ButtonsBottom, BoardPosition::ButtonsLeft),
+        (BoardPosition::ButtonsLeft, BoardPosition::ButtonsRight),
+        (BoardPosition::ButtonsTop, BoardPosition::ButtonsBottom),
+        (BoardPosition::ButtonsRight, BoardPosition::ButtonsRight),
+    ] {
+        let settings_dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::locate(settings_dir.path(), settings_dir.path(), "PC-TEST");
+        let (dir, library) = library();
+        let context = PageContext {
+            size: BLACKBOARD_PAGE,
+            orientation: Orientation::Landscape,
+            board_position: made,
+        };
+        let path = store_page_in(
+            Some(&store),
+            Some("fr-FR"),
+            dir.path(),
+            page.clone(),
+            &context,
+        )
+        .unwrap();
+        let synced = library.read(&path).unwrap();
+        assert_eq!(synced.file.note.page, board_page(made));
+        let settings = store
+            .update(|s| {
+                s.tablet.orientation = Orientation::PortraitLeft;
+                s.tablet.board_position = now;
+            })
+            .unwrap();
+        let tablet = TabletContext::of(dir.path(), &settings, Some("fr-FR"));
+        let original = original_in(&library, &path, &tablet).unwrap();
+        assert!(matches!(original, NoteOriginal::Tablet { .. }));
+        assert_eq!(
+            ink(original),
+            (
+                synced.file.note.page,
+                synced.file.note.layers.clone(),
+                synced.file.note.strokes.clone()
+            ),
+            "made {made:?}, set to {now:?} now"
+        );
+    }
+
+    // Made before the positions (no field): upright, whatever is set now.
     let settings_dir = tempfile::tempdir().unwrap();
     let store = SettingsStore::locate(settings_dir.path(), settings_dir.path(), "PC-TEST");
-    let settings = store
-        .update(|s| s.tablet.orientation = Orientation::PortraitLeft)
-        .unwrap();
     let (dir, library) = library();
     let context = PageContext {
         size: BLACKBOARD_PAGE,
         orientation: Orientation::Landscape,
+        board_position: BoardPosition::ButtonsBottom,
     };
     let path = store_page_in(Some(&store), Some("fr-FR"), dir.path(), page, &context).unwrap();
-    let synced = library.read(&path).unwrap();
-    assert_eq!(synced.file.note.page, BLACKBOARD_PAGE);
+    let loaded = library.read(&path).unwrap();
+    let mut older = loaded.file.clone();
+    older.unknown_fields.remove(BOARD_POSITION_FIELD);
+    library.save(&path, &older, &loaded.stamp).unwrap();
+    let settings = store
+        .update(|s| s.tablet.board_position = BoardPosition::ButtonsLeft)
+        .unwrap();
     let tablet = TabletContext::of(dir.path(), &settings, Some("fr-FR"));
-    let original = original_in(&library, &path, &tablet).unwrap();
-    assert!(matches!(original, NoteOriginal::Tablet { .. }));
-    assert_eq!(
-        ink(original),
-        (
-            synced.file.note.page,
-            synced.file.note.layers.clone(),
-            synced.file.note.strokes.clone()
-        )
-    );
+    let (page_size, _, strokes) = ink(original_in(&library, &path, &tablet).unwrap());
+    assert_eq!(page_size, BLACKBOARD_PAGE);
+    assert_eq!(strokes, loaded.file.note.strokes);
 }

@@ -5,7 +5,9 @@
 //!   decoded again with [`note_from_page`], exactly as the synchronisation decoded it, with this
 //!   PC's tablet size and orientation (the registered tablet's drawing area, else the Bamboo Slate's;
 //!   the orientation of the settings). A page of the Xiaomi blackboard is recognised from its bytes
-//!   ([`page_kind`]) and comes back on the blackboard's own page, never turned.
+//!   ([`page_kind`]) and comes back on the blackboard's own page, turned for the position the note
+//!   records it was made in ([`board_position_of`]: upright for a note made before the positions),
+//!   whatever the position set now.
 //! - Any other note (live mode, Inkspace import, made in Ardoise) gets `original.ardoise` when
 //!   the editor first saves a change of its ink over it ([`keep_original`], called by
 //!   `notes::save_in`), or when live mode first writes new ink on it ([`keep_resumed_original`],
@@ -31,7 +33,7 @@ use ardoise_core::library::Library;
 use ardoise_core::note::{BackgroundImage, Layer, Note, PageSize, Paper};
 use ardoise_core::settings::{Orientation, Settings};
 use ardoise_device::identity;
-use ardoise_device::pages::{note_from_page, page_kind};
+use ardoise_device::pages::{board_position_of, note_from_page, page_kind};
 use ardoise_device::session::DownloadedPage;
 use ardoise_ink::Stroke;
 use serde::Serialize;
@@ -141,10 +143,15 @@ pub fn original_of(file: &NoteFile, tablet: &TabletContext) -> CommandResult<Not
             kind: page_kind(bytes),
             previous: None,
         };
+        // A page of the blackboard comes back the way up it was made in (its note says how the
+        // blackboard was held; a position this version does not know: upright, the tablet's
+        // own frame).
+        let board_position = board_position_of(file).unwrap_or_default();
         let decoded = note_from_page(
             &page,
             tablet.size,
             tablet.orientation,
+            board_position,
             file.note.id.clone(),
             tablet.layer_name,
             now_ms(),
