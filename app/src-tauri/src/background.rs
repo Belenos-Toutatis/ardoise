@@ -141,7 +141,7 @@ fn kind_of(head: &[u8]) -> Result<SourceKind, CommandError> {
 
 /// The file at `path`, read whole, and its kind: its first kilobyte says what it is, and a file
 /// larger than its kind may be is refused before the rest is read.
-fn read_source(path: &Path) -> CommandResult<(Vec<u8>, SourceKind)> {
+pub(crate) fn read_source(path: &Path) -> CommandResult<(Vec<u8>, SourceKind)> {
     let read_error = |error: std::io::Error| {
         CommandError::new(
             "backgroundUnreadable",
