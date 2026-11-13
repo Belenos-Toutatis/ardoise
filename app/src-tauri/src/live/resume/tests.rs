@@ -36,7 +36,7 @@ use super::super::paper::LivePageImageOp;
 use super::super::session::LiveSession;
 use super::super::tests::{
     A5, Window, audio_of, break_folder, change, config, fixed, keys, note_narration, notes_in,
-    options, pen, send, stream_simulated_start, stroke, stroke_count, wait_until,
+    options, pen, send, stream_simulated_start, stroke, stroke_count, text_frame, wait_until,
 };
 use super::{
     PenMapping, RESUME_GAP_MS, ResumeSeed, held_for, hold_for, merged_keeping_both,
@@ -94,11 +94,13 @@ fn layer(name: &str, visible: bool) -> Layer {
     }
 }
 
-/// A file holding everything a note file can hold, on a sheet of `page`.
+/// A file holding everything a note file can hold, on a sheet of `page`: a text frame too (shown at
+/// 4.5 s, within the ink's time: the time base stays the strokes').
 fn full_file(page: PageSize) -> NoteFile {
     let mut note = sheet(page);
     note.tags = vec!["4e".to_owned()];
     note.favorite = true;
+    note.objects = vec![text_frame("consigne", 0, 4_500, 1_000.0, 500.0)];
     note.background = Background {
         paper: Paper::Cream,
         template: Template::Seyes,
@@ -771,6 +773,7 @@ fn assert_keeps_all_but_ink(written: &NoteFile, before: &NoteFile) {
         (&a.tags, a.favorite, &a.layers),
         (&b.tags, b.favorite, &b.layers)
     );
+    assert_eq!(a.objects, b.objects, "its text frames, where they were");
     assert_eq!((a.timing, &a.origin), (b.timing, &b.origin));
     assert_eq!(*original, before.original);
     assert_eq!(*background, before.background);
@@ -852,6 +855,7 @@ fn a_resumed_note_keeps_every_member_through_a_real_save_and_reload() {
         strokes,
         page,
         layers,
+        objects,
         paper,
         background_image,
     } = original_of(&written, &tablet_context()).unwrap()
@@ -859,6 +863,7 @@ fn a_resumed_note_keeps_every_member_through_a_real_save_and_reload() {
         panic!("no first version");
     };
     assert_eq!(strokes, before.note.strokes);
+    assert_eq!(objects, before.note.objects);
     assert_eq!(
         (page, layers),
         (before.note.page, before.note.layers.clone())
@@ -977,6 +982,8 @@ fn what_an_original_becomes_when_a_note_is_resumed() {
 fn blank_worksheet(page: PageSize) -> NoteFile {
     let mut file = full_file(page);
     file.note.strokes.clear();
+    // Blank: nothing drawn (a sheet of text frames only has its own test).
+    file.note.objects.clear();
     file.note.background.paper = Paper::Kraft;
     file.audio = None;
     file
@@ -990,6 +997,7 @@ fn back_to_the_original(library: &Library, path: &Path) -> NoteFile {
         page,
         layers,
         strokes,
+        objects,
         paper,
         background_image,
     } = original_of(&loaded.file, &tablet_context()).unwrap()
@@ -997,7 +1005,7 @@ fn back_to_the_original(library: &Library, path: &Path) -> NoteFile {
         panic!("no first version");
     };
     let mut note = loaded.file.note.clone();
-    (note.page, note.layers, note.strokes) = (page, layers, strokes);
+    (note.page, note.layers, note.strokes, note.objects) = (page, layers, strokes, objects);
     note.background_image = background_image;
     if note.background.paper == Paper::Slate && paper != Paper::Slate {
         note.background.paper = paper;
@@ -1026,13 +1034,14 @@ fn a_blank_worksheet_written_on_can_go_back_to_being_blank() {
         strokes,
         layers,
         page,
+        objects,
         paper,
         background_image,
     } = original_of(&written, &tablet_context()).unwrap()
     else {
         panic!("no first version");
     };
-    assert!(strokes.is_empty());
+    assert!(strokes.is_empty() && objects.is_empty());
     assert_eq!(
         (page, layers, paper),
         (before.note.page, before.note.layers.clone(), Paper::Kraft)
@@ -1100,6 +1109,7 @@ fn a_note_changed_elsewhere_is_left_alone_and_the_page_goes_on_in_its_binder() {
     let written = library.read(&new_path).unwrap().file;
     assert_ne!(written.note.id, before.note.id);
     assert_eq!(written.note.strokes.len(), 3);
+    assert_eq!(written.note.objects, before.note.objects);
     assert_eq!(written.background, before.background);
     assert_eq!(written.audio, before.audio);
     assert_eq!(written.text, before.text);
@@ -1265,6 +1275,7 @@ fn a_note_deleted_during_the_resume_becomes_a_new_note_in_its_binder_with_its_im
     );
     let written = library.read(&new_path).unwrap().file;
     assert_eq!(written.note.strokes.len(), 3);
+    assert_eq!(written.note.objects, before.note.objects);
     assert_eq!(written.background, before.background);
     assert_eq!(written.note.background_image, before.note.background_image);
     assert_eq!(written.note.created, before.note.created);
@@ -1308,6 +1319,10 @@ fn a_note_only_retitled_or_moved_goes_on_receiving_the_page_with_all_it_holds() 
         (written.note.title.as_str(), written.note.tags.clone()),
         ("Optique", vec!["optique".to_owned()])
     );
+    // The page whole but for what the library changed: its text frame too.
+    assert!(!before.note.objects.is_empty());
+    assert_eq!(written.note.objects, before.note.objects);
+    assert_eq!(written.note.layers, before.note.layers);
     assert_eq!(written.background, before.background);
     assert_eq!(written.text, before.text);
     assert_eq!(written.unknown_fields, before.unknown_fields);
@@ -3299,5 +3314,227 @@ fn a_sheet_resumed_with_a_tablet_that_does_not_fit_it_ends_at_once_with_nothing_
     let written = library.read(&path).unwrap().file;
     let point = written.note.strokes[2].points[0];
     assert_eq!((point.x, point.y), (3000.0, 1000.0));
+    hub.stop().unwrap();
+}
+
+// --- Text frames of a resumed sheet (format 1.4) -------------------------------------------------
+
+/// A sheet with a text frame on each of two layers, the second one hidden; the visible frame shows
+/// at 9 s in the replay, after the ink.
+fn sheet_with_frames() -> Note {
+    let mut note = sheet(A4_LANDSCAPE);
+    note.layers.push(layer("Réponses", false));
+    note.objects = vec![
+        text_frame("consigne", 0, 9_000, 1_000.0, 500.0),
+        text_frame("réponse", 1, 2_000, 1_000.0, 8_000.0),
+    ];
+    note
+}
+
+/// (id, layer) of every page object of `note`, in list order.
+fn frames_of(note: &Note) -> Vec<(String, u32)> {
+    note.objects
+        .iter()
+        .map(|object| (object.id.clone(), object.layer))
+        .collect()
+}
+
+/// The text frames of a resumed sheet show (the control window gets them all, a hidden one with
+/// its hidden layer), stay where they are when the tablet is switched (the sheet never turns) and
+/// through « Clear the page » (only strokes go, and come back), and the new ink comes after the
+/// last of them in the replay.
+#[test]
+fn a_resumed_sheet_keeps_its_text_frames_in_place() {
+    let note = sheet_with_frames();
+    assert_eq!(time_base(&note, None), 9_000 + RESUME_GAP_MS);
+    let mut session = resumed(note.clone(), Orientation::Landscape);
+    assert_eq!(session.snapshot().page.objects, note.objects);
+    let point = write_at(&mut session, 10, 10, RESUMED_AT + 2_000);
+    assert_eq!(point.t, 9_000 + RESUME_GAP_MS + 2_000);
+
+    // The quick switch to the other orientations: neither the sheet nor its frames move.
+    let mut out = Vec::new();
+    for orientation in [
+        Orientation::PortraitLeft,
+        Orientation::LandscapeFlipped,
+        Orientation::PortraitRight,
+        Orientation::Landscape,
+    ] {
+        session.reorient(29_700, 21_600, orientation, &mut out);
+        let page = &session.pages()[0];
+        assert_eq!(page.note.objects, note.objects, "{orientation:?}");
+        assert_eq!(page.note.page, note.page, "{orientation:?}");
+        assert_eq!(session.snapshot().page.objects, note.objects);
+    }
+
+    // Cleared: every visible stroke goes, the frames stay (on both layers); undone: the strokes
+    // come back, the frames are still there.
+    session.command(
+        LiveCommandKind::ClearPage,
+        LiveButton::NewPage,
+        RESUMED_AT + 3_000,
+        &mut out,
+    );
+    let page = &session.pages()[0];
+    assert!(page.note.strokes.is_empty());
+    assert_eq!(page.note.objects, note.objects);
+    assert_eq!(session.snapshot().page.objects, note.objects);
+    assert!(session.restore_cleared_with(None, &mut out));
+    assert_eq!(session.pages()[0].note.strokes.len(), 3);
+    assert_eq!(session.pages()[0].note.objects, note.objects);
+    // The blackboard's screen erased: the frames were never on it; with ink, a new page as ever.
+    session.screen_erased(RESUMED_AT + 4_000, &mut out);
+    assert_eq!(session.pages().len(), 2);
+    assert_eq!(session.pages()[0].note.objects, note.objects);
+    assert!(
+        session.pages()[1].note.objects.is_empty(),
+        "a new page has none"
+    );
+}
+
+/// A sheet that holds only text frames (a worksheet typed in the editor) is resumed like any other:
+/// nothing written while nothing changes; then written with its frames and the new ink, which comes
+/// after them in the replay, the frames alone kept as its first version.
+#[test]
+fn a_sheet_of_text_frames_only_is_resumed_written_and_kept() {
+    let (_dir, library) = library();
+    let mut worksheet = blank_note("Exercices", "Calque 1", CREATED);
+    worksheet.page = A5;
+    worksheet.objects = vec![text_frame("consigne", 0, 0, 1_000.0, 500.0)];
+    let path = filed(&library, "Classe", &NoteFile::new(worksheet));
+    let before = library.read(&path).unwrap().file;
+    let (bytes, stamp) = (std::fs::read(&path).unwrap(), FileStamp::of(&path).unwrap());
+    let hub = LiveHub::new(config());
+    let mut sink = resume(&hub, &library, &path, A5);
+    assert_eq!(hub.snapshot().page.objects, before.note.objects);
+    // Its blackboard screen erased before any ink: the sheet stays on screen.
+    hub.change_at_once(|session, out| session.screen_erased(now_ms(), out));
+    assert_eq!(hub.snapshot().page_count, 1);
+    std::thread::sleep(config().save_interval * 2);
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        bytes,
+        "nothing changed, nothing written"
+    );
+    assert_eq!(FileStamp::of(&path).unwrap(), stamp);
+
+    stroke(&mut sink, 3000, 5);
+    wait_until("the first write", || {
+        stroke_count(&library, &path) == Some(1)
+    });
+    hub.stop().unwrap();
+    let written = library.read(&path).unwrap().file;
+    assert_eq!(written.note.objects, before.note.objects);
+    assert!(written.note.strokes[0].points[0].t >= RESUME_GAP_MS);
+    assert_eq!(notes_in(&library), std::slice::from_ref(&path));
+    // Its first version: the frames alone, which « Back to the original » gives back.
+    let restored = back_to_the_original(&library, &path);
+    assert!(restored.note.strokes.is_empty());
+    assert_eq!(restored.note.objects, before.note.objects);
+}
+
+/// The layers zone of the live window on a sheet with text frames: a move and a merge take the
+/// frames with their layers (a merge puts the merged layer's after the lower layer's, as the
+/// editor does), and the sheet is written so; their places on the page do not change. The sheet
+/// was retitled from the library meanwhile: it receives the page all the same, frames included
+/// (`hub::merge_outside`), and stays one note.
+#[test]
+fn the_text_frames_of_a_resumed_sheet_follow_its_layers() {
+    let (_dir, library) = library();
+    let path = filed(&library, "", &NoteFile::new(sheet_with_frames()));
+    let before = library.read(&path).unwrap().file.note;
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A4_LANDSCAPE);
+    let path = library.retitle(&path, "Optique", None).unwrap().path;
+    // « Réponses » goes under « Calque 1 »: their frames swap layers, in the same order.
+    hub.layers(0, layer_op(json!({ "kind": "move", "from": 1, "to": 0 })))
+        .unwrap();
+    assert_eq!(
+        frames_of(&hub.snapshot().page),
+        [("consigne".to_owned(), 1), ("réponse".to_owned(), 0)]
+    );
+    // « Calque 1 » merged into « Réponses »: its frame after the other one.
+    hub.layers(0, layer_op(json!({ "kind": "merge", "layer": 1 })))
+        .unwrap();
+    let expected = [("réponse".to_owned(), 0), ("consigne".to_owned(), 0)];
+    assert_eq!(frames_of(&hub.snapshot().page), expected);
+    hub.stop().unwrap();
+    assert_eq!(notes_in(&library), std::slice::from_ref(&path), "one note");
+    let written = library.read(&path).unwrap().file.note;
+    assert_eq!(written.title, "Optique");
+    assert_eq!(written.layers.len(), 1);
+    assert_eq!(frames_of(&written), expected);
+    for object in &written.objects {
+        let was = before.objects.iter().find(|o| o.id == object.id).unwrap();
+        assert_eq!((object.x, object.y, object.t), (was.x, was.y, was.t));
+    }
+}
+
+/// What live mode compares to know that a note changed elsewhere sees its text frames: moved,
+/// retyped, added or taken away; not a box the writer measures again, nor a write and a read.
+#[test]
+fn the_fingerprint_sees_a_change_of_the_text_frames_alone() {
+    let file = full_file(A5);
+    let print = file_fingerprint(&file).unwrap();
+    let with = |change: &dyn Fn(&mut NoteFile)| {
+        let mut changed = file.clone();
+        change(&mut changed);
+        file_fingerprint(&changed).unwrap()
+    };
+    assert_ne!(with(&|f| f.note.objects[0].x += 1.0), print);
+    assert_ne!(with(&|f| f.note.objects[0].t += 1), print);
+    assert_ne!(with(&|f| f.note.objects[0].quarter_turns = 1), print);
+    assert_ne!(
+        with(&|f| {
+            if let ardoise_core::note::ObjectBody::Text(body) = &mut f.note.objects[0].body {
+                body.text.push('!');
+            }
+        }),
+        print
+    );
+    assert_ne!(with(&|f| f.note.objects.clear()), print);
+    assert_ne!(
+        with(&|f| {
+            let mut other = f.note.objects[0].clone();
+            other.id = "autre".to_owned();
+            f.note.objects.push(other);
+        }),
+        print
+    );
+    assert_eq!(with(&|f| f.note.objects[0].width = 0.0), print);
+    let back =
+        ardoise_core::format::read_from_bytes(&ardoise_core::format::to_bytes(&file).unwrap())
+            .unwrap();
+    assert_eq!(file_fingerprint(&back), Some(print));
+}
+
+/// A text frame moved on another PC, nothing else changed: the page is not written over it (nor
+/// merged into it as a mere retitling) but goes on as a new note beside it.
+#[test]
+fn a_text_frame_moved_elsewhere_is_not_overwritten() {
+    let (_dir, library) = library();
+    let path = filed(&library, "Classe", &full_file(A5));
+    let hub = LiveHub::new(config());
+    let window = Arc::new(Window::default());
+    hub.subscribe("main", window.clone());
+    let mut sink = resume(&hub, &library, &path, A5);
+    let mut elsewhere = library.read(&path).unwrap();
+    elsewhere.file.note.objects[0].x += 2_000.0;
+    library
+        .save(&path, &elsewhere.file, &elsewhere.stamp)
+        .unwrap();
+    let kept = std::fs::read(&path).unwrap();
+
+    stroke(&mut sink, 3000, 5);
+    wait_until("the notice", || !forks(&window).is_empty());
+    assert_eq!(std::fs::read(&path).unwrap(), kept, "not overwritten");
+    assert_eq!(forks(&window)[0].1, ForkReason::Changed);
+    // The new note has the page's frame, where the page has it.
+    let new_path = PathBuf::from(&forks(&window)[0].3);
+    let written = library.read(&new_path).unwrap().file.note;
+    assert_eq!(
+        written.objects[0].x,
+        elsewhere.file.note.objects[0].x - 2_000.0
+    );
     hub.stop().unwrap();
 }

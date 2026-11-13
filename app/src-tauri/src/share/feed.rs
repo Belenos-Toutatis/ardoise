@@ -7,14 +7,14 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
-use ardoise_core::note::{Background, Origin, PageSize, Timing};
+use ardoise_core::note::{Background, Origin, PageObject, PageSize, Timing};
 use ardoise_core::settings::Orientation;
 use ardoise_ink::{Rgba, Stroke, Tool};
 use ardoise_share::{LiveFeed, LiveViewer};
 use serde::Serialize;
 
 use super::live_paper::{LivePapers, paper_key};
-use super::page::is_drawn;
+use super::page::{is_drawn, shared_objects};
 use crate::live::LiveHub;
 use crate::live::hub::BatchSink;
 use crate::live::model::{
@@ -442,8 +442,9 @@ fn viewer_page_id(id: &str) -> String {
 
 /// The page of a snapshot as the viewer reads a `Note` (`note.ts`): what is drawn, and the
 /// fields the type requires with neutral values. The id, title, dates, tags, favourite mark, layer
-/// names, background image and origin of the page stay on the PC, and so do the strokes of a layer
-/// that is hidden (a resumed sheet may have some: it is an old note, with its own date).
+/// names, background image and origin of the page stay on the PC, and so do the strokes and the
+/// page objects of a layer that is hidden (a resumed sheet may have some: it is an old note, with
+/// its own date).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SharedLivePage<'a> {
@@ -460,6 +461,10 @@ struct SharedLivePage<'a> {
     tags: [(); 0],
     layers: Vec<SharedLayer>,
     strokes: Vec<&'a Stroke>,
+    /// The text frames of a resumed sheet the viewer draws ([`shared_objects`]), as `note.json`
+    /// writes them; absent when there is none, as in `note.json`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    objects: Vec<PageObject>,
     timing: Timing,
     origin: Origin,
 }
@@ -495,6 +500,7 @@ impl<'a> SharedLivePage<'a> {
                 .iter()
                 .filter(|stroke| is_drawn(&note.layers, stroke))
                 .collect(),
+            objects: shared_objects(&note.layers, &note.objects),
             timing: note.timing,
             origin: Origin::Ardoise,
         }

@@ -92,6 +92,10 @@ pub fn orient_board_record(record: LiveRecord, position: BoardPosition) -> LiveR
 /// the format itself does not know, so every reader keeps it as it is (docs/file-format.md).
 pub const BOARD_POSITION_FIELD: &str = "boardPosition";
 
+/// The key of `note.json` that holds the page objects (format 1.4): a list this version cannot
+/// read stays in the file under it, as an unknown field (`ardoise_core::objects`).
+const OBJECTS_FIELD: &str = "objects";
+
 /// How the blackboard was held when `file` was made from its page ([`BOARD_POSITION_FIELD`]):
 /// upright when the field is absent; `Err` (why) for a value this version does not know.
 pub fn board_position_of(file: &NoteFile) -> Result<BoardPosition, String> {
@@ -689,11 +693,12 @@ fn earlier_note(library: &Library, previous: u32) -> Result<LoadedNote, String> 
 }
 
 /// Whether `file` is still what importing its own `original.bin` gives (`layer_name` for its
-/// layer), after the format's rounding: its ink, layers, paper, background and image, timing
-/// and origin, and nothing added (narration, background file, text, revision, original note).
-/// Title, tags, favourite mark, thumbnail and `modified` do not count. Made again in the position
-/// the note was made in ([`board_position_of`]: upright for a note made before the positions),
-/// which is returned: the position the update keeps.
+/// layer), after the format's rounding: its ink, page objects (none), layers, paper, background
+/// and image, timing and origin, and nothing added (narration, background file, text, revision,
+/// original note, a list of page objects this version cannot read). Title, tags, favourite mark,
+/// thumbnail and `modified` do not count. Made again in the position the note was made in
+/// ([`board_position_of`]: upright for a note made before the positions), which is returned: the
+/// position the update keeps.
 fn unedited_since_import(file: &NoteFile, layer_name: &str) -> Result<BoardPosition, String> {
     let Some(original) = file.original.clone() else {
         return Err("it keeps no page".into());
@@ -703,6 +708,9 @@ fn unedited_since_import(file: &NoteFile, layer_name: &str) -> Result<BoardPosit
         || file.text.is_some()
         || file.revision.is_some()
         || file.original_note.is_some()
+        || !file.note.objects.is_empty()
+        // Page objects this version cannot read, kept as they were written.
+        || file.unknown_fields.contains_key(OBJECTS_FIELD)
     {
         return Err("something was added to it since its import".into());
     }
@@ -731,6 +739,7 @@ fn unedited_since_import(file: &NoteFile, layer_name: &str) -> Result<BoardPosit
         && note.background_image == again.background_image
         && note.layers == again.layers
         && note.strokes == again.strokes
+        && note.objects == again.objects
         && note.timing == again.timing
         && note.origin == again.origin;
     if same {
@@ -2012,6 +2021,37 @@ mod update_tests {
             whole.clone(),
         );
         assert!(reason(&how).contains("edited"), "{how:?}");
+        // A text frame typed on it in the editor (format 1.4): never overwritten by the screen,
+        // which has none.
+        let (how, notes) = refused(
+            &|library, path| {
+                let loaded = library.read(path).unwrap();
+                let mut file = loaded.file;
+                let frame =
+                    serde_json::json!({ "kind": "text", "id": "t", "x": 500, "text": "Exo" });
+                let frame: ardoise_core::note::PageObject = serde_json::from_value(frame).unwrap();
+                file.note.objects.push(frame);
+                library.save(path, &file, &loaded.stamp).unwrap();
+            },
+            whole.clone(),
+        );
+        assert!(reason(&how).contains("added"), "{how:?}");
+        assert_eq!(notes, 2);
+        // Page objects of a later version this one cannot read (kept as they were written).
+        let (how, notes) = refused(
+            &|library, path| {
+                let loaded = library.read(path).unwrap();
+                let mut file = loaded.file;
+                file.unknown_fields.insert(
+                    "objects".into(),
+                    serde_json::json!([{"kind": "text", "x": "left"}]),
+                );
+                library.save(path, &file, &loaded.stamp).unwrap();
+            },
+            whole.clone(),
+        );
+        assert!(reason(&how).contains("added"), "{how:?}");
+        assert_eq!(notes, 2);
         // In the trash.
         let (how, notes) = refused(
             &|library, path| {

@@ -720,6 +720,47 @@ mod tests {
         assert_eq!(list(&library).notes.len(), 4);
     }
 
+    /// Split and merge write the text frames they carry (`ardoise_core::ops` moves them): each
+    /// part keeps those of its own time, the merge has every note's, placed with its note.
+    #[test]
+    fn split_and_merge_write_the_text_frames() {
+        use crate::live::tests::text_frame;
+        let (_dir, library) = library();
+        let mut note = sample_note("Cadres");
+        // Samples are at 0, 8, 16... 232 ms: one frame before the split at 120 ms, one after.
+        note.objects = vec![
+            text_frame("avant", 0, 10, 1000.0, 1000.0),
+            text_frame("après", 0, 200, 1000.0, 9000.0),
+        ];
+        let saved = write_plain(&library, "", note);
+        let opened = library.read(&saved.path).unwrap();
+        let result = split_in(
+            &library,
+            &saved.path,
+            opened.file.note.clone(),
+            &opened.stamp,
+            &SplitSpec::Time { at: 120 },
+            "Suite",
+            None,
+        )
+        .unwrap();
+        let kept = read_note(&saved.path).unwrap().note;
+        assert_eq!(kept.objects, [opened.file.note.objects[0].clone()]);
+        let created = read_note(Path::new(&result.created.path)).unwrap().note;
+        assert_eq!(created.objects.len(), 1);
+        assert_eq!(created.objects[0].id, "après");
+        // Its time follows the new note's start (its first sample, at 120 ms).
+        assert_eq!(created.objects[0].t, 200 - 120);
+
+        let paths = [text(&saved.path), result.created.path.clone()];
+        let summary = merge_in(&library, &paths, MergeLayout::EndToEnd, "Ensemble").unwrap();
+        let merged = read_note(Path::new(&summary.path)).unwrap().note;
+        let ids: Vec<&str> = merged.objects.iter().map(|o| o.id.as_str()).collect();
+        assert_eq!(ids, ["avant", "après"]);
+        // The second note's frame lies on the second note's page, below the first one.
+        assert_eq!(merged.objects[1].y, 9000.0 + kept.page.height as f32);
+    }
+
     #[test]
     fn merges_end_to_end() {
         let (_dir, library) = library();

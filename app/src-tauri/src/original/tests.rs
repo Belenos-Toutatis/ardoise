@@ -1,5 +1,6 @@
 use super::*;
 use crate::library::tests::{library, sample_note};
+use crate::live::tests::text_frame;
 use crate::notes::{open_in, save_in};
 use crate::tablet::store_page_in;
 use crate::thumbnails::thumbnail_png;
@@ -41,6 +42,7 @@ fn ink(original: NoteOriginal) -> (PageSize, Vec<Layer>, Vec<Stroke>) {
             page,
             layers,
             strokes,
+            ..
         }
         | NoteOriginal::FirstVersion {
             page,
@@ -52,10 +54,21 @@ fn ink(original: NoteOriginal) -> (PageSize, Vec<Layer>, Vec<Stroke>) {
     }
 }
 
+/// The page objects of an original.
+fn objects_of(original: &NoteOriginal) -> Vec<PageObject> {
+    match original {
+        NoteOriginal::Tablet { objects, .. } | NoteOriginal::FirstVersion { objects, .. } => {
+            objects.clone()
+        }
+        NoteOriginal::None => panic!("no original"),
+    }
+}
+
 /// What the editor does with "Revenir à l'original": the original's ink in the current note,
-/// saved normally.
+/// page objects included, saved normally.
 fn go_back(library: &Library, path: &Path, stamp: &FileStamp, original: NoteOriginal) -> FileStamp {
     let mut note = library.read(path).unwrap().file.note;
+    note.objects = objects_of(&original);
     (note.page, note.layers, note.strokes) = ink(original);
     save_in(library, path, note, stamp).unwrap()
 }
@@ -365,6 +378,121 @@ fn keep_original_never_replaces_an_original() {
     assert_eq!(file.original_note, Some(first));
 }
 
+/// Text frames are part of the ink (SPEC §4.4): a change of them alone takes the first version,
+/// which gives them back as they were. The same frames sent back with a box measured otherwise are
+/// no change (the file stores the box this version measures).
+#[test]
+fn a_change_of_the_text_frames_alone_keeps_the_first_version() {
+    let (_dir, library) = library();
+    let tablet = TabletContext::of(Path::new("unused"), &Settings::default(), None);
+    let mut note = sample_note("Fiche");
+    note.objects = vec![text_frame("cadre-1", 0, 1200, 3000.0, 4000.0)];
+    let saved = library.create(Path::new(""), &NoteFile::new(note)).unwrap();
+    let first = library.read(&saved.path).unwrap().file;
+    assert_eq!(first.note.objects.len(), 1);
+
+    let mut resent = open_in(&library, &saved.path).unwrap().note;
+    resent.objects[0].width += 0.5;
+    resent.objects[0].height = 0.0;
+    let stamp = save_in(&library, &saved.path, resent, &saved.stamp).unwrap();
+    let after = library.read(&saved.path).unwrap().file;
+    assert!(after.original_note.is_none(), "nothing drawn changed");
+    assert_eq!(after.note.objects, first.note.objects);
+
+    // The frame moved, nothing else: the version before is kept.
+    let mut moved = open_in(&library, &saved.path).unwrap().note;
+    moved.objects[0].x += 500.0;
+    let stamp = save_in(&library, &saved.path, moved, &stamp).unwrap();
+    let after = library.read(&saved.path).unwrap().file;
+    assert!(after.original_note.is_some());
+    assert_eq!(after.note.objects[0].x, 3500.0);
+    let original = original_in(&library, &saved.path, &tablet).unwrap();
+    assert!(matches!(original, NoteOriginal::FirstVersion { .. }));
+    assert_eq!(objects_of(&original), first.note.objects);
+    assert_eq!(ink(original.clone()).2, first.note.strokes);
+
+    // Back to it, saved: the frame where it was; the original stays.
+    go_back(&library, &saved.path, &stamp, original);
+    let restored = library.read(&saved.path).unwrap().file;
+    assert_eq!(restored.note.objects, first.note.objects);
+    assert_eq!(restored.original_note, after.original_note);
+}
+
+/// A page that holds only text frames is not an empty page: its first edit keeps it.
+#[test]
+fn a_page_of_text_frames_only_has_something_to_go_back_to() {
+    let mut note = crate::library::blank_note("Consignes", "Calque 1", 1);
+    note.objects = vec![text_frame("cadre-1", 0, 0, 2000.0, 2000.0)];
+    assert!(note.strokes.is_empty() && note.has_content());
+    let mut file = NoteFile::new(note);
+    let mut edited = file.note.clone();
+    edited.objects[0].y += 1000.0;
+    keep_original(&mut file, &edited).unwrap();
+    let kept = file.original_note.clone().expect("original.ardoise");
+    let nested = read_from_bytes(&kept).unwrap();
+    assert_eq!(nested.note.objects, file.note.objects);
+    assert!(nested.note.strokes.is_empty());
+
+    // A frame added to a page of strokes is a change of the ink too, and one removed.
+    let mut file = NoteFile::new(sample_note("A"));
+    let mut added = file.note.clone();
+    added
+        .objects
+        .push(text_frame("cadre-2", 0, 50, 100.0, 100.0));
+    assert!(!same_ink(&file.note, &added) && !same_ink(&added, &file.note));
+    keep_original(&mut file, &added).unwrap();
+    let nested = read_from_bytes(file.original_note.as_ref().unwrap()).unwrap();
+    assert!(nested.note.objects.is_empty());
+    // Retyped text, another layer, a quarter turn: each a change.
+    let base = added.clone();
+    let mut retyped = base.clone();
+    if let ardoise_core::note::ObjectBody::Text(body) = &mut retyped.objects[0].body {
+        body.text.push('!');
+    }
+    let mut turned = base.clone();
+    turned.objects[0].quarter_turns = 1;
+    for other in [retyped, turned] {
+        assert!(!same_ink(&base, &other));
+    }
+    assert!(same_ink(&base, &base.clone()));
+}
+
+/// A tablet's page has no page object: going back to it takes away the frames typed since.
+#[test]
+fn a_tablet_note_goes_back_without_the_text_frames_added_to_it() {
+    let settings_dir = tempfile::tempdir().unwrap();
+    let store = SettingsStore::locate(settings_dir.path(), settings_dir.path(), "PC-TEST");
+    let (dir, library) = library();
+    let context = PageContext {
+        size: SLATE,
+        orientation: Orientation::Landscape,
+        board_position: Default::default(),
+    };
+    let path = store_page_in(
+        Some(&store),
+        Some("fr-FR"),
+        dir.path(),
+        sim_page(),
+        &context,
+    )
+    .unwrap();
+    let synced = library.read(&path).unwrap();
+    assert!(synced.file.note.objects.is_empty());
+    let mut typed = synced.file.note.clone();
+    typed.objects = vec![text_frame("cadre-1", 0, 10, 500.0, 500.0)];
+    let stamp = save_in(&library, &path, typed, &synced.stamp).unwrap();
+    assert_eq!(library.read(&path).unwrap().file.note.objects.len(), 1);
+
+    let tablet = TabletContext::of(dir.path(), &Settings::default(), Some("fr-FR"));
+    let original = original_in(&library, &path, &tablet).unwrap();
+    assert!(matches!(original, NoteOriginal::Tablet { .. }));
+    assert!(objects_of(&original).is_empty());
+    go_back(&library, &path, &stamp, original);
+    let restored = library.read(&path).unwrap().file.note;
+    assert!(restored.objects.is_empty());
+    assert_eq!(restored.strokes, synced.file.note.strokes);
+}
+
 #[test]
 fn a_damaged_original_is_reported() {
     let tablet = TabletContext::of(Path::new("unused"), &Settings::default(), None);
@@ -398,10 +526,12 @@ fn the_answer_has_the_shape_of_the_interface() {
         serde_json::json!({ "source": "none" })
     );
     let note = sample_note("A");
+    let frame = text_frame("cadre-1", 0, 1200, 3000.0, 4000.0);
     let json = serde_json::to_value(NoteOriginal::FirstVersion {
         page: note.page,
         layers: note.layers.clone(),
         strokes: note.strokes.clone(),
+        objects: vec![frame.clone()],
         paper: Paper::Kraft,
         background_image: None,
     })
@@ -413,23 +543,33 @@ fn the_answer_has_the_shape_of_the_interface() {
     assert_eq!(json["layers"][0]["visible"], true);
     assert!(json["strokes"][0]["points"][0]["pressure"].is_number());
     assert_eq!(json["strokes"][0]["color"]["a"], 255);
+    // The page objects as `note.json` writes them.
+    assert_eq!(json["objects"], serde_json::json!([frame]));
+    assert_eq!(json["objects"][0]["kind"], "text");
+    assert_eq!(json["objects"][0]["quarterTurns"], 0);
+    assert_eq!(json["objects"][0]["font"], "andika");
     let tablet = serde_json::to_value(NoteOriginal::Tablet {
         page: note.page,
         layers: vec![],
         strokes: vec![],
+        objects: vec![],
     })
     .unwrap();
     assert_eq!(tablet["source"], "tablet");
     assert!(tablet.get("backgroundImage").is_none());
     assert!(tablet.get("paper").is_none());
+    // Given even when there are none: the editor replaces the note's with them.
+    assert_eq!(tablet["objects"], serde_json::json!([]));
     let with_image = serde_json::to_value(NoteOriginal::FirstVersion {
         page: note.page,
         layers: vec![],
         strokes: vec![],
+        objects: vec![],
         paper: Paper::White,
         background_image: Some(fiche()),
     })
     .unwrap();
+    assert_eq!(with_image["objects"], serde_json::json!([]));
     assert_eq!(with_image["backgroundImage"]["name"], "fiche.pdf");
     assert_eq!(with_image["backgroundImage"]["pdfPage"], 2);
     assert_eq!(with_image["backgroundImage"]["quarterTurns"], 0);

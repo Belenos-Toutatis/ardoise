@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use ardoise_core::format::NoteFile;
 use ardoise_core::library::Library;
-use ardoise_core::note::{Origin, PageSize, Paper};
+use ardoise_core::note::{Origin, PageObject, PageSize, Paper};
 use ardoise_core::settings::{LiveButton, Orientation};
 use ardoise_device::service::{LiveInput, LiveSink, LiveState};
 use ardoise_device::transport::TabletKind;
@@ -92,6 +92,32 @@ fn points_of(events: &[LiveEvent]) -> Vec<LivePoint> {
             _ => Vec::new(),
         })
         .collect()
+}
+
+/// A text frame of the editor (two lines, Andika, 6 mm) on layer `layer`, shown at `t` ms of its
+/// note, its origin at (`x`, `y`), its box measured as the format measures it (so that it reads
+/// back from a file as it was written). Built from its `note.json` keys: the tests of the app do
+/// not see the fonts' crate.
+pub(crate) fn text_frame(id: &str, layer: u32, t: u32, x: f32, y: f32) -> PageObject {
+    let mut object: PageObject = serde_json::from_value(json!({
+        "kind": "text",
+        "id": id,
+        "layer": layer,
+        "t": t,
+        "x": x,
+        "y": y,
+        "text": "Exercice 1\nRéponds ici",
+        "font": "andika",
+        "size": 600,
+    }))
+    .unwrap();
+    assert!(
+        object.as_text().is_some(),
+        "a text frame this version reads"
+    );
+    object.measure();
+    assert!(object.width > 0.0 && object.height > 0.0);
+    object
 }
 
 pub(super) fn config() -> HubConfig {

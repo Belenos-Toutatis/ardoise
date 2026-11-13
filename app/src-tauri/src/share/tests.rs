@@ -13,8 +13,8 @@ use std::time::{Duration, Instant, SystemTime};
 use ardoise_core::format::{BackgroundFile, NoteFile};
 use ardoise_core::library::Library;
 use ardoise_core::note::{
-    A4_LANDSCAPE, Background, BackgroundImage, ImageRect, Layer, Note, Origin, PageSize, Paper,
-    Template, Timing,
+    A4_LANDSCAPE, Background, BackgroundImage, ImageRect, Layer, Note, ObjectBody, Origin,
+    PageObject, PageSize, Paper, Template, Timing,
 };
 use ardoise_core::settings::{LiveButton, Orientation};
 use ardoise_device::service::{LiveInput, LiveSink};
@@ -43,6 +43,7 @@ use crate::live::model::{
     LiveBatch, LiveEvent, LiveMark, LivePen, LivePoint, LiveSnapshot, LiveStroke, LiveStyle,
     LiveViewState, MarkPoint, PlacedStroke, RecolouredStrokes, ViewerIndices,
 };
+use crate::live::tests::text_frame;
 use crate::notes::background_png;
 use crate::presentation::MonitorInfo;
 use crate::thumbnails::tests::png_of;
@@ -724,6 +725,135 @@ fn live_strokes_of_a_hidden_layer_never_reach_a_viewer() {
         .collect();
     assert_eq!(layers, [1, 7]);
     assert!(!text.contains("Corrigé"));
+}
+
+/// A visible text frame, a frame of a hidden layer (« the answers »), a kind of a later version:
+/// the page objects a note may hold, for the viewers.
+fn frames_for_the_viewers(note: &mut Note) -> PageObject {
+    note.layers.push(Layer {
+        name: "Corrigé".into(),
+        visible: false,
+    });
+    let mut shown = text_frame("consigne", 0, 0, 1000.0, 1000.0);
+    shown.extra.insert("keyOfTheFuture".into(), json!("Léa's"));
+    let mut answer = text_frame("réponse", 1, 0, 1000.0, 5000.0);
+    if let ObjectBody::Text(body) = &mut answer.body {
+        body.text = "La réponse de Léa".into();
+    }
+    let later: PageObject =
+        serde_json::from_value(json!({ "kind": "equation", "id": "eq", "latex": "Léa" })).unwrap();
+    note.objects = vec![shown.clone(), answer, later];
+    shown.extra.clear();
+    shown
+}
+
+/// The page objects of a live page (a resumed sheet's text frames), as a viewer gets them: those
+/// of the layers that show, as `note.json` writes them but without a key this version does not
+/// know; nothing of a hidden layer, nothing of a kind the viewer does not draw; and no key at all
+/// on a page without any (as `a_viewer_gets_only_the_fields_the_viewer_draws` checks).
+#[test]
+fn a_viewer_gets_the_text_frames_of_the_layers_that_show_only() {
+    let mut note = note_with(vec![pen_stroke(1000.0, 3)]);
+    let expected = frames_for_the_viewers(&mut note);
+    let batch = LiveBatch {
+        events: vec![LiveEvent::Snapshot {
+            snapshot: Arc::new(snapshot_of(note)),
+        }],
+        sent_at: 1.0,
+    };
+    let text = batch_json(&batch).unwrap();
+    assert!(!text.contains("Léa"), "{text}");
+    let value: Value = serde_json::from_str(&text).unwrap();
+    let objects = value["events"][0]["snapshot"]["page"]["objects"]
+        .as_array()
+        .unwrap();
+    assert_eq!(objects.len(), 1);
+    assert_eq!(objects[0], serde_json::to_value(&expected).unwrap());
+    assert_eq!(
+        keys(&objects[0]),
+        [
+            "bold",
+            "color",
+            "font",
+            "height",
+            "id",
+            "kind",
+            "layer",
+            "quarterTurns",
+            "scale",
+            "size",
+            "t",
+            "text",
+            "width",
+            "x",
+            "y"
+        ]
+    );
+    // The page whose answers layer is shown gets its frame too.
+    let mut shown = note_with(vec![pen_stroke(1000.0, 3)]);
+    frames_for_the_viewers(&mut shown);
+    shown.layers[1].visible = true;
+    let batch = LiveBatch {
+        events: vec![LiveEvent::Snapshot {
+            snapshot: Arc::new(snapshot_of(shown)),
+        }],
+        sent_at: 1.0,
+    };
+    let value: Value = serde_json::from_str(&batch_json(&batch).unwrap()).unwrap();
+    let ids: Vec<&str> = value["events"][0]["snapshot"]["page"]["objects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|object| object["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["consigne", "réponse"]);
+}
+
+/// The text frames of the editor's note go to the viewers with its page (the layers that show
+/// only); a frame added, moved or gone sends the whole page again (without its paper), a stroke
+/// added still goes alone, and a change of a hidden frame sends nothing.
+#[test]
+fn the_text_frames_of_the_editors_note_reach_the_viewers() {
+    let mut sharer = NoteSharer::default();
+    let render = |_: &SharedPaper| None;
+    let mut note = note_with(vec![pen_stroke(1000.0, 3)]);
+    let expected = frames_for_the_viewers(&mut note);
+    let first = sharer.update(note.clone(), None, render).unwrap();
+    assert!(!first.full.contains("Léa"), "{}", first.full);
+    let full = parse(&first.full);
+    assert_eq!(
+        full["page"]["objects"],
+        json!([serde_json::to_value(&expected).unwrap()])
+    );
+    assert!(sharer.update(note.clone(), None, render).is_none());
+
+    // The hidden frame moved: nothing the viewers see changed.
+    note.objects[1].x += 100.0;
+    assert!(sharer.update(note.clone(), None, render).is_none());
+    // The visible one moved alone: the whole page, without its paper.
+    note.objects[0].x += 500.0;
+    let moved = sharer.update(note.clone(), None, render).unwrap();
+    let replaced = parse(moved.append.as_deref().unwrap());
+    assert_eq!(replaced["type"], "note");
+    assert!(replaced.get("background").is_none());
+    assert_eq!(replaced["page"]["objects"][0]["x"], 1500.0);
+    // A stroke added: appended alone, the frames as they were.
+    note.strokes.push(pen_stroke(3000.0, 2));
+    let added = sharer.update(note.clone(), None, render).unwrap();
+    assert_eq!(
+        parse(added.append.as_deref().unwrap())["type"],
+        "noteStrokes"
+    );
+    assert_eq!(
+        parse(&added.full)["page"]["objects"][0]["x"],
+        1500.0,
+        "later viewers get it where it is"
+    );
+    // Every frame gone: the page whole, without the key.
+    note.objects.clear();
+    let gone = sharer.update(note, None, render).unwrap();
+    let replaced = parse(gone.append.as_deref().unwrap());
+    assert!(replaced["page"].get("objects").is_none(), "{replaced}");
 }
 
 #[test]

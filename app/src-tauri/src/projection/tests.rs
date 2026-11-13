@@ -395,6 +395,45 @@ fn strokes_replace_the_tail_of_the_page() {
     );
 }
 
+/// The page's text frames reach the window as the editor sends them, in the snapshot's page as
+/// `note.json` writes them; the strokes' updates leave them as they are; a change of them alone
+/// comes as a new page (the projection keeps no diff of its own), which this window and a late one
+/// draw whole.
+#[test]
+fn text_frames_reach_the_window_with_their_page() {
+    let projection = open();
+    let window = subscribed(&projection);
+    let mut lesson = note(2);
+    lesson.objects = vec![crate::live::tests::text_frame(
+        "cadre-1", 0, 50, 3000.0, 2000.0,
+    )];
+    update(&projection, page(lesson.clone())).unwrap();
+    let events = window.take();
+    let snapshot = snapshot_of(&events[0]);
+    assert_eq!(snapshot.page.objects, lesson.objects);
+    let json = serde_json::to_value(snapshot).unwrap();
+    assert_eq!(
+        json["page"]["objects"],
+        json!([serde_json::to_value(&lesson.objects[0]).unwrap()])
+    );
+
+    // Strokes written and undone: the frames stay.
+    update(&projection, strokes(1.0, vec![stroke(7)], None)).unwrap();
+    assert!(matches!(
+        &window.take()[..],
+        [LiveEvent::StrokesEdited { .. }]
+    ));
+    assert_eq!(shown(&projection).page.objects, lesson.objects);
+
+    // Moved alone: a new page, the frame where it went.
+    let mut moved = shown(&projection).page.clone();
+    moved.objects[0].x += 1000.0;
+    update(&projection, page(moved.clone())).unwrap();
+    let events = window.take();
+    assert_eq!(snapshot_of(&events[0]).page.objects, moved.objects);
+    assert_eq!(subscribe_events(&projection).0.page.objects, moved.objects);
+}
+
 #[test]
 fn the_stroke_in_progress_is_a_computer_stroke_with_the_pointers_time() {
     let projection = open();
