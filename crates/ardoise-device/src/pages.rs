@@ -353,7 +353,7 @@ impl ImportedPages {
         self.trashed.values().flatten().any(|path| {
             format::read_header(path).is_ok_and(|header| header.note.created == created)
                 && format::read_note(path).is_ok_and(|file| {
-                    file.note.page == BLACKBOARD_PAGE
+                    is_blackboard_page(file.note.page)
                         && file
                             .original
                             .as_deref()
