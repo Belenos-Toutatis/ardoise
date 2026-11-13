@@ -214,7 +214,7 @@ L'utilisateur possède aussi une tablette Xiaomi 13,5 pouces Bluetooth (米家�
 
 **Reste à mesurer avant ou pendant M18** : le téléchargement et l'effacement d'une page d'essai depuis le PC ; ce qu'envoie le bouton d'effacement de l'écran (pour savoir si le direct doit passer à une nouvelle page) ; l'unité exacte des coordonnées, à la règle.
 
-## Q15 — Trois choix faits en construisant la tablette Xiaomi (jalon M18, 2026-11-13) — **ouverte**
+## Q15 — Trois choix faits en construisant la tablette Xiaomi (jalon M18, 2026-11-13) — **tranchée le 2026-11-13**
 
 En construisant M18, trois comportements ont dû être fixés que le SPEC ne dit pas. Ils sont dans le code, les guides et les tests ; le SPEC n'est pas modifié tant que l'utilisateur ne les a pas confirmés.
 
@@ -222,7 +222,7 @@ En construisant M18, trois comportements ont dû être fixés que le SPEC ne dit
 2. **Un direct reste sur sa tablette** : si la liaison se perd, Ardoise attend la tablette avec laquelle le direct a commencé et ignore l'autre ; pour continuer avec l'autre, on termine le direct et on le relance. Pendant un direct, on ne peut pas ajouter la Xiaomi ; pendant un direct qui attend la Xiaomi, on ne peut pas enregistrer la Bamboo Slate. Raison : une page du direct a les dimensions de sa tablette.
 3. **Synchroniser avec « effacer de la tablette après import réussi » désactivé** (SPEC §4.1 : « Ardoise n'importe les pages de cette tablette qu'à la demande, après avoir dit qu'elles seront effacées ») : la demande ne vaut que si elle est confirmée pendant que la Xiaomi est la tablette connectée. « Synchroniser maintenant » cliqué alors qu'elle n'est pas connectée n'importe donc pas ses pages plus tard, quand elle se connecte : le panneau dit alors combien de pages attendent, et le bouton passe par la confirmation. Raison : sans cela, un clic destiné à la Bamboo Slate pouvait effacer les pages de la Xiaomi sans avertissement.
 
-**Proposition pour le SPEC, si l'utilisateur confirme** : une phrase en §4.2 pour 1 et 2 (« Une feuille se reprend avec la tablette qui l'a écrite ; un direct reste sur la tablette avec laquelle il a commencé. »), et la précision de 3 en §4.1.
+**Décision (2026-11-13)** : l'utilisateur confirme les trois choix, après une seconde explication avec des exemples (la première n'était pas claire). SPEC §4.2 (points 1 et 2) et §4.1 (point 3) mis à jour avec son accord.
 
 ## Q16 — Xiaomi : ce que les premiers essais sur la vraie tablette ont montré (2026-11-13) — **ouverte**
 
