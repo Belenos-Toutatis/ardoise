@@ -18,7 +18,7 @@ import type { InkPoint } from './ink';
 import { UNHANDLED, fileName, freshStamp, mockLibrary, notifyLibraryChanged } from './mock-data';
 import { failure, freePath, mockLibraryInvoke } from './mock-library';
 import type { Note, Stroke, TabletInfo } from './note';
-import { setMockLiveOrientation } from './mock-live';
+import { setMockLiveOrientation, setMockLiveTablet } from './mock-live';
 import { isOrientation, pageSizeFor, quarterTurns, turnStrokes, type Orientation } from './orientation';
 import type {
   Connection,
@@ -105,6 +105,7 @@ export function resetMockTablet(): void {
   if (sim) for (const timer of sim.timers) clearTimeout(timer);
   sim = null;
   setMockLiveOrientation('landscape');
+  setMockLiveTablet(null);
   mockTablet.stepMs = 1000;
   mockTablet.autoPress = true;
   mockTablet.failRegistration = null;
@@ -246,6 +247,7 @@ function update(s: Sim, change: Partial<TabletStatus>): void {
   s.status = { ...s.status, ...change };
   if (!LINKED.has(s.status.connection)) s.status.active = null;
   s.status.known = knownOf(s);
+  setMockLiveTablet(s.status.active);
   for (const listener of [...s.listeners]) listener({ type: 'status', status: structuredClone(s.status) });
 }
 

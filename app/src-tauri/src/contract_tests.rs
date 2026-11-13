@@ -185,3 +185,93 @@ fn the_details_of_the_blackboard_have_a_kind_and_a_memory() {
     assert_eq!(value["kind"], "slate");
     assert_eq!(value["memory"], json!(null));
 }
+
+// --- M18, after the review: sync confirmation, refused resume, error codes --------------------------------------------
+
+/// `tablet_sync` takes one optional argument; Tauri turns `confirm_blackboard_delete` into the `confirmBlackboardDelete`
+/// that `lib/api.ts` sends (nothing at all when it is false). Without a running service, both forms fail alike.
+#[test]
+fn tablet_sync_takes_the_optional_confirmation_of_the_blackboard_deletion() {
+    let source = include_str!("tablet.rs");
+    assert!(
+        source.contains("confirm_blackboard_delete: Option<bool>"),
+        "the argument `confirmBlackboardDelete` of lib/api.ts is `confirm_blackboard_delete: Option<bool>`"
+    );
+    let runtime = crate::tablet::TabletRuntime::default();
+    for confirmed in [false, true] {
+        let error = crate::tablet::tablet_sync_in(&runtime, confirmed).unwrap_err();
+        assert_eq!(error.code(), "tablet");
+    }
+}
+
+/// The errors of the Xiaomi paths reach the interface as `{ code, message }`, `code` selecting `errorCodes.*`.
+#[test]
+fn the_errors_of_the_blackboard_are_a_code_and_a_message() {
+    use crate::commands::CommandError;
+    for code in [
+        "blackboardConfirmDelete",
+        "pageUnreadable",
+        "sheetOtherTablet",
+    ] {
+        let value = serde_json::to_value(CommandError::new(code, "detail")).unwrap();
+        assert_eq!(value, json!({ "code": code, "message": "detail" }));
+    }
+}
+
+/// A resume refused after it was accepted: the channel carries `{ type: 'refused', code, message }` (`lib/live.ts`),
+/// then the `idle` snapshot.
+#[test]
+fn a_refused_resume_is_an_event_with_a_code() {
+    use crate::live::model::{LiveBatch, LiveEvent};
+    let batch = LiveBatch {
+        events: vec![LiveEvent::Refused {
+            code: "sheetOtherTablet".into(),
+            message: "the blackboard cannot write on this sheet".into(),
+        }],
+        sent_at: 1.5,
+    };
+    let value = serde_json::to_value(batch).unwrap();
+    assert_eq!(
+        value["events"][0],
+        json!({ "type": "refused", "code": "sheetOtherTablet",
+                "message": "the blackboard cannot write on this sheet" })
+    );
+}
+
+/// Every code the tablet paths can return (the Xiaomi's included) has its sentence in both languages: a code without
+/// one would show its technical detail alone.
+#[test]
+fn every_error_code_of_the_tablet_paths_has_a_text_in_both_languages() {
+    const CODES: [&str; 17] = [
+        "blackboardNotFound",
+        "transferIncomplete",
+        "pageNotDeleted",
+        "notSupported",
+        "pageUnreadable",
+        "blackboardConfirmDelete",
+        "sheetOtherTablet",
+        "tabletTimeout",
+        "tabletNotConnected",
+        "tabletBusy",
+        "tabletNotRegistered",
+        "noLibrary",
+        "libraryAccess",
+        "bluetoothOff",
+        "bluetoothMissing",
+        "tablet",
+        "simulationOnly",
+    ];
+    for (language, file) in [
+        ("fr", include_str!("../../ui/src/locales/fr.json")),
+        ("en", include_str!("../../ui/src/locales/en.json")),
+    ] {
+        let texts: serde_json::Value = serde_json::from_str(file).unwrap();
+        for code in CODES {
+            let text = texts["errorCodes"][code].as_str();
+            assert!(
+                text.is_some_and(|text| !text.is_empty()),
+                "{language}: no text for the error code {code}"
+            );
+        }
+    }
+}

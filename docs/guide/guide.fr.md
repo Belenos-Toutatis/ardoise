@@ -409,6 +409,12 @@ faut aussi ne choisir qu'une seule note.
 - **L'orientation** : la feuille n'est jamais tournée. Si elle est en paysage et que la tablette est réglée en portrait
   (ou l'inverse), un avis dit comment tenir la tablette : « Pour écrire sur cette feuille, tenez la tablette ainsi : … ».
   Les quatre boutons de position sont grisés pour cette feuille.
+- **Quelle tablette** : la tablette Xiaomi n'écrit que sur une page de la tablette Xiaomi (environ 20 × 27 cm : ses pages
+  récupérées et ses notes du direct), et la Bamboo Slate sur toutes les autres feuilles. Une feuille de la Bamboo Slate
+  se continue donc avec la Bamboo Slate, une page de la tablette Xiaomi avec la tablette Xiaomi. Si la tablette
+  connectée ne convient pas, Ardoise refuse, dit pourquoi (**Le mode direct n'a pas pu reprendre cette feuille.**) et
+  n'écrit rien sur la note ; si la tablette ne se connecte qu'ensuite, le message arrive à ce moment-là. **Retour à la
+  bibliothèque**, ou **Réessayer** une fois l'autre tablette allumée.
 - **La page suivante** crée une note neuve, à la racine de la bibliothèque, avec le papier de la feuille (couleur,
   modèle, texture, pas son image), et suit de nouveau la position réglée pour la tablette : les boutons de position
   fonctionnent alors. Les onglets **Page** et **Fond** changent le papier et l'image de la feuille en cours (voir
@@ -1615,6 +1621,7 @@ de tous les composants utilisés avec leur licence.
 | « Aucun adaptateur Bluetooth trouvé » | Branchez la clé Bluetooth (4.0 ou plus), attendez que Windows la reconnaisse, réessayez. |
 | « La tablette ne répond pas » / « n'est pas connectée » | Rapprochez-la de l'ordinateur et appuyez brièvement sur son bouton ; vérifiez la charge. |
 | « La tablette refuse la commande » | L'application du téléphone ou Inkspace l'a peut-être enregistrée depuis : enregistrez-la de nouveau dans Ardoise (chapitre 4). Coupez le Bluetooth du téléphone. |
+| « Cette feuille ne peut pas être continuée avec cette tablette » | Une feuille de la Bamboo Slate se continue avec la Bamboo Slate, une page de la tablette Xiaomi avec la tablette Xiaomi. Allumez l'autre tablette (la Xiaomi se connecte, la Bamboo Slate demande un appui bref), puis **Réessayer** ; la note n'a pas été touchée (chapitre 6). |
 | « La tablette est occupée » | Une synchronisation ou le mode direct est en cours : réessayez à la fin. |
 | « Aucune tablette Xiaomi trouvée » | Allumez-la, rapprochez-la de l'ordinateur, fermez Mi Home (ou coupez le Bluetooth du téléphone : elle ne parle qu'à une application à la fois), puis **Chercher de nouveau** (chapitre 4). |
 | La tablette Xiaomi n'a plus ses pages | Mi Home les a importées (et effacées) avant Ardoise : les pages vont à l'application qui les prend la première (chapitre 5). |

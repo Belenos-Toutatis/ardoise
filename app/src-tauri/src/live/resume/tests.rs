@@ -3119,7 +3119,7 @@ fn a_sheet_resumed_with_a_tablet_that_does_not_fit_it_ends_at_once_with_nothing_
             })
             .collect();
         assert_eq!(refused.len(), 1, "{sheet_page:?} with the {}", kind.name());
-        assert_eq!(refused[0].0, "notSupported");
+        assert_eq!(refused[0].0, "sheetOtherTablet");
         assert_eq!(hub.snapshot().state, LiveSessionState::Idle);
         // Whatever comes after is not written anywhere.
         stroke(&mut sink, 3000, 5);

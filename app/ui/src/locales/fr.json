@@ -794,7 +794,8 @@
     "pageNotDeleted": "La tablette Xiaomi garde une page qu'Ardoise vient de lui demander d'effacer : la synchronisation s'est arrêtée. La note de cette page est déjà dans la bibliothèque.",
     "notSupported": "Cette tablette ne permet pas cela (la tablette Xiaomi n'a pas de nom à changer).",
     "blackboardConfirmDelete": "Les pages de la tablette Xiaomi ne sont importées qu'après votre accord : elles sont effacées de la tablette une fois importées, car elle ne donne que sa page la plus ancienne. Confirmez la synchronisation pour continuer.",
-    "pageUnreadable": "La tablette Xiaomi a envoyé une page qu'Ardoise ne sait pas lire : rien n'a été importé et la page reste sur la tablette."
+    "pageUnreadable": "La tablette Xiaomi a envoyé une page qu'Ardoise ne sait pas lire : rien n'a été importé et la page reste sur la tablette.",
+    "sheetOtherTablet": "Cette feuille ne peut pas être continuée avec cette tablette : une feuille de la Bamboo Slate se continue avec la Bamboo Slate, une page de la tablette Xiaomi avec la tablette Xiaomi. Rien n'a été écrit sur la note."
   },
   "editor": {
     "back": "Bibliothèque",

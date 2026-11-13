@@ -2554,11 +2554,11 @@ fn a_resume_is_refused_at_once_when_the_tablet_connected_cannot_write_on_the_she
     let refused = |active, sheet| super::refused_now(active, sheet).err().map(|e| e.code());
     assert_eq!(
         refused(Some(TabletKind::Blackboard), A4_PORTRAIT),
-        Some("notSupported")
+        Some("sheetOtherTablet")
     );
     assert_eq!(
         refused(Some(TabletKind::Slate), BLACKBOARD_PAGE),
-        Some("notSupported")
+        Some("sheetOtherTablet")
     );
     assert_eq!(refused(Some(TabletKind::Blackboard), BLACKBOARD_PAGE), None);
     assert_eq!(refused(Some(TabletKind::Slate), A5), None);

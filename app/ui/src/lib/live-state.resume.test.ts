@@ -105,3 +105,33 @@ describe('live state: sheets that went on in a new note', () => {
     expect(live.forks).toEqual([fork('b.ardoise', 'b (2).ardoise')]);
   });
 });
+
+describe('live state: a resume refused for the tablet that connected', () => {
+  const refused = (code = 'sheetOtherTablet'): LiveEvent => ({ type: 'refused', code, message: 'the blackboard cannot write on this sheet' });
+
+  it('keeps the refusal, with its code, and the idle snapshot that follows', () => {
+    const live = new LiveState();
+    live.initial(snapshot({ state: 'waiting' }));
+    expect(live.refused).toBeNull();
+    live.receive(batch(refused(), { type: 'snapshot', snapshot: snapshot({ state: 'idle' }) }));
+    expect(live.refused).toEqual({ code: 'sheetOtherTablet', message: 'the blackboard cannot write on this sheet' });
+    expect(live.state).toBe('idle');
+  });
+
+  it('forgets it when the view starts again, and keeps no strokes of the sheet it refused', () => {
+    const live = new LiveState();
+    live.initial(snapshot({ state: 'waiting' }));
+    live.receive(batch(refused()));
+    live.clearRefused();
+    expect(live.refused).toBeNull();
+  });
+
+  it('is told to a window that subscribed before the answer of the subscription', async () => {
+    const live = new LiveState();
+    await subscribeLive(live, async (onBatch) => {
+      onBatch(batch(refused()));
+      return snapshot({ state: 'idle' });
+    });
+    expect(live.refused?.code).toBe('sheetOtherTablet');
+  });
+});

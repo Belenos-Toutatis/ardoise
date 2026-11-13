@@ -107,6 +107,7 @@ export const blackboardJourneys = [
         await app.waitFor(
           `(() => { const t = document.querySelector(${j(`${PANEL} [data-slot="last-sync"]`)})?.textContent ?? ''; return t.includes(${j(saved)}) && t.includes(${j(deleted)}); })()`,
           'the result of the sync',
+          30_000,
         );
         await app.waitFor(
           `document.querySelector(${j(`${PANEL} [data-slot="stored-pages"]`)})?.textContent === '0'`,

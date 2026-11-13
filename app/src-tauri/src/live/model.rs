@@ -515,7 +515,7 @@ pub enum LiveEvent {
         /// The new note.
         path: String,
     },
-    /// The tablet that connected cannot write on the sheet this session resumes (`notSupported`:
+    /// The tablet that connected cannot write on the sheet this session resumes (`sheetOtherTablet`:
     /// a Slate sheet with the blackboard, a blackboard page with the Slate): the session ended at
     /// once, `idle`, nothing written on the sheet; the tablet leaves live mode. Sent once, to the
     /// windows subscribed then; never to the viewers of the share.

@@ -870,7 +870,7 @@ impl Shared {
                 state.accepting = None;
                 state.session.set_state(LiveSessionState::Idle, &mut out);
                 out.push(LiveEvent::Refused {
-                    code: "notSupported".to_owned(),
+                    code: "sheetOtherTablet".to_owned(),
                     message: format!(
                         "the {} cannot write on this sheet ({width} × {height}, {orientation:?})",
                         kind.name()

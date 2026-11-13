@@ -383,12 +383,12 @@ pub async fn live_start(
 }
 
 /// A tablet connected now (`active`) that cannot write on a sheet of size `sheet`
-/// ([`resume::tablet_fits`]): the resume is refused at once (`notSupported`), nothing changed. One
+/// ([`resume::tablet_fits`]): the resume is refused at once (`sheetOtherTablet`), nothing changed. One
 /// that connects later ends the resumed run the same way (the `refused` event).
 fn refused_now(active: Option<TabletKind>, sheet: PageSize) -> CommandResult<()> {
     match active {
         Some(kind) if !resume::tablet_fits(kind, sheet) => Err(CommandError::new(
-            "notSupported",
+            "sheetOtherTablet",
             format!("the {} cannot write on this sheet", kind.name()),
         )),
         _ => Ok(()),

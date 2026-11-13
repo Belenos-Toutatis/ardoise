@@ -226,7 +226,7 @@ Taken while building:
     wide tablet): fixed, the blackboard is held as it is (`held_for`), its records land as they come. **Rule**
     (`tablet_fits`): the blackboard writes only on a page of exactly its size (`BLACKBOARD_PAGE`), the Slate on every
     other sheet (as before the blackboard: A5 on A4 and so on, unchanged). Any other pair: `live_resume` returns
-    `notSupported` at once when that tablet is connected; otherwise the run ends when it connects (`refused` event,
+    `sheetOtherTablet` at once when that tablet is connected; otherwise the run ends when it connects (`refused` event,
     state `idle`), the tablet leaves live mode, nothing is written to the note. A blackboard note turned in the
     editor is a sheet like any other (the Slate's).
 21. **Deletion is by time** (`12 05 06 <time>`): two pages stored within the same second are assumed impossible (the
@@ -271,7 +271,7 @@ Taken while building:
   `blackboard.json`; a sink refusing the tablet ends live mode, the link kept.
 - `app/src-tauri/src/live/resume/tests.rs`: who may write where; a blackboard page resumed with the blackboard takes
   its records exactly as they come whatever the Slate's setting; a Slate sheet (landscape and turned) with the
-  blackboard and a blackboard page with the Slate end at once (`refused`, `notSupported`, `idle`), the note's file
+  blackboard and a blackboard page with the Slate end at once (`refused`, `sheetOtherTablet`, `idle`), the note's file
   byte for byte the same; `live/tests.rs`: `live_resume` refused at once.
 - `ardoise-sim/tests/blackboard_captures.rs` (private captures, skipped without them): every vendor frame of every
   capture decodes and encodes back (60 requests, 35 replies); every live notification is whole records of a known
@@ -395,9 +395,9 @@ Resuming a note (`live_resume`, M12): the blackboard writes only on a blackboard
 pages and its live notes), the Slate on every other note, never on a blackboard page (§2.20).
 
 - The tablet that does not fit is connected when `live_resume({ path })` is called: the command fails with
-  `{ code: 'notSupported', message }`, nothing started, the session shown before left as it is.
+  `{ code: 'sheetOtherTablet', message }`, nothing started, the session shown before left as it is.
 - It connects later (nothing was connected, or both tablets are known and the other one came first): the session
-  ends at once. The live channel gets `{ type: 'refused', code: 'notSupported', message }` and a snapshot with
+  ends at once. The live channel gets `{ type: 'refused', code: 'sheetOtherTablet', message }` and a snapshot with
   `state: 'idle'`; the note is not written; the tablet leaves live mode and stays connected (`connection` back to
   `connected`). Say that this note can only be resumed with the other tablet (the blackboard's notes with the
   blackboard, the others with the Slate), then close the live view as after `live_stop` (calling `live_stop` is

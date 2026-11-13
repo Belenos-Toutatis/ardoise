@@ -416,9 +416,16 @@
     };
   });
 
+  // A resume accepted while the tablet was not there yet, then refused when it connected (it cannot write on this sheet):
+  // the same banner as a refused `live_resume`, with the same ways out (try again, back to the library).
+  $effect(() => {
+    if (live.refused) startError = errorMessage(live.refused);
+  });
+
   async function start() {
     starting = true;
     startError = null;
+    live.clearRefused();
     try {
       const snapshot = resume === null ? await api.liveStart() : await api.liveResume(resume);
       if (destroyed) {

@@ -381,6 +381,12 @@ The button is greyed out while the tablet is not registered or is busy (sync und
 - **The orientation**: the sheet is never turned. If it is landscape and the tablet is set to portrait (or the other
   way round), a notice tells you how to hold the tablet: "To write on this sheet, hold the tablet like this: …". The
   four position buttons are greyed out for this sheet.
+- **Which tablet**: the Xiaomi tablet writes only on a page of the Xiaomi tablet (about 20 × 27 cm: its fetched pages and
+  its live notes), and the Bamboo Slate on every other sheet. A Bamboo Slate sheet is therefore continued with the
+  Bamboo Slate, a page of the Xiaomi tablet with the Xiaomi tablet. If the connected tablet does not fit, Ardoise
+  refuses, says why (**Live mode could not resume this sheet.**) and writes nothing on the note; if the tablet only
+  connects afterwards, the message comes then. **Back to the library**, or **Try again** once the other tablet is
+  switched on.
 - **The next page** creates a new note, at the root of the library, with the sheet's paper (colour, template, texture, not
   its image), and follows the position set for the tablet again: the position buttons then work. The **Page** and
   **Background** tabs change the paper and the image of the current sheet (see **The paper and the image of the current
@@ -1523,6 +1529,7 @@ of every component used, with its licence.
 | "No Bluetooth adapter found" | Plug in the Bluetooth dongle (4.0 or later), wait for Windows to recognise it, try again. |
 | "The tablet does not answer" / "is not connected" | Bring it closer to the computer and press its button briefly; check the charge. |
 | "The tablet refused the command" | The phone app or Inkspace may have registered it since: register it again in Ardoise (chapter 4). Turn off the phone's Bluetooth. |
+| "This sheet cannot be continued with this tablet" | A Bamboo Slate sheet is continued with the Bamboo Slate, a page of the Xiaomi tablet with the Xiaomi tablet. Switch on the other tablet (the Xiaomi connects by itself, the Bamboo Slate needs a brief button press), then **Try again**; the note was not touched (chapter 6). |
 | "The tablet is busy" | A sync or live mode is under way: try again when it is finished. |
 | "No Xiaomi tablet found" | Switch it on, bring it close to the computer, close Mi Home (or turn off the phone's Bluetooth: it talks to one application at a time), then **Look again** (chapter 4). |
 | The Xiaomi tablet no longer has its pages | Mi Home imported (and deleted) them before Ardoise: pages go to whichever application takes them first (chapter 5). |

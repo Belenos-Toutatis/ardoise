@@ -302,6 +302,12 @@ export type LiveEvent =
    * share's viewers.
    */
   | { type: 'sheetForked'; pageIndex: number; reason: SheetForkReason; original: string; path: string }
+  /**
+   * The tablet that connected cannot write on the sheet this session resumes (`sheetOtherTablet`: a Bamboo Slate sheet
+   * with the Xiaomi tablet, a page of the Xiaomi tablet with the Slate): the session ended at once, a snapshot `idle`
+   * follows, nothing was written on the note. `code` selects `errorCodes.*`. Sent once, to the windows subscribed then.
+   */
+  | { type: 'refused'; code: string; message: string }
   | LiveStrokesEdited;
 
 export interface LiveBatch {

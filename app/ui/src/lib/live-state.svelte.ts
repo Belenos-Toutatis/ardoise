@@ -119,6 +119,11 @@ function sameStrokes(a: readonly Stroke[], b: readonly Stroke[]): boolean {
 export class LiveState {
   /** A snapshot was applied: the fields below describe the session. */
   ready = $state(false);
+  /**
+   * The resume was refused after it was accepted (`refused` event): the tablet that connected cannot write on the sheet.
+   * `code` selects `errorCodes.*`; kept until `clearRefused` (the view asks again, or closes).
+   */
+  refused = $state.raw<{ code: string; message: string } | null>(null);
   state = $state<LiveSessionState>('idle');
   pageIndex = $state(0);
   pageCount = $state(1);
@@ -344,6 +349,9 @@ export class LiveState {
       case 'sheetForked':
         this.addFork(event);
         break;
+      case 'refused':
+        this.refused = { code: event.code, message: event.message };
+        break;
       case 'saved':
         this.mergeSaved(event.paths);
         // A successful save means that everything is written, the failed pages included.
@@ -390,6 +398,11 @@ export class LiveState {
    */
   adoptForks(forks: readonly SheetFork[]): SheetFork[] {
     return forks.filter((fork) => this.addFork(fork));
+  }
+
+  /** Forgets a refusal (the view starts again). */
+  clearRefused(): void {
+    this.refused = null;
   }
 
   /** Forgets the notice of a fork (the user dismissed it). */

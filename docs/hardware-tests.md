@@ -756,6 +756,11 @@ Ce test vérifie SPEC §4.1 « Tablette Xiaomi » et §4.2 « Avec la tablette X
 5. **Couper puis rétablir le Bluetooth du PC** (ou s'éloigner de la tablette) pendant le direct : l'état dit-il **Reconnexion…**, et le direct reprend-il tout seul, sur la même tablette ? Noter le temps.
 6. **Annuler une synchronisation au milieu d'une grande page** (écrire une page très chargée, enregistrer, lancer **Synchroniser maintenant**, puis **Annuler** pendant le transfert), puis lancer le mode direct : **aucun trait parasite** ne doit apparaître. Noter le temps que prend la liaison à se rétablir (Ardoise ferme la liaison et la rouvre : c'est voulu).
 
+#### D bis. Continuer une feuille
+
+1. Dans la bibliothèque, **Reprendre en mode direct** sur la note récupérée de la Xiaomi à l'étape C, **avec la Xiaomi connectée**. Écrire un mot et la même ligne de 10 cm : le **nouveau trait tombe-t-il là où est le stylet**, et **à la même taille** que l'ancien ? (Comparer la longueur des deux lignes dans la note après **Terminer**.) Noter tout décalage ou réduction.
+2. Avec la Xiaomi connectée, essayer de **reprendre une note de la Bamboo Slate** : Ardoise doit refuser tout de suite avec « Cette feuille ne peut pas être continuée avec cette tablette… » (**Le mode direct n'a pas pu reprendre cette feuille.**), sans rien écrire sur la note (la date de modification de la note ne change pas). Noter le texte exact. Puis, la Xiaomi éteinte, reprendre cette même note et allumer la Xiaomi : le message doit arriver à la connexion, le direct passer à **Arrêté**, et **Retour à la bibliothèque** fonctionner.
+
 #### E. Deux tablettes (avec la Bamboo Slate)
 
 1. Enregistrer la Bamboo Slate (chapitre 4 du guide) si elle ne l'est pas : les **deux** tablettes doivent être listées, chacune avec son **Oublier la tablette**.
@@ -784,5 +789,7 @@ Ce qui ne revient pas tout seul :
 | Ce qui se passe pendant le direct quand on **enregistre une page** avec le bouton, et quand on **appuie sur le bouton d'effacement** de l'écran | D3, D4 |
 | La reprise du direct après une coupure du Bluetooth, et son délai | D5 |
 | Un **trait parasite** après l'annulation d'un transfert, et le délai de reconnexion | D6 |
+| Où tombe le **trait ajouté** à une note de la Xiaomi, et sa taille comparée à l'ancien | D bis 1 |
+| Le texte exact du refus quand la tablette ne convient pas à la feuille, et s'il arrive tout de suite ou à la connexion | D bis 2 |
 | Ce que fait Ardoise quand la **Bamboo Slate** s'allume alors que la Xiaomi est connectée (hors direct, puis pendant un direct) | E2, E3 |
 | Toute phrase incompréhensible, tout message d'erreur nouveau | tout le test |

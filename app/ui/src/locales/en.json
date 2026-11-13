@@ -794,7 +794,8 @@
     "pageNotDeleted": "The Xiaomi tablet still holds a page that Ardoise has just asked it to delete: the sync stopped. The note of that page is already in the library.",
     "notSupported": "This tablet cannot do that (the Xiaomi tablet has no name to change).",
     "blackboardConfirmDelete": "The Xiaomi tablet's pages are imported only with your agreement: they are deleted from the tablet once imported, because it gives only its oldest page. Confirm the sync to go on.",
-    "pageUnreadable": "The Xiaomi tablet sent a page that Ardoise cannot read: nothing was imported and the page stays on the tablet."
+    "pageUnreadable": "The Xiaomi tablet sent a page that Ardoise cannot read: nothing was imported and the page stays on the tablet.",
+    "sheetOtherTablet": "This sheet cannot be continued with this tablet: a Bamboo Slate sheet is continued with the Bamboo Slate, a page of the Xiaomi tablet with the Xiaomi tablet. Nothing was written on the note."
   },
   "editor": {
     "back": "Library",
