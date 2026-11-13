@@ -95,7 +95,7 @@
 <Modal title={t('tablet.board.title')} onclose={leave}>
   <div bind:this={root} class="add-blackboard" data-slot="add-blackboard">
     {#if phase === 'intro'}
-      <div class="step" data-step="intro">
+      <div class="stage" data-step="intro">
         <h3>{t('tablet.board.introTitle')}</h3>
         <ul class="checks">
           <li>{t('tablet.board.intro')}</li>
@@ -110,7 +110,7 @@
         <button type="button" class="button" data-action="cancel-add" onclick={leave}>{t('tablet.board.cancel')}</button>
       </div>
     {:else if phase === 'running'}
-      <div class="step" data-step={step}>
+      <div class="stage" data-step={step}>
         <div aria-live="polite">
           {#if found.length === 0}
             <h3><span class="pulse" aria-hidden="true"></span>{t('tablet.board.searching.title')}</h3>
@@ -153,7 +153,7 @@
         </button>
       </div>
     {:else if phase === 'added'}
-      <div class="step" data-step="added">
+      <div class="stage" data-step="added">
         <div aria-live="polite">
           <h3>{t('tablet.board.added.title')}</h3>
           <p>{t('tablet.board.added.text')}</p>
@@ -165,7 +165,7 @@
         </button>
       </div>
     {:else}
-      <div class="step" data-step="error" role="alert">
+      <div class="stage" data-step="error" role="alert">
         <h3>{t('tablet.board.error.title')}</h3>
         {#if failure}
           <p class="error">{failure}</p>
@@ -182,14 +182,14 @@
 </Modal>
 
 <style>
-  .step h3 {
+  .stage h3 {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     margin: 0.5rem 0 0.25rem;
   }
 
-  .step p {
+  .stage p {
     margin: 0.4rem 0;
   }
 
