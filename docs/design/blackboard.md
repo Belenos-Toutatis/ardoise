@@ -69,7 +69,8 @@ app/src-tauri               tablet_find_blackboards, tablet_add_blackboard, tabl
   transport describes frames in the protocol of the tablet it connects to (`LoggingTransport::for_tablet`).
 - `pages.rs`: `DownloadedPage::kind`; `note_from_page` reads a blackboard page with `blackboard_note` (its own page,
   never turned, `Timing::Synthesized`); `page_kind(bytes)` recognises kept bytes (`original.bin`) so that "back to the
-  original" works for blackboard notes; `BLACKBOARD_PAGE`.
+  original" works for blackboard notes; `BLACKBOARD_PAGE` (the size it writes now), `BLACKBOARD_PAGES` and
+  `is_blackboard_page(size)` (every size it ever wrote with, §3).
 - `service/worker/board.rs`: the blackboard's half of the worker (search to add, connection, sync, live mode, the
   Slate's priority, the fresh link of a dirty stream); `service.rs`: the status fields and requests of §5;
   `LiveInput::Started` names the tablet (`kind`), and a `LiveSink` that answers `active() == false` right after it
@@ -96,10 +97,15 @@ app/src-tauri               tablet_find_blackboards, tablet_add_blackboard, tabl
   `draw_page(strokes)` (write, store, erase), `press_store()`, `erase()`. Faults: `power_off/on`,
   `disconnect_after`, `disconnect_at_next_request`, `stall_next_download(bytes)` (queued: the rest never comes),
   `delay_next_download(bytes)` (queued: the rest comes just after the host's next download request on the same link,
-  lost with the link), `ignore_next_delete`, `delay_next_delete(after)`, `store_raw_page(bytes)` (a page that is not
-  records), `on_next_download(action)` (to land a request in the middle of a download). **Supposed**: a transfer ends
-  with its link. Inspection: `stored_pages`, `screen`, `stats` (connections, requests, unknown requests, downloads,
-  deletes, live records, page-stored events).
+  lost with the link), `pace_downloads(interval)` (the chunks of a page come that far apart on the virtual clock, about
+  10 ms in Mi Home's capture; at once by default), `send_stream(bytes)` (stream bytes now, nobody asking: more of a
+  transfer thought finished), `stream_without_asking(on)` (every new link streams the pen without `12 02 08 01`: a
+  tablet that kept live mode across a reconnection, not measured), `ignore_next_delete`, `delay_next_delete(after)`,
+  `store_raw_page(bytes)` (a page that is not records), `on_next_download(action)` (to land a request in the middle of
+  a download), `on_next_delete(action)` (right after the next delete). Notifications leave in the order they are due
+  (a reply overtakes the chunks of a paced download still to come). **Supposed**: a transfer ends with its link.
+  Inspection: `stored_pages`, `screen`, `stats` (connections, requests, unknown requests, downloads, deletes, live
+  records, page-stored events).
 - `SimDevice::{Slate, Board}`; `SimConnector::over(devices)`, `RealTimeConnector::over(devices)`,
   `SimFactory::of(devices, real_time)` / `.with_board(board)`; devices must share one virtual clock
   (`SimBoard::with_clock(config, tablet.clock())`).
@@ -114,7 +120,8 @@ app/src-tauri               tablet_find_blackboards, tablet_add_blackboard, tabl
 - `original.rs`: a blackboard note's original comes back on the blackboard's page.
 - `live/resume.rs`: `tablet_fits(kind, sheet)` (which tablet may write on a resumed sheet, §2.20), `held_for` (the
   blackboard is never turned to follow a sheet); `live/hub.rs` ends a resumed run the tablet does not fit
-  (`refused` event); `live.rs`: `live_resume` refuses at once with a tablet connected that does not fit.
+  (`refused` event); `live.rs`: `live_resume` refuses at once with a tablet connected that does not fit;
+  `live/model.rs`: `LiveSnapshot.tablet`, the tablet the session writes with (§5.5).
 
 ## 2. Decisions
 
@@ -144,8 +151,11 @@ Taken while building:
    describe, download, keep, delete. `12 05 06` is written only after the page store returned `Ok` (note written and
    read back, `LibrarySink::store`), with cancellation disabled for that one write (as for the Slate), and only if no
    stream byte came while the page was kept. A page is accepted only after its count, a quiet window and the record
-   check (§2.15). A download that stops short (no byte for 5 s) or brings more bytes than announced is
-   `transferIncomplete`: retried once **on a fresh link**, then the sync stops and the page stays. A page that is not
+   check (§2.15). A download that stops short (no byte for 5 s), brings more bytes than announced, whose stream did
+   not go quiet before it could be asked (§2.15), or after which more bytes come while the page is kept is
+   `transferIncomplete`: retried once **on a fresh link**, then the sync stops and the page stays. Every unclean
+   transfer of a page uses up that one retry, whichever way it failed, so a tablet that always misbehaves ends the
+   sync with `transferIncomplete`, never in a loop of fresh links (second review of M18, R2). A page that is not
    whole records of a known status, or announced larger than the tablet's memory (`11 01 02`; 128 MiB while unknown),
    is `pageUnreadable`: nothing kept, nothing deleted, the sync stops, one log line with counts only. If the tablet
    describes again the page it was just asked to delete, it is described once more after 300 ms (`DELETE_SETTLE`,
@@ -167,18 +177,31 @@ Taken while building:
    the Slate only advertises when it wants to connect, the blackboard is always on. That scan leaves Windows'
    peripheral list alone (`ScanKind::Gentle`, §8). Supposed: Windows scans while a link is open (to check at H8).
 8. **Adding**: `tablet_find_blackboards` closes any open link and listens 60 s (`BOARD_SEARCH`) in 1 s slices, publishing
-   what it hears; `tablet_add_blackboard(address)` accepts only an address heard by the search under way, saves
+   what it hears (refused with `tabletBusy` during a sync and while live mode runs or waits for a tablet: §2.10);
+   `tablet_add_blackboard(address)` accepts only an address heard by the search under way, saves
    `blackboard.json` (replacing a blackboard known before: one at a time) and ends the search; the worker then connects
    to it. The name saved is `Mijia LCD blackboard` (the tablet advertises a generic `xiaomi.dev.ble`).
 9. **"Page stored" event**: noted in the log; the page count is read again as soon as nothing else runs (never during
    live mode or a sync), so a page stored during live mode is imported afterwards (a safe duplicate of the live note).
 10. **Live mode** on the blackboard: `Started { width: 20 500, height: 27 200, orientation: landscape }` (landscape
     means "not turned" in the hub); orientation changes are ignored while the blackboard holds the link or its live
-    mode waits for it; records are never turned. **A live run belongs to the tablet it started on**: after a lost link
-    only that tablet is looked for and accepted, the other one is ignored until live mode ends (its page would have
-    the wrong size and way of holding). Live mode asked with nothing connected takes the first tablet that connects. The hub times records 5 ms apart inside a notification and follows the wall clock across
-    notifications: with up to 6 records per notification at 120 per second, the times inside one notification are
-    compressed by at most about 20 ms, which the next notification corrects. Not worth a new field in `LiveInput`.
+    mode waits for it; records are never turned. **A live run belongs to the tablet it started on** and never changes
+    tablets (its page has that tablet's size and way of holding; second review of M18, R1):
+    - after a lost link only that tablet is looked for and accepted, the other one is ignored until live mode ends;
+    - the Slate's registration is refused (`tabletBusy`) while live mode runs (as before) or waits for the
+      blackboard it was written with; the search for a blackboard to add is refused while any live run exists. A run
+      waiting for a Slate, or for any tablet, lets the wizard run, as before the blackboard existed;
+    - a run whose tablet is no longer known (its file gone or unreadable: forgotten from another computer through the
+      shared library) ends as soon as the other tablet is known, before the other one is searched for: the sink is told
+      live mode stopped, nothing shown, as `forget` does here. With no tablet known at all it waits, as before;
+    - last guard, not expected to be reached: when the other tablet holds the link, the run ends before anything is
+      asked of that tablet (`live_step`, `board_live_step`), nothing of it is written, the sink is told live mode
+      stopped and the status shows `sheetOtherTablet` (`DeviceError::LiveOnOtherTablet`); the link stays.
+
+    Live mode asked with nothing connected takes the first tablet that connects. The hub times records 5 ms apart
+    inside a notification and follows the wall clock across notifications: with up to 6 records per notification at
+    120 per second, the times inside one notification are compressed by at most about 20 ms, which the next
+    notification corrects. Not worth a new field in `LiveInput`.
 11. **Future "screen erased" event**: `live_input()` (in `service/worker/board.rs`) is the one place where a frame of
     the reply characteristic becomes a live input; today it maps nothing. When the erase button is measured, its frame
     becomes a `BoardReply` variant mapped there to a new page.
@@ -196,12 +219,18 @@ Taken while building:
       cancelled, a page failing the record check, any error but a lost link), or stream bytes arriving after a
       download ended, mark the session dirty. A dirty session refuses downloads and live mode (`StreamDirty`), and the
       worker closes the link and opens a fresh one (`Worker::board_reopen`) before anything else; the sync or live mode
-      under way carries on there, with its permission. The reopening is not cut short by requests (a request that
-      cannot wait is taken first). Only a fresh link is known to carry nothing of the old transfer (supposed: to check
-      at H8, whether the tablet aborts a transfer on disconnection).
-    - *Quiet window.* Once the count reaches the announced size, the stream must stay quiet for 300 ms
-      (`QUIET_WINDOW`, supposed; page notifications came about every 10 ms in Mi Home's capture: 52 185 bytes in
-      2.1 s) before the page is returned; any byte more makes it incomplete. About 0.3 s per page.
+      under way carries on there, with its permission. Live mode that finds late page bytes as it starts
+      (`StreamDirty` from `start_live`'s drain, after a sync thought clean) waits the same way: the next step reopens
+      the link and live mode starts there; `StreamDirty` never reaches the screen (R3). The reopening is not cut short by
+      requests (a request that cannot wait is taken first). Only a fresh link is known to carry nothing of the old
+      transfer (supposed: to check at H8, whether the tablet aborts a transfer on disconnection).
+    - *Quiet window.* A download is asked only once the stream has been quiet for 300 ms (`QUIET_WINDOW`, supposed;
+      page notifications came about every 10 ms in Mi Home's capture: 52 185 bytes in 2.1 s), a fresh link counting
+      from its opening; the session waits for that at most 5 s (`DATA_IDLE_TIMEOUT`), and a stream that does not go
+      quiet is an unclean transfer (dirty, the page's retry used up, nothing asked: R4). No wait in a normal sync: a
+      page ends with a quiet window; on a fresh link, at most what is left of the window after the information was read
+      (once per link); after live mode, at most 0.3 s. Once the count reaches the announced size, the stream must stay
+      quiet for 300 ms again before the page is returned; any byte more makes it incomplete. About 0.3 s per page.
     - *Record check.* Size a multiple of 7, every byte at an offset multiple of 7 `a0`, `a1` or `c0` (x, y and
       pressure never reach `a0` in their high byte: 244-byte chunks, 244 mod 7 = 6, so most splices are misaligned).
       A rotation of the same page by a multiple of 7 would pass, with every record kept in the wrong order; the fresh
@@ -212,6 +241,8 @@ Taken while building:
     (and the blackboard while the Slate does) does not interrupt the worker at all.
 17. **Forgetting a tablet** stops a live mode waiting for a tablet, the sync waiting and the pending state, as before
     the blackboard existed, unless the other tablet holds the link: then its sync, live mode and what waits for it stay.
+    Forgotten from another computer (its file gone from the shared library): a live run waiting for it ends once the
+    other tablet is known (§2.10).
 18. **`blackboard.json` unreadable**: no blackboard known (a Slate goes on working), one line in the diagnostic log
     (written once), no error shown, the file left as it is until a blackboard is added (which replaces it).
 19. **A page dated before 2020-01-01 UTC** (a clock never set) gives a note dated by the import; its id still comes from
@@ -224,8 +255,9 @@ Taken while building:
     or out of the page, but never at the same physical scale, and turned ink for the blackboard. And its own page
     with the blackboard was turned and shrunk too (`hold_for` took its "landscape", which means "not turned", for a
     wide tablet): fixed, the blackboard is held as it is (`held_for`), its records land as they come. **Rule**
-    (`tablet_fits`): the blackboard writes only on a page of exactly its size (`BLACKBOARD_PAGE`), the Slate on every
-    other sheet (as before the blackboard: A5 on A4 and so on, unchanged). Any other pair: `live_resume` returns
+    (`tablet_fits`): the blackboard writes only on a page of a size it wrote with (`is_blackboard_page`: today exactly
+    `BLACKBOARD_PAGE`, §3), the Slate on every other sheet (as before the blackboard: A5 on A4 and so on, unchanged).
+    Any other pair: `live_resume` returns
     `sheetOtherTablet` at once when that tablet is connected; otherwise the run ends when it connects (`refused` event,
     state `idle`), the tablet leaves live mode, nothing is written to the note. A blackboard note turned in the
     editor is a sheet like any other (the Slate's).
@@ -236,7 +268,10 @@ Taken while building:
 ## 3. Units and time
 
 - x and y as sent, 1:1 in units of 10 µm (inferred: 13.5" 3:4 panel, about 206 × 274 mm); the page 20 500 × 27 200
-  (largest coordinates seen: 20 401 and 27 067). To calibrate with a ruler at H8: only the two constants change.
+  (largest coordinates seen: 20 401 and 27 067). To calibrate with a ruler at H8: the two constants change
+  (`BOARD_WIDTH`, `BOARD_HEIGHT`, so `BLACKBOARD_PAGE`), and the new size is **added** to `BLACKBOARD_PAGES`, the old
+  ones kept: every check of "is this a blackboard page" (`is_blackboard_page`: who may resume it, §2.20) goes through
+  that list, so the notes written before stay blackboard pages. New notes take the new size.
 - Pressure 1..=2047 when touching, normalised by 2047 like the Slate's.
 - Live mode: each notification stamped on arrival (latency stamp), as for the Slate.
 
@@ -246,13 +281,16 @@ Taken while building:
   research note encodes and decodes identically; unknown replies kept, unknown requests refused; malformed frames and
   every prefix never panic; records round-trip; a page becomes timed strokes; beacon recognition.
 - `ardoise-device`: `blackboard.rs` (scripted tablet, the per-page step: info and clock, each page deleted after the
-  keeper, a page refused is not deleted, the quiet window, a stall retried once on a fresh link only, bytes after a
-  page make the stream dirty and keep the page on the tablet, an unreadable page, a size beyond the memory, a delete
+  keeper, a page refused is not deleted, the quiet window, a download asked only on a quiet stream (a fresh link
+  counting from its opening, at once after a page, nothing asked on a stream that never stops), a stall retried once
+  on a fresh link only, bytes after a page make the stream dirty and keep the page on the tablet and use up its retry
+  (the second time `transferIncomplete`), an unreadable page, a size beyond the memory, a delete
   described again once, an empty tablet and the 1 000-page cap, a cancelled download, unknown input counted, live mode
   order, a lost link); `identity.rs`, `pages.rs` (a clock never set), `logging.rs`, `transport.rs`,
   `service/tests.rs` (status shapes, error codes).
 - `ardoise-ble/src/convert.rs`, `gatt.rs`: recognition, the blackboard's layout never touching `fe95`, the layout choice.
-- `ardoise-sim/src/board.rs`: the simulated tablet itself.
+- `ardoise-sim/src/board.rs`: the simulated tablet itself (paced downloads, stream bytes nobody asked for, a pen
+  streamed to a new link unasked, the action after a delete).
 - `ardoise-sim/tests/blackboard.rs` (service against the simulated blackboard, virtual time): adding it then three dated
   notes; a page deleted only after its note is written and checked (the store refuses the second page: it stays on the
   tablet, the next sync brings it without the first one twice); deletion off: on request only, still deleted; live mode
@@ -262,7 +300,14 @@ Taken while building:
   cancelled. Through `TabletService`, the app's own sync step: a stall recovered on a fresh link, a second stall
   (`transferIncomplete`, the page stays); the rest of an earlier transfer, late, never joins another page (the review's
   two cases: a rotation by 20 records, a page entirely late); a download cancelled for live mode leaves no phantom
-  record; a slow delete waited for, an ignored one (`pageNotDeleted`); an unreadable page (`pageUnreadable`, counts in
+  record (the page paced over time, so that without the fresh link its rest would reach live mode: checked by
+  removing the dirty flag, the phantom check then fails); late page bytes found as live mode starts reopen the link
+  and live mode starts, no error shown; bytes while a page is kept, after its retry: `transferIncomplete`, its note
+  kept, one more fresh link and no loop; a tablet streaming unasked on every link: no download ever asked, no page
+  kept, `transferIncomplete` after one fresh link; while a live run waits for its tablet, registering a Slate (run of
+  the blackboard) and searching for a blackboard (run of the Slate) are refused; a run whose tablet is forgotten
+  elsewhere ends and the other tablet writes nothing, both ways (each of the two guards alone passes it, checked by
+  disabling the other); a slow delete waited for, an ignored one (`pageNotDeleted`); an unreadable page (`pageUnreadable`, counts in
   the log); the status after an automatic, explicit, empty and cancelled sync (`connected`, `active: 'blackboard'`,
   `storedPages` going down); a page stored during a failed sync counted at once; live mode keeps its tablet (both
   ways, and the first to connect); who may delete (a request for the Slate, an automatic sync resumed after the option
@@ -272,7 +317,10 @@ Taken while building:
 - `app/src-tauri/src/live/resume/tests.rs`: who may write where; a blackboard page resumed with the blackboard takes
   its records exactly as they come whatever the Slate's setting; a Slate sheet (landscape and turned) with the
   blackboard and a blackboard page with the Slate end at once (`refused`, `sheetOtherTablet`, `idle`), the note's file
-  byte for byte the same; `live/tests.rs`: `live_resume` refused at once.
+  byte for byte the same, every size of `BLACKBOARD_PAGES` is the blackboard's; `live/tests.rs`: `live_resume` refused
+  at once, `LiveSnapshot.tablet` (`null`, then the tablet, kept while reconnecting); `contract_tests.rs`: the error
+  codes of the tablet paths read from the code (`error_code`, `sync_error`, `StatusError::new`, `CommandError::new`,
+  the hub's refusal), each with its text in both languages; `LiveSnapshot.tablet` as words.
 - `ardoise-sim/tests/blackboard_captures.rs` (private captures, skipped without them): every vendor frame of every
   capture decodes and encodes back (60 requests, 35 replies); every live notification is whole records of a known
   status (904 notifications, 4 062 records); the nine downloads of Mi Home's import are, byte for byte, the kept
@@ -290,9 +338,12 @@ real blackboard exists yet), e2e journeys (the interface work).
 
 ### 5.1 Commands
 
-Unchanged: `tablet_status`, `tablet_subscribe`, `tablet_register` (the Slate's wizard), `tablet_set_options`,
-`tablet_info` (the Slate's `device.json`), `forget_tablet` (the Slate only), `sim_press_button` (the simulated Slate),
-the live commands (`live_start`, `live_stop`, …: live mode starts on whichever tablet is connected or connects first).
+Unchanged: `tablet_status`, `tablet_subscribe`, `tablet_set_options`, `tablet_info` (the Slate's `device.json`),
+`forget_tablet` (the Slate only), `sim_press_button` (the simulated Slate), the live commands (`live_start`,
+`live_stop`, …: live mode starts on whichever tablet is connected or connects first). `tablet_register` (the Slate's
+wizard): as before, plus `tabletBusy` (in `status.error`, nothing started) while live mode waits for the blackboard it
+was written with (a live session never changes tablets, §2.10); a live session waiting for a Slate, or for any tablet,
+still lets it run.
 
 Changed meaning, same signature:
 
@@ -308,7 +359,7 @@ New:
 
 | Command | Arguments | Returns | Notes |
 |---|---|---|---|
-| `tablet_find_blackboards` | none | `null` | Starts the search: `connection: 'adding'`, `boardSearch` filled as blackboards are heard, for 60 s. Closes any open link. `tabletBusy` (in `status.error`) during a sync or live mode. |
+| `tablet_find_blackboards` | none | `null` | Starts the search: `connection: 'adding'`, `boardSearch` filled as blackboards are heard, for 60 s. Closes any open link. `tabletBusy` (in `status.error`, nothing started) during a sync, and while a live session runs or waits for its tablet (`pending: 'live'`). |
 | `tablet_add_blackboard` | `{ address: string }` (one of `boardSearch.found[].address`, any case) | `TabletStatus` | Saves `blackboard.json`, ends the search, then the service connects. Errors: `blackboardNotFound` (not heard by the search under way, or no search), `libraryAccess`, `noLibrary`. |
 | `tablet_forget_blackboard` | none | `null` | Disconnects the blackboard if connected and deletes `blackboard.json`; a connected Slate stays connected. With the simulated tablets, only their throwaway folder. |
 | `sim_blackboard_store_page` | none | `null` | Presses the simulated blackboard's store button (`--simulated-blackboard` only, else `simulationOnly`). |
@@ -382,14 +433,32 @@ the last connected tablet said (check `device.kind`); `lastSync` is the last syn
   syncing again on a fresh connection may work.
 - `blackboardConfirmDelete` (new): returned by `tablet_sync` without `confirmBlackboardDelete` while the blackboard is
   connected and "delete after import" is off; nothing was done. Not a failure to show as such: the cue to ask.
+- `sheetOtherTablet` (M18, already translated): `live_resume` refused, the `refused` live event (§5.5), and, in
+  `status.error`, a live session that met the other tablet (§5.5, not expected).
 - Already translated, also used: `tabletTimeout`, `tabletNotConnected`, `tabletBusy`, `tabletNotRegistered` (no tablet
-  known at all), `noLibrary`, `libraryAccess`, `bluetoothOff`, `bluetoothMissing`, `tablet` (also an internal
-  "dirty stream" state, never expected on screen), `simulationOnly`.
+  known at all), `noLibrary`, `libraryAccess`, `bluetoothOff`, `bluetoothMissing`, `tablet` (an unexpected failure;
+  the internal "dirty stream" state never reaches it), `simulationOnly`.
 
 ### 5.5 Live mode
 
 Same commands and events as for the Slate. The live page is portrait (20 500 × 27 200). Hovering records drive the
 laser pointer. Live mode resumes only on the tablet it started on (the other one is not connected while it waits).
+
+`LiveSnapshot` (`lib/live.ts`) has one more field, `tablet: 'slate' | 'blackboard' | null`: the tablet this live session
+writes with, set when its tablet first connects, kept while it reconnects (`state: 'reconnecting'`, `active` then
+`null` in the tablet status), `null` before any tablet connected (and in a session refused at once, below). Use it,
+not `tablet.active`, to show or hide what is the Slate's only (the position switch, the hint about its button). It is
+not sent to the share's viewers.
+
+A live session never changes tablets. What the interface receives when one cannot go on:
+
+- Its tablet is forgotten from another computer (its file gone from the shared library) while it waits for it and the
+  other tablet is known: the session ends as after `live_stop` (the `idle` snapshot, its notes saved), with no
+  error, as when the tablet is forgotten here; `status.known` loses that tablet.
+- The other tablet holds the link (not expected: the registration and the search wait, see §5.1): the same end, and
+  `status.error.code === 'sheetOtherTablet'`; the other tablet stays connected, nothing of it was written (what the
+  first tablet wrote is saved). Not the `refused` event below: that one is for a resumed sheet that never started,
+  and opens the start banner (try again, back to the library).
 
 Resuming a note (`live_resume`, M12): the blackboard writes only on a blackboard page (20 500 × 27 200: its synced
 pages and its live notes), the Slate on every other note, never on a blackboard page (§2.20).
@@ -449,7 +518,11 @@ when nothing failed.
   link relies on it), whether it ever pauses more than 300 ms inside a page (the quiet window would then refuse good
   pages after their count, as `transferIncomplete` twice: nothing lost), how long a delete takes (`DELETE_SETTLE`,
   300 ms), whether it ever announces a page of 0 bytes (kept as an empty note and deleted today), whether two pages
-  can share a second (deletion is by time).
+  can share a second (deletion is by time), whether it keeps live mode across a reconnection (§2.15: then no
+  download is asked while it streams). Not covered by the quiet window: a tablet that ignores a download request while
+  it streams, and whose pen paused more than 300 ms just before the request; its pen records could then be counted as
+  the page. A page that reaches exactly its announced size that way and passes the record check would be kept and
+  the real page deleted unread. Only measuring whether the tablet keeps streaming after a reconnection can close it.
 - The Slate's priority scans for 1 s every 10 s while the blackboard's link is open. Emptying Windows' peripheral list
   then (what every other scan does, btleplug #405) might drop the open link's peripheral or its disconnection events;
   so that scan is gentle: the list is neither emptied nor swept (a swept list still holds a Slate that stopped
