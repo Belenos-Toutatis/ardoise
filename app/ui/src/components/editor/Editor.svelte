@@ -731,6 +731,8 @@
       // The fonts of the text frames, for the field where one types and the toolbar's family buttons.
       void registerTextFonts(module.text);
       noteId = opened.note.id;
+      // A frame being typed belongs to the doc that goes.
+      textEdit = null;
       history = createHistory(start);
       savedNote = start.note;
       stamp = opened.stamp;
@@ -1775,6 +1777,8 @@
         // The kept part has the same background image, with the same pixels.
         const pixels = result.note.backgroundImage ? present.backgroundPixels : undefined;
         const start = pixels ? { ...fresh, backgroundPixels: pixels } : fresh;
+        // A frame being typed belongs to the doc that goes.
+        textEdit = null;
         history = createHistory(start);
         savedNote = start.note;
         stamp = result.stamp;

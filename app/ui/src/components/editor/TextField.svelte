@@ -115,7 +115,11 @@
     unscroll();
   }}
   onscroll={unscroll}
-  {onblur}
+  onblur={() => {
+    // The window itself lost the focus (another window, Alt + Tab): the field gets it back when the window does.
+    if (typeof document !== 'undefined' && typeof document.hasFocus === 'function' && !document.hasFocus()) return;
+    onblur();
+  }}
 ></textarea>
 
 <style>
