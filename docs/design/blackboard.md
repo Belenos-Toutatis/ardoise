@@ -383,6 +383,7 @@ New:
 | `tablet_add_blackboard` | `{ address: string }` (one of `boardSearch.found[].address`, any case) | `TabletStatus` | Saves `blackboard.json`, ends the search, then the service connects. Errors: `blackboardNotFound` (not heard by the search under way, or no search), `libraryAccess`, `noLibrary`. |
 | `tablet_forget_blackboard` | none | `null` | Disconnects the blackboard if connected and deletes `blackboard.json`; a connected Slate stays connected. With the simulated tablets, only their throwaway folder. |
 | `sim_blackboard_store_page` | none | `null` | Presses the simulated blackboard's store button (`--simulated-blackboard` only, else `simulationOnly`). |
+| `sim_blackboard_erase` | none | `null` | Presses the simulated blackboard's erase button (`--simulated-blackboard` only, else `simulationOnly`): what is written next is a new screen. For the journeys; the interface has no button for it. |
 
 Errors are `{ code, message }` as everywhere; `code` selects `errorCodes.*`.
 

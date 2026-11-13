@@ -624,6 +624,21 @@ pub fn forget_blackboard_through(
     }
 }
 
+/// Presses the simulated blackboard's erase button (`--simulated-blackboard` only): what is
+/// written next is a new screen, so a new page.
+pub fn sim_blackboard_erase_in(runtime: &TabletRuntime) -> CommandResult<()> {
+    match lock(&runtime.simulated_board).as_ref() {
+        Some(board) => {
+            board.erase();
+            Ok(())
+        }
+        None => Err(CommandError::new(
+            "simulationOnly",
+            "no simulated blackboard",
+        )),
+    }
+}
+
 /// Presses the simulated blackboard's store button (`--simulated-blackboard` only).
 pub fn sim_blackboard_store_page_in(runtime: &TabletRuntime) -> CommandResult<()> {
     match lock(&runtime.simulated_board).as_ref() {
@@ -769,6 +784,13 @@ pub async fn tablet_forget_blackboard(app: AppHandle) -> CommandResult<()> {
 #[tauri::command]
 pub async fn sim_blackboard_store_page(runtime: State<'_, TabletRuntime>) -> CommandResult<()> {
     sim_blackboard_store_page_in(&runtime)
+}
+
+/// Presses the simulated blackboard's erase button (`--simulated-blackboard` only, for the e2e
+/// journeys).
+#[tauri::command]
+pub async fn sim_blackboard_erase(runtime: State<'_, TabletRuntime>) -> CommandResult<()> {
+    sim_blackboard_erase_in(&runtime)
 }
 
 #[tauri::command]

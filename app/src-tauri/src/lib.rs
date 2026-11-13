@@ -339,6 +339,7 @@ pub fn run() {
             tablet::tablet_add_blackboard,
             tablet::tablet_forget_blackboard,
             tablet::sim_blackboard_store_page,
+            tablet::sim_blackboard_erase,
             live::live_subscribe,
             live::live_start,
             live::live_resume,

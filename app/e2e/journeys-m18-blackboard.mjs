@@ -277,8 +277,26 @@ export const blackboardJourneys = [
           throw new Error('the position of the Slate is offered without a Slate');
         }
 
-        // A page stored now: imported by itself (automatic sync, deletion on), as a landscape note.
+        // The screen erased first: the same screen stored again would only update the note of its earlier store, made
+        // upright. Live mode starts on the landscape page, still with no switch (the quarter turns are not the Slate's
+        // orientation), and the simulated pen writes the new screen.
         await showTab(app, 'use');
+        await invoke(app, 'sim_blackboard_erase');
+        await app.waitFor(`document.querySelector(${j(`${PANEL} button[data-action="live"]:not([disabled])`)}) !== null`, 'the live button');
+        await app.click(`${PANEL} button[data-action="live"]`);
+        await app.waitFor(`document.querySelector('.live-view[data-state="live"]') !== null`, 'live mode', 30_000);
+        await app.waitFor(`${canvasData('pageSize')} === '27200x20500'`, 'the landscape page of the blackboard');
+        await app.waitFor(`Number(${canvasData('strokes')}) > 0`, 'strokes on the landscape live page', 20_000);
+        if (await app.evaluate(`document.querySelector('[data-slot="orientation"]') !== null || document.querySelector('[data-slot="resume-hold"]') !== null`)) {
+          throw new Error('the Slate position switch or its notice is shown for the blackboard');
+        }
+        await app.click('button[data-action="stop-live"]');
+        await app.waitFor(`document.querySelector('.shell:not(.shell-hidden) input.search') !== null`, 'the library', 30_000);
+
+        // That screen stored: a new page (the screen was erased before the run), imported by itself (automatic sync,
+        // deletion on) as a landscape note.
+        await openPanel(app);
+        await app.waitFor(connection('connected'), 'the blackboard idle after live mode', 60_000);
         const before = await notePaths(app);
         await invoke(app, 'sim_blackboard_store_page');
         try {
@@ -292,19 +310,6 @@ export const blackboardJourneys = [
         if (added.length !== 1) throw new Error(`${added.length} new notes for one stored page`);
         const size = await pageSizeOfNote(app, added[0]);
         if (size !== '27200x20500') throw new Error(`the page of the new note is ${size}, not landscape`);
-
-        // Live mode starts on the landscape page, still with no switch: the quarter turns are not the Slate's orientation.
-        await app.waitFor(connection('connected'), 'the blackboard idle after the import', 60_000);
-        await app.waitFor(`document.querySelector(${j(`${PANEL} button[data-action="live"]:not([disabled])`)}) !== null`, 'the live button');
-        await app.click(`${PANEL} button[data-action="live"]`);
-        await app.waitFor(`document.querySelector('.live-view[data-state="live"]') !== null`, 'live mode', 30_000);
-        await app.waitFor(`${canvasData('pageSize')} === '27200x20500'`, 'the landscape page of the blackboard');
-        await app.waitFor(`Number(${canvasData('strokes')}) > 0`, 'strokes on the landscape live page', 20_000);
-        if (await app.evaluate(`document.querySelector('[data-slot="orientation"]') !== null || document.querySelector('[data-slot="resume-hold"]') !== null`)) {
-          throw new Error('the Slate position switch or its notice is shown for the blackboard');
-        }
-        await app.click('button[data-action="stop-live"]');
-        await app.waitFor(`document.querySelector('.shell:not(.shell-hidden) input.search') !== null`, 'the library', 30_000);
 
         // Back to the starting position, so that the next steps are as before.
         await openPanel(app);
