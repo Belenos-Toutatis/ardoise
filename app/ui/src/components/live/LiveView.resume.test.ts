@@ -303,8 +303,8 @@ describe('a sheet that went on in a new note', () => {
 
 describe('live view: a sheet the connected tablet cannot write on', () => {
   const SENTENCE = {
-    fr: ['Cette feuille ne peut pas être continuée avec cette tablette', 'une page de la tablette Xiaomi avec la tablette Xiaomi', "Rien n'a été écrit sur la note"],
-    en: ['This sheet cannot be continued with this tablet', 'a page of the Xiaomi tablet with the Xiaomi tablet', 'Nothing was written on the note'],
+    fr: ['Cette feuille ne peut pas être continuée avec cette tablette', 'une page de la tablette Xiaomi avec la tablette Xiaomi', "Cette tablette n'a rien écrit sur la note"],
+    en: ['This sheet cannot be continued with this tablet', 'a page of the Xiaomi tablet with the Xiaomi tablet', 'This tablet wrote nothing on the note'],
   } as const;
 
   it.each(['fr', 'en'] as const)('shows why at once when the Xiaomi tablet is connected and the sheet is the Slate\'s (%s)', async (locale) => {

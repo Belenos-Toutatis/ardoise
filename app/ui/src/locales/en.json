@@ -796,7 +796,7 @@
     "notSupported": "This tablet cannot do that (the Xiaomi tablet has no name to change).",
     "blackboardConfirmDelete": "The Xiaomi tablet's pages are imported only with your agreement: they are deleted from the tablet once imported, because it gives only its oldest page. Confirm the sync to go on.",
     "pageUnreadable": "The Xiaomi tablet sent a page that Ardoise cannot read: that page was not imported and stays on the tablet, and so do the pages stored after it (the tablet gives only its oldest page). Import them with Mi Home, and keep the diagnostic log (the _ardoise\\diagnostics folder of the library).",
-    "sheetOtherTablet": "This sheet cannot be continued with this tablet: a Bamboo Slate sheet is continued with the Bamboo Slate, a page of the Xiaomi tablet with the Xiaomi tablet. Nothing was written on the note."
+    "sheetOtherTablet": "This sheet cannot be continued with this tablet: a Bamboo Slate sheet is continued with the Bamboo Slate, a page of the Xiaomi tablet with the Xiaomi tablet. This tablet wrote nothing on the note."
   },
   "editor": {
     "back": "Library",
