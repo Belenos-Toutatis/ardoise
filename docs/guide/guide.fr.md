@@ -944,15 +944,17 @@ l'adresse *et* le code.
 ### Parcourir
 
 La bibliothèque est la page d'accueil. En haut : le champ **Rechercher une note**, le tri (**Trier les notes** :
-**Date : la plus récente d'abord**, **Date : la plus ancienne d'abord**, **Titre : A → Z**, **Titre : Z → A**), les
+**Date : la plus récente d'abord**, **Date : la plus ancienne d'abord**, **Titre : A → Z**, **Titre : Z → A**, et, quand
+un classeur est affiché, **Ordre du classeur**, voir plus bas), les
 boutons **Nouvelle note**, **Depuis un PDF ou une image…** et **Réglages**. À gauche : la barre latérale avec
 **Toutes les notes**, **Favoris**, les **Classeurs**, les **Étiquettes**, la **Corbeille**, l'entrée
 **Importer depuis Inkspace…** (chapitre 11), et en bas le bloc **Tablette** et le bouton **Tester la tablette**.
 
 Une carte montre la miniature, le titre (ou la date si la note n'a pas de titre), la date, le classeur et les
 étiquettes. Un clic ouvre la note dans l'éditeur. Sur la carte : la case pour *sélectionner*, l'étoile des favoris, le menu
-**Actions pour…** (**Renommer**, favoris, **Mettre à la corbeille**) et une poignée, qui apparaît sur la carte, pour
-glisser la note hors d'Ardoise (chapitre 10). Renommer une note renomme aussi son fichier.
+**Actions pour…** (**Renommer**, favoris, **Dupliquer**, **Changer la date…**, **Mettre à la corbeille**) et une poignée,
+qui apparaît sur la carte, pour glisser la note hors d'Ardoise (chapitre 10). Le **clic droit** sur une carte ouvre ce
+même menu. Renommer une note renomme aussi son fichier.
 
 Les miniatures sont gardées dans un cache propre à chaque PC. Quand une note change sur un autre ordinateur
 (synchronisation Nextcloud), la bibliothèque se met à jour toute seule.
@@ -972,17 +974,60 @@ Sous la date, chaque carte indique le classeur de la note, avec son chemin compl
 mention **Non classée** : vous voyez d'un coup d'œil ce qu'il reste à ranger. Une note étant un fichier, elle est dans un
 seul classeur à la fois.
 
-Pour renommer ou supprimer un classeur, ouvrez le menu **⋯** (« Actions sur le classeur… ») à côté de son nom dans la
-barre latérale :
+Pour renommer, exporter, imprimer ou supprimer un classeur, ouvrez le menu **⋯** (« Actions sur le classeur… ») à côté de son
+nom dans la barre latérale, ou faites un **clic droit** sur son nom :
 
 - **Renommer…** : tapez le nouveau nom puis **Renommer** (**Annuler** ou `Échap` abandonne). Le dossier est renommé et
   ses notes le suivent. Ardoise ne remplace jamais un classeur ou un fichier du même nom : elle prévient et vous
   laisse en choisir un autre.
+- **Exporter le classeur en PDF…** et **Imprimer le classeur…** : voir le chapitre 10.
 - **Supprimer…** : Ardoise demande confirmation en disant combien de notes (et de sous-classeurs) le classeur contient.
   **Supprimer le classeur** envoie ses notes à la **Corbeille**, puis supprime le dossier. Rien n'est détruit : chaque
   note restaurée depuis la corbeille retrouve son classeur. Un dossier qui contient encore des fichiers qui ne sont pas
   des notes est gardé, et le message le dit. Un message **Annuler** reste affiché quelques secondes (voir « La
   corbeille » plus bas) : il rétablit le classeur avec ses notes.
+
+### Ranger les notes d'un classeur dans l'ordre voulu
+
+Quand un classeur est affiché, le tri **Ordre du classeur** range ses notes comme *vous* le décidez, au lieu de la date. Dans
+les autres vues (**Toutes les notes**, **Favoris**, une étiquette), ce choix n'est pas proposé et les notes sont triées par date,
+la plus récente d'abord ; votre choix revient dès que vous rouvrez un classeur.
+
+- **Au glisser-déposer** : faites glisser une carte (ou toute la sélection, si la carte en fait partie) *entre deux cartes* : une
+  barre verticale montre où elle va se poser (sur la moitié gauche d'une carte, avant elle ; sur la moitié droite, après). Les
+  notes sélectionnées se déplacent ensemble en gardant leur ordre. Déposée sur un classeur de la barre latérale, la note change
+  de classeur, quel que soit le tri.
+- **Au clavier** : `Alt + flèche gauche` ou `Alt + flèche droite` déplace la carte qui a le focus (ou la sélection) d'une place ;
+  `Alt + Début` ou `Alt + Fin` la met au début ou à la fin. Le lecteur d'écran annonce la nouvelle place (« Beta déplacée en
+  position 1 sur 3 »).
+- **Le classeur parent** montre ses propres notes d'abord, puis celles de chaque sous-classeur, dans l'ordre de ce
+  sous-classeur (les sous-classeurs dans l'ordre de la barre latérale). Une carte ne se déplace que parmi les notes de son
+  classeur : on range un sous-classeur en l'ouvrant ou en glissant sa note à côté d'une note du même sous-classeur.
+- **Une note qui arrive** (tablette, nouvelle note, note déplacée dans le classeur, note restaurée) se place à la fin ; une
+  copie (voir plus bas) se place juste après son original. Pendant une **recherche**, les notes gardent l'ordre du classeur
+  mais ne se déplacent pas : videz la recherche pour les ranger.
+- **L'ordre est enregistré dans le classeur lui-même**, dans le petit fichier `_ardoise-order.json` (à côté des notes), et suit donc la
+  synchronisation. Chaque classeur a son ordre. Les boutons **Page précédente** et **Page suivante** de l'éditeur, et l'export
+  de plusieurs notes, suivent l'ordre affiché. Si le fichier est absent ou abîmé, les notes sont simplement triées par date, sans
+  rien perdre. Si deux PC rangent le même classeur en même temps, Nextcloud garde une « copie en conflit » du fichier : c'est le
+  rangement le plus récent qui est retenu, et aucune note n'est perdue (une note que ce rangement ne cite pas passe à la fin).
+
+### Dupliquer une note, changer sa date
+
+- **Dupliquer** (menu de la carte, clic droit, ou barre de la sélection pour une ou plusieurs notes) crée une copie dans le
+  *même classeur*, avec la *même date de création*, le titre suivi de **(copie)** (« Cours (copie) », puis « Cours (copie 2) »
+  pour la copie d'une copie ; une note sans titre donne « (copie) »), sans le favori. Le tracé, les calques, le papier, l'image de
+  fond, les étiquettes, la **narration** et l'**original de la tablette** sont copiés : **Revenir à l'original** marche sur la copie.
+  Une copie d'une *copie retouchée par un assistant* reste une copie retouchée. Un message **Annuler** (ou `Ctrl + Z`) met les
+  copies à la corbeille.
+- **Changer la date…** (menu de la carte, clic droit) ouvre une petite fenêtre : **Aujourd'hui** remplit le champ avec la date et
+  l'heure de maintenant, ou tapez une **Nouvelle date et heure**, puis **Changer la date**. C'est la date que montre la note, selon
+  laquelle la bibliothèque la trie, et qui commence le nom du fichier ; l'écriture et le son ne changent pas. **Annuler** remet
+  l'ancienne date.
+- *Avec la tablette* : une copie n'est pas « la note d'une page » de la tablette, et changer la date d'une note importée ne
+  la fait pas revenir à la synchronisation suivante (Ardoise la reconnaît à son identifiant). Un cas particulier : un écran de
+  la tablette Xiaomi enregistré de nouveau met à jour sa note ; si vous avez daté cette note *après* l'enregistrement précédent,
+  une nouvelle note est ajoutée au lieu de la mettre à jour (rien n'est perdu ni écrasé).
 
 ### Étiquettes et favoris
 
@@ -1004,7 +1049,7 @@ changement le plus récent l'emportant.
 
 Cochez les cartes, ou : `Ctrl + clic` ajoute ou retire une note, `Maj + clic` sélectionne une plage, `Ctrl + A` tout,
 `Échap` désélectionne. Une barre d'actions apparaît : **Déplacer vers…**, **Étiquettes…**, **Exporter…**,
-**Imprimer…**, **Assembler…**, **Tourner**, **Mettre en favoris** (ou **Retirer des favoris**),
+**Imprimer…**, **Assembler…**, **Dupliquer**, **Tourner**, **Mettre en favoris** (ou **Retirer des favoris**),
 **Mettre à la corbeille**, **Désélectionner**.
 
 **Tourner** fait pivoter *toutes* les notes sélectionnées d'un coup : choisissez **Un quart de tour à gauche** ou
@@ -1519,8 +1564,23 @@ moins juste. *Relisez toujours le texte* : la reconnaissance peut se tromper.
 
 - **Copier l'image** : met la note dans le presse-papiers de Windows ; collez-la dans Word ou OneNote.
 - **Imprimer…** (éditeur, ou barre de la sélection) : la fenêtre d'impression de Windows s'ouvre pour choisir
-  l'imprimante. Chaque note est imprimée sur une page, dans son orientation. Vous réglez **Imprimer le fond** et la
-  **Taille sur la feuille** (**Taille réelle** ou **Ajustée à la feuille**).
+  l'imprimante. Chaque note est imprimée sur une page, dans son orientation. Vous réglez **Imprimer le fond**, la
+  **Taille sur la feuille** (**Taille réelle** ou **Ajustée à la feuille**) et les **Notes par feuille** : **1**, **2 par
+  feuille** ou **4 par feuille**. Avec 2 ou 4, Ardoise range les notes dans l'ordre sur la feuille, chacune dans sa case sans
+  être déformée (deux notes en hauteur côte à côte sur une feuille en largeur, deux notes en largeur l'une sous l'autre ;
+  quatre notes en deux fois deux) ; ce réglage est celui d'Ardoise, pas celui du pilote de l'imprimante (qui n'agirait que
+  sur des feuilles déjà faites). Dans la fenêtre de Windows, les *pages* sont alors les feuilles : cinq notes à deux par feuille
+  font trois pages.
+
+### Exporter ou imprimer un classeur
+
+**Exporter le classeur en PDF…** (menu **⋯** ou clic droit sur un classeur de la barre latérale) met toutes ses notes dans un
+seul PDF, une page par note, **dans l'ordre du classeur** (**Ordre du classeur**, ci-dessus), quel que soit le tri affiché. La
+fenêtre est celle de l'export, réduite au PDF, avec la case **Inclure les sous-classeurs** (décochée au départ : elle n'apparaît
+que si le classeur a des sous-classeurs) ; leurs notes viennent après celles du classeur, chaque sous-classeur dans son ordre.
+Le PDF a des **signets** : un par note (son titre, ou sa date), et, avec les sous-classeurs, un par sous-classeur qui regroupe les
+signets de ses notes ; ouvrez le panneau des signets de votre lecteur PDF pour les voir. **Imprimer le classeur…** ouvre la
+fenêtre d'impression avec les mêmes notes, dans le même ordre, et la même case **Inclure les sous-classeurs**.
 - *Glisser hors d'Ardoise* : la poignée d'une carte de la bibliothèque dépose une *image PNG* de la note dans
   l'Explorateur, sur le bureau, dans Word, OneNote ou un courriel (une image par note si plusieurs sont sélectionnées).
   Gardez le bouton enfoncé pendant la préparation de l'image.

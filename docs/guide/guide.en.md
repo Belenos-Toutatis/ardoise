@@ -893,15 +893,15 @@ The writing and the image of the shared notes can be seen by anyone who has the 
 ### Browsing
 
 The library is the home page. At the top: the **Search notes** field, the sort (**Sort notes**: **Date: newest first**,
-**Date: oldest first**, **Title: A → Z**, **Title: Z → A**), and the **New note**, **From a PDF or an image…** and
+**Date: oldest first**, **Title: A → Z**, **Title: Z → A**, and, when a binder is shown, **Binder order**, see below), and the **New note**, **From a PDF or an image…** and
 **Settings** buttons. On the left: the sidebar with **All notes**, **Favourites**, the **Binders**, the **Tags**, the
 **Trash**, the **Import from Inkspace…** entry (chapter 11), and at the bottom the **Tablet** block and the **Test the
 tablet** button.
 
 A card shows the thumbnail, the title (or the date if the note has no title), the date, the binder and the tags. A click
 opens the note in the editor. On the card: the box to *select* it, the favourites star, the **Actions for…** menu (**Rename**,
-favourites, **Move to trash**) and a handle, which appears on the card, to drag the note out of Ardoise (chapter 10).
-Renaming a note also renames its file.
+favourites, **Duplicate**, **Change the date…**, **Move to trash**) and a handle, which appears on the card, to drag the
+note out of Ardoise (chapter 10). A **right click** on a card opens the same menu. Renaming a note also renames its file.
 
 Thumbnails are kept in a cache of each PC. When a note changes on another computer (Nextcloud sync), the library
 updates by itself.
@@ -919,15 +919,56 @@ Under the date, each card names the note's binder, with its whole path if it sit
 `Classe/3e B`). A note in no binder, so at the root of the library, says **Not in a binder**: you see at a glance what is
 left to file. As a note is a file, it is in one binder at a time.
 
-To rename or delete a binder, open the **⋯** menu ("Actions on the binder…") next to its name in the sidebar:
+To rename, export, print or delete a binder, open the **⋯** menu ("Actions on the binder…") next to its name in the
+sidebar, or **right-click** its name:
 
 - **Rename…**: type the new name, then **Rename** (**Cancel** or `Esc` gives up). The folder is renamed and its notes
   follow. Ardoise never replaces a binder or a file with the same name: it warns you and lets you pick another.
+- **Export the binder as a PDF…** and **Print the binder…**: see chapter 10.
 - **Delete…**: Ardoise asks for confirmation, saying how many notes (and sub-binders) the binder holds. **Delete the
   binder** sends its notes to the **Trash**, then removes the folder. Nothing is destroyed: each note restored from the
   trash goes back to its binder. A folder that still holds files that are not notes is kept, and the message says so.
   An **Undo** message stays on screen for a few seconds (see "The trash" below): it brings the binder back with its
   notes.
+
+### Arranging the notes of a binder in the order you want
+
+When a binder is shown, the **Binder order** sort arranges its notes as *you* decide, instead of by date. In the other views
+(**All notes**, **Favourites**, a tag) this choice is not offered and the notes are sorted by date, newest first; your choice
+comes back as soon as you open a binder again.
+
+- **By dragging**: drag a card (or the whole selection, if the card is part of it) *between two cards*: a vertical bar shows
+  where it will land (on the left half of a card, before it; on the right half, after it). Selected notes move together and keep
+  their order. Dropped on a binder of the sidebar, the note changes binder, whatever the sort.
+- **From the keyboard**: `Alt + Left arrow` or `Alt + Right arrow` moves the focused card (or the selection) one place;
+  `Alt + Home` or `Alt + End` puts it at the start or the end. A screen reader announces the new place ("Beta moved to
+  position 1 of 3").
+- **A parent binder** shows its own notes first, then those of each sub-binder in that sub-binder's order (the sub-binders in
+  the sidebar's order). A card only moves among the notes of its own binder: arrange a sub-binder by opening it, or by dropping
+  its note next to another note of the same sub-binder.
+- **A note that arrives** (tablet, new note, a note moved into the binder, a restored note) goes to the end; a copy (see below) goes
+  right after its original. During a **search** the notes keep the binder's order but cannot be moved: clear the search to arrange
+  them.
+- **The order is saved in the binder itself**, in the small file `_ardoise-order.json` (next to the notes), so it follows the
+  synchronisation. Each binder has its own order. The editor's **Previous page** and **Next page** buttons, and the export of
+  several notes, follow the order shown. If the file is missing or damaged, the notes are simply sorted by date and nothing is
+  lost. If two PCs arrange the same binder at once, Nextcloud keeps a "conflicted copy" of the file: the most recent arrangement
+  is used, and no note is lost (a note that arrangement does not mention goes to the end).
+
+### Duplicating a note, changing its date
+
+- **Duplicate** (the card's menu, right click, or the selection bar for one or several notes) makes a copy in the *same
+  binder* with the *same creation date*, its title followed by **(copy)** ("Course (copy)", then "Course (copy 2)" for the copy of a
+  copy; an untitled note gives "(copy)"), without the favourite mark. The ink, layers, paper, background image, tags, the
+  **narration** and the **tablet's original** are copied: **Back to the original** works on the copy. A copy of an *assistant's
+  retouched copy* stays a retouched copy. An **Undo** message (or `Ctrl + Z`) puts the copies in the trash.
+- **Change the date…** (the card's menu, right click) opens a small window: **Today** fills the field with the current date
+  and time, or type a **New date and time**, then **Change the date**. This is the date the note shows, the one the library sorts
+  it by, and the one that starts its file name; the writing and the sound do not change. **Undo** puts the old date back.
+- *With the tablet*: a copy is not "the note of a page" of the tablet, and changing the date of an imported note does not make
+  its page come back at the next sync (Ardoise recognises it by its identifier). One special case: a screen of the Xiaomi tablet
+  stored again updates its note; if you dated that note *after* the previous storing, a new note is added instead of updating it
+  (nothing is lost or overwritten).
 
 ### Tags and favourites
 
@@ -946,7 +987,7 @@ most recent change winning.
 ### Selecting several notes
 
 Tick the cards, or: `Ctrl + click` adds or removes a note, `Shift + click` selects a range, `Ctrl + A` selects all,
-`Esc` deselects. An action bar appears: **Move to…**, **Tags…**, **Export…**, **Print…**, **Assemble…**, **Turn**,
+`Esc` deselects. An action bar appears: **Move to…**, **Tags…**, **Export…**, **Print…**, **Assemble…**, **Duplicate**, **Turn**,
 **Add to favourites** (or **Remove from favourites**), **Move to trash**, **Deselect**.
 
 **Turn** rotates *all* the selected notes at once: choose **A quarter turn to the left** or **A quarter turn to the
@@ -1431,8 +1472,22 @@ could not analyse the layout, Ardoise says so: the structure is then guessed fro
 
 - **Copy image**: puts the note on Windows' clipboard; paste it into Word or OneNote.
 - **Print…** (editor, or the selection bar): Windows' print window opens so that you can choose the printer. Each note is
-  printed on a page, in its orientation. You set **Print the background** and the **Size on the sheet** (**Real size**
-  or **Fitted to the sheet**).
+  printed on a page, in its orientation. You set **Print the background**, the **Size on the sheet** (**Real size** or
+  **Fitted to the sheet**) and the **Notes per sheet**: **1**, **2 per sheet** or **4 per sheet**. With 2 or 4, Ardoise lays
+  the notes out in order on the sheet, each in its own cell and undistorted (two portrait notes side by side on a landscape
+  sheet, two landscape notes one above the other; four notes two by two); this setting is Ardoise's own, not the printer
+  driver's (which would only act on sheets that are already made). In the Windows window the *pages* are then the sheets: five
+  notes at two per sheet make three pages.
+
+### Exporting or printing a binder
+
+**Export the binder as a PDF…** (the **⋯** menu or a right click on a binder of the sidebar) puts all its notes in a single
+PDF, one page per note, **in the binder's order** (**Binder order**, above), whatever sort is shown. The window is the export
+window reduced to PDF, with the **Include the sub-binders** box (unchecked at first; it only appears if the binder has
+sub-binders); their notes come after the binder's, each sub-binder in its own order. The PDF has **bookmarks**: one per note (its
+title, or its date), and, with the sub-binders, one per sub-binder that groups the bookmarks of its notes; open your PDF reader's
+bookmarks panel to see them. **Print the binder…** opens the print window with the same notes in the same order, and the same
+**Include the sub-binders** box.
 - *Dragging out of Ardoise*: the handle of a library card drops a *PNG image* of the note into Explorer, onto the
   desktop, into Word, OneNote or an email (one image per note if several are selected). Keep the button pressed while
   the image is prepared.

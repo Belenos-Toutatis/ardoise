@@ -2,6 +2,14 @@
 
 ## Non publié
 
+### Ajouté (demandes de l'utilisateur du 2026-11-13, Q20)
+
+- **Dupliquer une note** (menu de la carte, clic droit, barre de la sélection) : une copie dans le même classeur, à la même date de création, au titre suivi de « (copie) » (« (copie 2) » pour la copie d'une copie), sans le favori ; le tracé, les calques, le fond, les étiquettes, la narration, l'original de la tablette (« Revenir à l'original » marche sur la copie), le texte reconnu et les membres inconnus du fichier sont gardés. « Annuler » met les copies à la corbeille. Une copie n'est jamais prise pour la note de sa page à la synchronisation de la tablette (`docs/design/library-order.md` §5).
+- **Changer la date d'une note** (menu de la carte, clic droit) : « Aujourd'hui » ou une date et une heure ; la date de création, selon laquelle la bibliothèque trie, et le début du nom du fichier changent, pas le tracé ni le son. « Annuler » remet l'ancienne.
+- **Ordre du classeur**, un cinquième tri (proposé quand un classeur est affiché) : glisser-déposer des cartes entre deux cartes, avec une barre qui montre où elles se posent, et `Alt + flèches` (`Alt + Début` et `Alt + Fin`) au clavier, annoncé aux lecteurs d'écran. L'ordre est rangé dans le classeur (`_ardoise-order.json`, suit la synchronisation, copies en conflit : la plus récente l'emporte, jamais de note perdue) ; un classeur parent montre ses notes puis celles de ses sous-classeurs ; une note qui arrive se place à la fin. Page précédente et suivante de l'éditeur et export de plusieurs notes suivent l'ordre affiché.
+- **Exporter un classeur en PDF** (clic droit sur un classeur) : un seul PDF dans l'ordre du classeur, un signet par note (et par sous-classeur), les sous-classeurs en option. **Imprimer le classeur…** de même, et **1, 2 ou 4 notes par feuille** pour toute impression (la feuille se tourne pour deux notes, la fenêtre de Windows compte les feuilles).
+- Menu des cartes et des classeurs : le **clic droit** ouvre le menu ⋯.
+
 ### Corrigé (sélection de plusieurs notes ; retour de l'utilisateur du 2026-11-13)
 
 - **Ctrl+A sélectionne toutes les notes affichées** où que soit le dernier clic (il sélectionnait le texte de la fenêtre quand aucune carte n'avait le focus), et **Échap désélectionne tout** de la même façon ; dans un champ de saisie, ces touches restent celles du champ.

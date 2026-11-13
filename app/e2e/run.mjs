@@ -44,12 +44,13 @@ import { livePaperJourneys } from './journeys-m17-live.mjs';
 import { editorProjectionJourneys } from './journeys-m17-projection.mjs';
 import { writingSoundJourneys } from './journeys-m17-sound.mjs';
 import { blackboardJourneys } from './journeys-m18-blackboard.mjs';
+import { q20Journeys } from './journeys-q20-library.mjs';
 import { mcpJourney } from './mcp.mjs';
 
 // Milestone M7 journeys live in files of their own. `ARDOISE_E2E_ONLY=text` runs only the journeys whose
 // name contains one of its `|`-separated parts (while working on them; `cargo xtask e2e` runs everything).
 const only = process.env.ARDOISE_E2E_ONLY?.split('|').filter(Boolean);
-const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys, ...resumeJourneys, ...touchUpJourneys, ...editorNavJourneys, ...closeKeyJourneys, ...revisionJourneys, ...editorLayersJourneys, ...liveComputerJourneys, ...exportLayersJourneys, ...straightenSettingJourneys, ...sidePanelEditorJourneys, ...sidePanelLiveJourneys, ...livePaperJourneys, ...editorProjectionJourneys, ...writingSoundJourneys, ...blackboardJourneys].filter(
+const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys, ...resumeJourneys, ...touchUpJourneys, ...editorNavJourneys, ...closeKeyJourneys, ...revisionJourneys, ...editorLayersJourneys, ...liveComputerJourneys, ...exportLayersJourneys, ...straightenSettingJourneys, ...sidePanelEditorJourneys, ...sidePanelLiveJourneys, ...livePaperJourneys, ...editorProjectionJourneys, ...writingSoundJourneys, ...blackboardJourneys, ...q20Journeys].filter(
   (journey) => !only || only.some((part) => journey.name.includes(part)),
 );
 
@@ -141,8 +142,11 @@ async function startApp(language, port, args = [], { settings = '', env = {}, br
   });
   let id = 0;
   const pending = new Map();
+  // The protocol's events (no id), kept for the journeys that wait for one (`app.waitForEvent`: a drag the page starts).
+  const events = [];
   ws.addEventListener('message', (message) => {
     const data = JSON.parse(message.data);
+    if (data.method) events.push(data);
     pending.get(data.id)?.(data);
     pending.delete(data.id);
   });
@@ -167,6 +171,18 @@ async function startApp(language, port, args = [], { settings = '', env = {}, br
     /** The remote debugging port of this window: a journey attaches to the other windows (presentation) through it. */
     port,
     send,
+    /** The next event `method` of the protocol (after `since`, an index of `events`), or null after `timeout` ms. */
+    async waitForEvent(method, { timeout = 5000, since = 0 } = {}) {
+      const deadline = Date.now() + timeout;
+      for (;;) {
+        const found = events.slice(since).find((event) => event.method === method);
+        if (found) return found;
+        if (Date.now() > deadline) return null;
+        await sleep(50);
+      }
+    },
+    /** How many protocol events have arrived so far (for `waitForEvent`'s `since`). */
+    eventCount: () => events.length,
     /** Value of a JavaScript expression in the page (awaited). */
     async evaluate(expression) {
       const reply = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
