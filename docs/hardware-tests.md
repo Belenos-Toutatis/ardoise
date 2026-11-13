@@ -747,12 +747,20 @@ Ce test vérifie SPEC §4.1 « Tablette Xiaomi » et §4.2 « Avec la tablette X
 4. Le nombre de **pages en mémoire** est-il retombé à 0 ? **Ouvrir Mi Home** (après avoir remis le Bluetooth du téléphone) : la page a-t-elle bien **disparu de la tablette** ?
 5. *Option désactivée* : décocher **Effacer de la tablette après import**, écrire et enregistrer deux autres pages, reconnecter la tablette (l'éteindre et la rallumer). Le panneau dit-il « 2 pages attendent sur la tablette Xiaomi » et **rien** n'est-il importé tout seul ? **Synchroniser maintenant** demande-t-il de confirmer (**Synchroniser et effacer**) ? Les deux pages sont-elles importées puis effacées ? Recocher l'option.
 
+#### C ter. Une page enregistrée pendant qu'Ardoise est connecté
+
+Mesuré le 2026-11-13 : la tablette décrit autrement (12 octets au lieu de 8) une page enregistrée avec son bouton pendant qu'Ardoise est connecté **hors mode direct**, et une telle page non récupérée n'était plus dans la tablette à la connexion suivante. Ardoise lit maintenant cette description ; il reste à voir si la page se télécharge et s'efface comme les autres. **Uniquement avec des pages d'essai.**
+
+1. Ardoise ouvert, la tablette **Connectée**, hors mode direct : écrire quelques mots, appuyer sur le **bouton d'enregistrement**. Attendu : la synchronisation part toute seule, la note apparaît, **Pages en mémoire** retombe à 0. Noter le message exact en cas d'échec.
+2. **Sans effacer l'écran**, écrire encore quelques mots et appuyer de nouveau sur le bouton d'enregistrement : une seconde note arrive-t-elle ? Contient-elle **tout l'écran** (les premiers mots et les nouveaux) ou seulement les nouveaux ?
+3. Effacer l'écran, écrire, enregistrer : la note est-elle juste ?
+
 #### D. Le mode direct
 
 1. **Mode direct** depuis le panneau. Écrire pendant **trente secondes**. Noter le retard du trait, la fidélité, et si le **pointeur laser** suit le stylet quand il survole sans toucher.
 2. Vérifier que la page du direct est **en hauteur**, sans choix de position, et que le rappel « Tablette Xiaomi : page en hauteur » est là.
 3. **Enregistrer une page avec le bouton** de la tablette pendant le direct : le direct continue-t-il sans coupure ni trait parasite ? Terminer le direct : la page enregistrée est-elle importée ensuite (doublon de la note du direct)?
-4. Relancer le direct, puis **appuyer sur le bouton d'effacement de l'écran** de la tablette : noter **ce qui se passe** dans Ardoise (rien ? nouvelle page ? trait parasite ? coupure ?), à chaque appui. (SPEC §4.2 : le direct passe à une nouvelle page si la tablette le signale ; sinon on change de page avec **Page suivante**.)
+4. Relancer le direct, écrire quelques mots, puis **appuyer sur le bouton d'effacement de l'écran** de la tablette. Attendu (SPEC §4.2 ; la tablette signale l'effacement pendant le direct, mesuré le 2026-11-13) : le direct passe à une **nouvelle page**, et ce qu'on écrit ensuite s'y trace ; un second appui sans avoir écrit ne crée pas de page vide. Noter tout écart (rien ? trait parasite ? coupure ?), à chaque appui.
 5. **Couper puis rétablir le Bluetooth du PC** (ou s'éloigner de la tablette) pendant le direct : l'état dit-il **Reconnexion…**, et le direct reprend-il tout seul, sur la même tablette ? Noter le temps.
 6. **Annuler une synchronisation au milieu d'une grande page** (écrire une page très chargée, enregistrer, lancer **Synchroniser maintenant**, puis **Annuler** pendant le transfert), puis lancer le mode direct : **aucun trait parasite** ne doit apparaître. Noter le temps que prend la liaison à se rétablir (Ardoise ferme la liaison et la rouvre : c'est voulu).
 

@@ -9,6 +9,10 @@ State on 2026-11-12: the tablet's own commands, its live pen samples and its sto
 download of stored pages is known from a capture of Mi Home and has not been replayed from the PC yet
 (section 5).
 
+State on 2026-11-13: Ardoise drives the tablet. The download and the deletion of stored pages work from the PC;
+two things Mi Home's captures did not show were met at once (section 6): a longer description for a page stored
+while the application is connected, and the frame of the erase button.
+
 Conventions: hex bytes are written `12 01 09`. "(measured)" was observed on the user's own tablet with
 `cargo run -p ardoise-ble --example survey`. "(reported)" comes from a public source and was not verified by us.
 The raw captures hold the tablet's Bluetooth address and stay in `testdata/private/xiaomi/` (never in git); the
@@ -73,7 +77,7 @@ third characteristic, `6e400004`, that the Nordic service does not have.
 
 ## 3. Two sessions of Mi Home (measured, captures of 2026-11-12)
 
-From Bluetooth HCI logs of the user's Android phone (section 6). In the first, Mi Home connected to the tablet
+From Bluetooth HCI logs of the user's Android phone (section 7). In the first, Mi Home connected to the tablet
 and mirrored the writing, and the user stored the page with the tablet's button. In the second, Mi Home imported
 the nine pages stored in the tablet. The tablet asks for an ATT MTU of 247.
 
@@ -156,8 +160,9 @@ So the Xiaomi layer can be ignored altogether for these commands.
 
 ### Not seen yet
 
-What the tablet's erase button sends (if anything), what `12 01 05` answers on an empty tablet, whether a
-download can be interrupted, and the codes of groups `11` and `12` that Mi Home did not use.
+Whether a download can be interrupted, and the codes of groups `11` and `12` that Mi Home did not use. (The
+erase button and the description of a page stored while a host is connected: section 6. The bare `12 01 05` of
+an empty tablet was measured from the PC.)
 
 ## 4. The Xiaomi layer (`fe95`), from public sources (reported)
 
@@ -179,10 +184,11 @@ download can be interrupted, and the codes of groups `11` and `12` that Mi Home 
 ## 5. Open questions, in the order that decides feasibility
 
 1. Do the download and the deletion of a page work from the PC without the Xiaomi login, as the other commands
-   do? To be tried on a test page: download first, compare with the live records, delete only with the user's
-   agreement.
-2. What does the tablet's erase button send, and what does `12 01 05` answer on an empty tablet?
-3. The exact unit of the coordinates (a ruler), and whether the live stream goes on when a page is stored.
+   do? **Yes** for the pages stored while no host is connected or during live mode (section 6). Open for a page
+   stored while a host is connected outside live mode, which the tablet describes otherwise.
+2. What does the tablet's erase button send? `11 01 0c` in live mode (section 6, inferred). An empty tablet
+   answers the bare `12 01 05`.
+3. The exact unit of the coordinates (a ruler). The live stream goes on when a page is stored (section 6).
 4. Does the tablet accept two clients, or does a PC connection keep Mi Home out (and the reverse)? While the
    phone was connected, the PC did not hear the tablet.
 
@@ -190,7 +196,36 @@ Answered: the commands, the live samples and the stored pages are in clear; the 
 tried so far from a client that has not logged in on `fe95`; a stored page is a run of live records (section 3).
 Both the live mode and the import of stored pages are feasible, the second subject to question 1.
 
-## 6. Method
+## 6. Sessions of Ardoise with the real tablet (measured, 2026-11-13)
+
+From the diagnostic logs of the first sessions of Ardoise with the user's tablet (five logs over eleven minutes,
+kept outside git). Ardoise wrote nothing to `fe95` and sent only the frames of section 3.
+
+- **The download and the deletion work from the PC.** Four pages (1 771 to 20 769 bytes) were described
+  (`12 09 05`), downloaded, written as notes and deleted; the count then read 0. The 20 769 bytes of the
+  largest came in 1.3 s; a page deleted is gone when the next request is answered, about 50 ms later. These pages
+  had been stored while no host was connected, or during live mode.
+- **A page stored during live mode holds what was streamed**: its 20 769 bytes are, to the byte, the records
+  streamed between the frame `11 01 0c` below and the press of the store button. The store button does not
+  interrupt the stream.
+- **A longer page description.** A page stored with the button while Ardoise was connected outside live mode is
+  described by `12 0d 05 <time u32> <size u32> <u32>`: 12 bytes instead of 8. Three times out of three; the page
+  count counts such a page. The third number was once a time 61 s before the page's (33 s before the connection
+  itself), and twice 0: **its meaning is not known**. Ardoise took the frame for malformed and stopped there, so
+  whether such a page is downloaded and deleted by the same two commands is **not measured yet**.
+- **Such a page did not stay on the tablet.** The first (1 582 bytes) was gone at the next connection, three
+  minutes later: the tablet then held one page, stored during the live mode that had followed. The second was not
+  among the pages found four minutes after it, all stored after the application had closed. What removes such a
+  page (the erase button, the next press of the store button, live mode, the end of the connection) is not known;
+  until it is, a page stored while the application is connected must be taken at once.
+- **The erase button sends `11 01 0c`** in live mode (inferred): the frame came three times, never outside live
+  mode, and the page stored after one of them holds only what was written after it, although the screen had been
+  stored with other strokes before. Nothing tells that the button was pressed outside live mode.
+- The tablet sends its battery level unasked when it changes (`11 02 01 50`).
+- The link was lost twice during live mode (9 s after a press of the store button, 2 s after `11 01 0c`); the
+  tablet was found again in under 2 s and connected in 2 to 3 s. Cause not known.
+
+## 7. Method
 
 - **Never write a guessed command.** An unknown opcode could erase the stored pages or start a firmware update.
   Only commands seen in a capture of Mi Home are replayed, and the destructive ones (delete, format, reset,
@@ -209,7 +244,7 @@ Both the live mode and the import of stored pages are feasible, the second subje
 - The tablet is with the user at the development PC, unlike the Bamboo Slate: experiments can be run directly,
   and whatever is learnt must still end up in `ardoise-sim` and in replayable captures.
 
-## 7. What Ardoise would need
+## 8. What Ardoise would need
 
 - A second protocol next to the Slate's (`ardoise-proto`), its flows in `ardoise-device` (`device.json` already
   records a `protocol`), its simulated tablet in `ardoise-sim`, and in `ardoise-ble` a GATT layout chosen by the

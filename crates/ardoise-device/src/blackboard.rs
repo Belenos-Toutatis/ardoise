@@ -965,10 +965,7 @@ mod tests {
     fn a_page_is_returned_only_after_a_quiet_window() {
         let page = page_bytes(3);
         let (mut board, _) = session(vec![("12 06 03 01 68 00 00 01", vec![data(&page)])]);
-        let info = PageInfo {
-            time: 0x6800_0001,
-            size: 21,
-        };
+        let info = PageInfo::new(0x6800_0001, 21);
         let start = board.clock().monotonic();
         assert_eq!(board.download(info).unwrap().bytes, page);
         assert!(board.clock().monotonic() - start >= QUIET_WINDOW);
@@ -991,10 +988,7 @@ mod tests {
     #[test]
     fn a_download_is_asked_only_once_the_stream_is_quiet() {
         let page = page_bytes(3);
-        let info = PageInfo {
-            time: 0x6800_0001,
-            size: 21,
-        };
+        let info = PageInfo::new(0x6800_0001, 21);
         // A fresh link counts as quiet from when it opened: the first download waits for what
         // is left of the window (here all of it, nothing else was asked), the next one, after
         // the quiet window that ends a page, is asked at once.
@@ -1071,10 +1065,7 @@ mod tests {
         assert_eq!(step, Ok(PageStep::Reopen));
         assert!(board.is_dirty());
         // This link refuses to download or to stream again, without writing anything.
-        let info = PageInfo {
-            time: 0x6800_0001,
-            size: 70,
-        };
+        let info = PageInfo::new(0x6800_0001, 70);
         assert_eq!(board.download(info), Err(DeviceError::StreamDirty));
         assert_eq!(board.start_live(), Err(DeviceError::StreamDirty));
         assert_eq!(
@@ -1292,10 +1283,7 @@ mod tests {
         )]);
         let cancel = Arc::new(AtomicBool::new(true));
         board.set_cancel_flag(cancel.clone());
-        let info = PageInfo {
-            time: 0x6800_0001,
-            size: 70,
-        };
+        let info = PageInfo::new(0x6800_0001, 70);
         assert_eq!(board.download(info), Err(DeviceError::Cancelled));
         assert!(board.is_dirty());
         cancel.store(false, Ordering::SeqCst);

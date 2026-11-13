@@ -396,6 +396,9 @@ pub enum LiveInput {
     },
     /// The tablet's button was pressed.
     Button,
+    /// The blackboard's screen was erased with its button: what is written next is written on a
+    /// clean screen.
+    ScreenErased,
     State(LiveState),
 }
 

@@ -352,8 +352,9 @@ with a reminder, and the **Tablet button in live mode** setting applies to the B
 
 - **Storing the page with the tablet's button** does not interrupt live mode. The page is imported afterwards, like a
   sync: its note is a harmless duplicate of the live one.
-- The tablet's screen-erase button does not change the page yet (its effect is still to be measured on the real tablet): to move to a new page, use **Next page** on
-  the computer.
+- **Erasing the tablet's screen with its button** moves live mode to a **new page**: what you write next is not
+  drawn over the previous page. A page that is still blank stays the current page. **Next page**, on the computer,
+  works too.
 - A session stays on **the tablet it started on**. If the link is lost, Ardoise waits for that same tablet
   (**Reconnecting…**) and ignores the other one until live mode ends. To carry on with the other tablet, end live mode
   and start it again.

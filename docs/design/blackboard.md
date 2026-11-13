@@ -202,9 +202,11 @@ Taken while building:
     inside a notification and follows the wall clock across notifications: with up to 6 records per notification at
     120 per second, the times inside one notification are compressed by at most about 20 ms, which the next
     notification corrects. Not worth a new field in `LiveInput`.
-11. **Future "screen erased" event**: `live_input()` (in `service/worker/board.rs`) is the one place where a frame of
-    the reply characteristic becomes a live input; today it maps nothing. When the erase button is measured, its frame
-    becomes a `BoardReply` variant mapped there to a new page.
+11. **The erase button** (`11 01 0c`, `BoardReply::ScreenErased`; research note §6): `live_input()` (in
+    `service/worker/board.rs`) is the one place where a frame of the reply characteristic becomes a live input, and
+    it maps this one to `LiveInput::ScreenErased`. The hub goes to a new page (`LiveSession::screen_erased`),
+    whatever the setting of the tablet's button (a new layer would put the writing over ink the tablet no longer
+    shows), unless the page on screen has no ink yet. Outside live mode the frame is ignored.
 12. **Rename and clock**: renaming with the blackboard connected is `notSupported`; `tablet_set_time` sets its clock and
     returns a drift of 0 (the tablet cannot be asked its time).
 13. **Battery** is shown capped at 100 (inferred per cent); `charging` is always false, `firmware` empty (the tablet
@@ -470,8 +472,9 @@ pages and its live notes), the Slate on every other note, never on a blackboard 
   `state: 'idle'`; the note is not written; the tablet leaves live mode and stays connected (`connection` back to
   `connected`). Say that this note can only be resumed with the other tablet (the blackboard's notes with the
   blackboard, the others with the Slate), then close the live view as after `live_stop` (calling `live_stop` is
-  harmless). Storing a page with the tablet's button does not interrupt live mode. The tablet's erase button sends
-nothing known yet: "next page" stays on the computer. The orientation switch has no effect on the blackboard.
+  harmless). Storing a page with the tablet's button does not interrupt live mode. The tablet's erase button makes a new
+page (a snapshot follows, as after `live_command('newPage')`), unless the page has no ink yet; "next page" on the
+computer stays. The orientation switch has no effect on the blackboard.
 
 ### 5.6 What to show and hide for the blackboard (`device.kind === 'blackboard'`, `known[].kind`)
 
@@ -511,9 +514,15 @@ when nothing failed.
 
 ## 8. Not done, not measured, risks
 
-- Nothing here was tried on the real tablet. To measure at H8: the download and deletion of a test page from the PC
-  (only seen in Mi Home's capture), what the erase button sends, the unit (ruler), whether Windows delivers 244-byte
-  notifications whole (the count does not depend on it), whether the blackboard drops a silent link.
+- First sessions with the real tablet on 2026-11-13 (research note §6): the download and the deletion work from the
+  PC; the erase button sends `11 01 0c` in live mode; a page stored while the application is connected outside live
+  mode is described in a longer form (`12 0d 05`, `PageInfo::extra`), which the sync took for a malformed frame.
+  The long form is now read; **whether such a page is downloaded and deleted like the others is still to measure**,
+  and what the tablet does of one that is not taken (two were gone at the next connection). Since the store button
+  can replace a page without changing the count, the "page stored" event alone starts the automatic sync when a page
+  is there. Still to measure at H8: the unit (ruler), whether Windows delivers 244-byte notifications whole (the
+  count does not depend on it), whether the blackboard drops a silent link (the link was lost twice during live
+  mode, cause unknown).
 - To check at H8 for the page transfers (§2.15): whether the tablet ends a transfer when the link closes (the fresh
   link relies on it), whether it ever pauses more than 300 ms inside a page (the quiet window would then refuse good
   pages after their count, as `transferIncomplete` twice: nothing lost), how long a delete takes (`DELETE_SETTLE`,

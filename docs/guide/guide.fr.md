@@ -376,8 +376,9 @@ s'applique qu'à la Bamboo Slate.
 
 - **Enregistrer la page avec le bouton de la tablette** n'interrompt pas le direct. La page est importée ensuite, comme
   une synchronisation : sa note est un doublon de celle du direct, sans danger.
-- Le bouton d'effacement de l'écran de la tablette ne change pas encore de page (son effet est encore à mesurer sur la vraie tablette) : pour passer à une
-  nouvelle page, utilisez **Page suivante** sur l'ordinateur.
+- **Effacer l'écran de la tablette avec son bouton** fait passer le direct à une **nouvelle page** : ce que vous
+  écrivez ensuite n'est pas tracé par-dessus la page précédente. Une page encore vide reste la page en cours.
+  **Page suivante**, sur l'ordinateur, fonctionne aussi.
 - Une séance reste sur **la tablette avec laquelle elle a commencé**. Si la liaison est perdue, Ardoise attend cette
   même tablette (**Reconnexion…**) et ignore l'autre jusqu'à la fin du direct. Pour continuer avec l'autre tablette,
   terminez le direct et relancez-le.

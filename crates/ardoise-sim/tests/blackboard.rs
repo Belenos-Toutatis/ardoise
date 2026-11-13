@@ -1940,3 +1940,154 @@ fn a_live_run_whose_tablet_is_forgotten_elsewhere_ends_and_the_other_tablet_writ
     assert!(inputs.try_recv().is_err(), "nothing after the stop");
     run.service.shutdown();
 }
+
+/// What the real tablet did on 2026-11-13 (research note §6): a page stored with the button
+/// while the host is connected outside live mode is described in the long form (`12 0d 05`, 12
+/// bytes instead of 8). The sync took that description for a malformed frame and failed every
+/// time; the page is a page like any other.
+#[test]
+fn a_page_stored_while_the_host_is_connected_is_imported_despite_its_long_description() {
+    let _report = common::report("blackboard: a page stored while connected (long description)");
+    let library = new_library();
+    let board = SimBoard::blackboard();
+    added_beforehand(&board, library.path());
+    let offered = Arc::new(Mutex::new(Vec::new()));
+    let mut run = Running::start(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        TabletOptions::default(),
+        Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+        library_store(board.clone(), None, offered.clone()),
+    );
+    run.wait(|s| s.connection == Connection::Connected);
+    assert_eq!(board.stored_page_count(), 0);
+
+    // The hand writes and presses the store button, the host connected and idle.
+    board.draw_page(&reference_board_pages()[0]);
+    let stored = board.stored_pages();
+    assert_eq!(stored.len(), 1);
+    let status = run.wait(|s| {
+        s.last_sync.as_ref().is_some_and(|l| !l.saved.is_empty())
+            && s.device.as_ref().is_some_and(|d| d.stored_pages == 0)
+    });
+    let last = status.last_sync.unwrap();
+    assert_eq!(last.error, None, "{last:?}");
+    assert_eq!((last.saved.len(), last.deleted), (1, 1));
+    // Its note was written while the tablet still held it, then it was deleted.
+    assert_eq!(*offered.lock().unwrap(), [(stored[0].time, true)]);
+    assert_eq!(board.stored_page_count(), 0);
+    assert_eq!(kept_bytes(library.path()), [stored[0].bytes.clone()]);
+    assert!(board.stats().long_descriptions >= 1, "the long form");
+    run.service.shutdown();
+    // Nothing odd happened: no diagnostic log was kept (a malformed frame keeps one).
+    assert!(!library.path().join("_ardoise").join("diagnostics").exists());
+}
+
+/// The erase button during live mode (`11 01 0c`, measured on the real tablet: research note §6)
+/// reaches the live sink as a clean screen; the store button does not. Outside live mode the
+/// tablet says nothing of it.
+#[test]
+fn erasing_the_screen_during_live_mode_tells_the_sink_and_only_then() {
+    let _report = common::report("blackboard: the erase button during live mode");
+    let library = new_library();
+    let board = SimBoard::blackboard();
+    added_beforehand(&board, library.path());
+    let script = handwriting();
+    let strokes = script.points().filter(|p| p.pressure > 0).count();
+    let mut run = Running::start(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        // No automatic sync: the page stored below stays out of the way.
+        options(false, true),
+        Arc::new(Writer {
+            board: board.clone(),
+            script,
+        }),
+        library_store(board.clone(), None, Arc::default()),
+    );
+    run.wait(|s| s.connection == Connection::Connected);
+    // Outside live mode: nothing is sent.
+    board.erase();
+    assert_eq!(board.stats().screen_erased_events, 0);
+
+    let (sender, inputs) = mpsc::channel();
+    run.service.start_live(Box::new(ChannelSink(sender)));
+    records_until(&inputs, |i| matches!(i, LiveInput::Started { .. }));
+    let mut received = Vec::new();
+    while touching(&received).len() < strokes {
+        match inputs.recv_timeout(WAIT).expect("records in time") {
+            LiveInput::Records { records, .. } => received.extend(records),
+            LiveInput::ScreenErased => panic!("nothing was erased yet"),
+            _ => {}
+        }
+    }
+    // The store button says nothing to the sink; the erase button does, once, in order.
+    board.press_store();
+    board.erase();
+    board.draw_live(handwriting());
+    let (_, before) = records_until(&inputs, |i| *i == LiveInput::ScreenErased);
+    assert!(touching(&before).is_empty(), "written after the erasure");
+    let mut after = Vec::new();
+    while touching(&after).len() < strokes {
+        match inputs.recv_timeout(WAIT).expect("records in time") {
+            LiveInput::Records { records, .. } => after.extend(records),
+            LiveInput::ScreenErased => panic!("erased once only"),
+            LiveInput::State(state) => panic!("live mode interrupted: {state:?}"),
+            _ => {}
+        }
+    }
+    assert_eq!(board.stats().screen_erased_events, 1);
+    assert_eq!(board.stats().page_stored_events, 1);
+    run.service.stop_live();
+    records_until(&inputs, |i| *i == LiveInput::State(LiveState::Stopped));
+    run.service.shutdown();
+    // Nothing odd happened: no diagnostic log was kept (an unknown frame keeps one).
+    assert!(!library.path().join("_ardoise").join("diagnostics").exists());
+}
+
+/// The store button pressed again on a screen that was not erased replaces its page by a longer
+/// one (measured): the count stays the same with another page behind it. With the automatic sync
+/// on, the "page stored" event is enough to sync, whatever the count was.
+#[test]
+fn a_screen_stored_again_is_synced_though_the_page_count_did_not_change() {
+    let _report = common::report("blackboard: a screen stored again, the count unchanged");
+    let library = new_library();
+    let board = SimBoard::blackboard();
+    added_beforehand(&board, library.path());
+    let pages = reference_board_pages();
+    let mut run = Running::start(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        TabletOptions::default(),
+        Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+        // The first page offered cannot be saved: it stays on the tablet.
+        store_with(|n| match n {
+            1 => Err("the disk is full".into()),
+            _ => Ok(()),
+        }),
+    );
+    run.wait(|s| s.connection == Connection::Connected);
+    board.write(&pages[0]);
+    board.press_store();
+    let status = run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.error.is_some()));
+    let failed = status.last_sync;
+    assert_eq!(board.stored_page_count(), 1);
+    let first = board.stored_pages()[0].clone();
+
+    // The hand writes on, the screen not erased, and stores again: one page still, a longer one.
+    board.write(&pages[1]);
+    board.press_store();
+    let stored = board.stored_pages();
+    assert_eq!(stored.len(), 1);
+    assert!(stored[0].bytes.len() > first.bytes.len());
+    assert!(stored[0].bytes.starts_with(&first.bytes));
+    let status = run.wait(|s| {
+        synced_after(s, &failed) && s.device.as_ref().is_some_and(|d| d.stored_pages == 0)
+    });
+    let last = status.last_sync.unwrap();
+    assert_eq!(last.error, None, "{last:?}");
+    assert_eq!((last.saved.len(), last.deleted), (1, 1));
+    assert_eq!(board.stored_page_count(), 0);
+    assert_eq!(kept_bytes(library.path()), [stored[0].bytes.clone()]);
+    run.service.shutdown();
+}

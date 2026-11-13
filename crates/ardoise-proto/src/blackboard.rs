@@ -1,7 +1,8 @@
 //! The vendor protocol of the Xiaomi Mijia LCD blackboard, storage edition (米家液晶小黑板 存储版,
 //! Mi Home model `jiqid.sxb.v1`), as measured in docs/research/xiaomi-blackboard.md §3.
 //!
-//! Everything here comes from captures of Mi Home and from sessions driven from the PC: the
+//! Everything here comes from captures of Mi Home, from sessions driven from the PC and from
+//! the journals of the first sessions of Ardoise with the real tablet (research note §6): the
 //! frames below are the only ones the host may ever send ([`BoardRequest`] has no other
 //! variant and no "unknown" one, so the host cannot encode anything else). The Xiaomi service
 //! (`fe95`) and its login are not part of this protocol: Ardoise never touches them.
@@ -43,7 +44,9 @@ pub mod code {
     pub const SET_TIME: u8 = 0x07;
     /// `12 01 04` → `12 07 04 <count u16> <bytes u32>`.
     pub const PAGE_COUNT: u8 = 0x04;
-    /// `12 01 05` → `12 09 05 <time u32> <size u32>`, or the bare `12 01 05` on an empty tablet.
+    /// `12 01 05` → `12 09 05 <time u32> <size u32>`, or `12 0d 05 <time u32> <size u32> <u32>`
+    /// for a page stored while a host was connected outside live mode, or the bare `12 01 05` on
+    /// an empty tablet.
     pub const OLDEST_PAGE: u8 = 0x05;
     /// `12 06 03 01 <time u32>`: the page's bytes follow on the stream characteristic.
     pub const DOWNLOAD: u8 = 0x03;
@@ -53,6 +56,8 @@ pub mod code {
     pub const LIVE: u8 = 0x08;
     /// Event `12 01 09`: a page was stored with the tablet's button.
     pub const PAGE_STORED: u8 = 0x09;
+    /// Event `11 01 0c`: the screen was erased with the tablet's button. Seen in live mode only.
+    pub const SCREEN_ERASED: u8 = 0x0c;
 }
 
 /// First payload byte of a download request. Always `01` in Mi Home's captures; its meaning
@@ -303,6 +308,23 @@ pub struct PageInfo {
     pub time: u32,
     /// Size of the page in bytes (a multiple of 7 in every capture).
     pub size: u32,
+    /// The third number of the long description (`12 0d 05`), `None` in the short one
+    /// (`12 09 05`). The tablet gives the long one for a page stored with its button while a host
+    /// was connected outside live mode (research note §6). **Its meaning is not known**: a time 61
+    /// seconds before the page's in one journal, 0 in the others. It is only logged; the page is
+    /// asked for and deleted by its `time`, like any other.
+    pub extra: Option<u32>,
+}
+
+impl PageInfo {
+    /// A page as the short description gives it.
+    pub fn new(time: u32, size: u32) -> Self {
+        Self {
+            time,
+            size,
+            extra: None,
+        }
+    }
 }
 
 /// What the tablet sends on the reply characteristic.
@@ -314,10 +336,13 @@ pub enum BoardReply {
     Memory { total: u32, free: u32 },
     /// `12 07 04 <count u16> <bytes u32>`: pages stored and their total size.
     PageCount { count: u16, bytes: u32 },
-    /// `12 09 05 <time u32> <size u32>`, or the bare `12 01 05` of an empty tablet (`None`).
+    /// `12 09 05 <time u32> <size u32>`, the long `12 0d 05 <time u32> <size u32> <u32>`
+    /// ([`PageInfo::extra`]), or the bare `12 01 05` of an empty tablet (`None`).
     OldestPage(Option<PageInfo>),
     /// Event `12 01 09`: a page was stored with the tablet's button.
     PageStored,
+    /// Event `11 01 0c`: the screen was erased with the tablet's button (seen in live mode only).
+    ScreenErased,
     /// Any other group or code, kept verbatim (logged and ignored by the host).
     Unknown(BoardFrame),
 }
@@ -340,9 +365,13 @@ impl BoardReply {
             Self::OldestPage(Some(info)) => {
                 let mut payload = info.time.to_be_bytes().to_vec();
                 payload.extend_from_slice(&info.size.to_be_bytes());
+                if let Some(extra) = info.extra {
+                    payload.extend_from_slice(&extra.to_be_bytes());
+                }
                 BoardFrame::new(GROUP_PAGES, code::OLDEST_PAGE, payload)
             }
             Self::PageStored => BoardFrame::new(GROUP_PAGES, code::PAGE_STORED, []),
+            Self::ScreenErased => BoardFrame::new(GROUP_DEVICE, code::SCREEN_ERASED, []),
             Self::Unknown(frame) => frame.clone(),
         }
     }
@@ -380,12 +409,22 @@ impl BoardReply {
             },
             (GROUP_PAGES, code::OLDEST_PAGE) => match payload {
                 [] => Ok(Self::OldestPage(None)),
-                [t0, t1, t2, t3, s0, s1, s2, s3] => Ok(Self::OldestPage(Some(PageInfo {
-                    time: u32::from_be_bytes([*t0, *t1, *t2, *t3]),
-                    size: u32::from_be_bytes([*s0, *s1, *s2, *s3]),
-                }))),
-                _ => Err(wrong("expected nothing or 8 bytes")),
+                [t0, t1, t2, t3, s0, s1, s2, s3, extra @ ..] => {
+                    let extra = match extra {
+                        [] => None,
+                        [e0, e1, e2, e3] => Some(u32::from_be_bytes([*e0, *e1, *e2, *e3])),
+                        _ => return Err(wrong("expected nothing, 8 or 12 bytes")),
+                    };
+                    Ok(Self::OldestPage(Some(PageInfo {
+                        time: u32::from_be_bytes([*t0, *t1, *t2, *t3]),
+                        size: u32::from_be_bytes([*s0, *s1, *s2, *s3]),
+                        extra,
+                    })))
+                }
+                _ => Err(wrong("expected nothing, 8 or 12 bytes")),
             },
+            (GROUP_DEVICE, code::SCREEN_ERASED) if payload.is_empty() => Ok(Self::ScreenErased),
+            (GROUP_DEVICE, code::SCREEN_ERASED) => Err(wrong("expected no payload")),
             (GROUP_PAGES, code::PAGE_STORED) if payload.is_empty() => Ok(Self::PageStored),
             (GROUP_PAGES, code::PAGE_STORED) => Err(wrong("expected no payload")),
             _ => Ok(Self::Unknown(frame)),
@@ -408,13 +447,20 @@ impl fmt::Display for BoardReply {
                 write!(f, "BOARD PAGE_COUNT {count} pages, {bytes} bytes")
             }
             Self::OldestPage(None) => f.write_str("BOARD OLDEST_PAGE none (no page stored)"),
-            Self::OldestPage(Some(info)) => write!(
-                f,
-                "BOARD OLDEST_PAGE stored {}, {} bytes",
-                utc(info.time),
-                info.size
-            ),
+            Self::OldestPage(Some(info)) => {
+                write!(
+                    f,
+                    "BOARD OLDEST_PAGE stored {}, {} bytes",
+                    utc(info.time),
+                    info.size
+                )?;
+                match info.extra {
+                    Some(extra) => write!(f, ", long description, third number {extra:#010x}"),
+                    None => Ok(()),
+                }
+            }
             Self::PageStored => f.write_str("BOARD PAGE_STORED (the tablet's button)"),
+            Self::ScreenErased => f.write_str("BOARD SCREEN_ERASED (the tablet's button)"),
             Self::Unknown(frame) => write!(f, "BOARD unknown frame {frame}"),
         }
     }
@@ -596,13 +642,29 @@ mod tests {
             ),
             (
                 "12 09 05 68 00 00 01 00 00 53 20",
+                BoardReply::OldestPage(Some(PageInfo::new(0x6800_0001, 21_280))),
+            ),
+            // The long description, as the real tablet gave it on 2026-11-13 for pages stored
+            // while Ardoise was connected outside live mode (times replaced).
+            (
+                "12 0d 05 68 00 00 3d 00 00 06 2e 68 00 00 00",
                 BoardReply::OldestPage(Some(PageInfo {
-                    time: 0x6800_0001,
-                    size: 21_280,
+                    time: 0x6800_003d,
+                    size: 1582,
+                    extra: Some(0x6800_0000),
+                })),
+            ),
+            (
+                "12 0d 05 68 00 01 32 00 00 07 ee 00 00 00 00",
+                BoardReply::OldestPage(Some(PageInfo {
+                    time: 0x6800_0132,
+                    size: 2030,
+                    extra: Some(0),
                 })),
             ),
             ("12 01 05", BoardReply::OldestPage(None)),
             ("12 01 09", BoardReply::PageStored),
+            ("11 01 0c", BoardReply::ScreenErased),
         ];
         for (text, reply) in replies {
             assert_eq!(

@@ -868,6 +868,42 @@ fn the_tablet_button_does_what_the_settings_say() {
     hub.stop().unwrap();
 }
 
+/// The Xiaomi blackboard's erase button (SPEC §4.2): what is written next goes to a new page,
+/// whatever the button's setting; a page with no ink stays, so erasing twice, or before the first
+/// stroke, makes no blank page.
+#[test]
+fn erasing_the_tablets_screen_goes_to_a_new_page_once_the_page_has_ink() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(config());
+    // The button set to a new layer: an erased screen does not follow that setting.
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewLayer)));
+    sink.input(LiveInput::ScreenErased);
+    assert_eq!(hub.snapshot().page_count, 1, "nothing written yet");
+
+    stroke(&mut sink, 3000, 5);
+    sink.input(LiveInput::ScreenErased);
+    let snapshot = hub.snapshot();
+    assert_eq!((snapshot.page_count, snapshot.page_index), (2, 1));
+    assert_eq!(snapshot.page.layers.len(), 1, "a page, not a layer");
+    assert!(snapshot.page.strokes.is_empty());
+    sink.input(LiveInput::ScreenErased);
+    assert_eq!(hub.snapshot().page_count, 2, "still blank: no third page");
+
+    stroke(&mut sink, 4000, 5);
+    assert_eq!(hub.snapshot().page.strokes.len(), 1);
+    hub.command(LiveCommandKind::PreviousPage).unwrap();
+    assert_eq!(
+        hub.snapshot().page.strokes.len(),
+        1,
+        "the first page kept its ink"
+    );
+    // Erased while an earlier page is on screen: the writing goes on a new page at the end.
+    sink.input(LiveInput::ScreenErased);
+    let snapshot = hub.snapshot();
+    assert_eq!((snapshot.page_count, snapshot.page_index), (3, 2));
+    assert_eq!(hub.stop().unwrap().len(), 2, "the two pages with ink");
+}
+
 #[test]
 fn the_tablet_states_are_shown() {
     let (_dir, library) = library();

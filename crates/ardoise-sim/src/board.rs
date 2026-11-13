@@ -8,7 +8,7 @@
 //!
 //! # Behaviour
 //!
-//! Facts from docs/research/xiaomi-blackboard.md §3, plus the assumptions marked below:
+//! Facts from docs/research/xiaomi-blackboard.md §3 and §6, plus the assumptions marked below:
 //!
 //! - No login: every known request is answered at once, on [`Channel::Command`]; the frames
 //!   are those of [`ardoise_proto::blackboard`]. `11 05 07` sets the clock, `12 05 06`
@@ -29,8 +29,13 @@
 //!   without erasing replaces that page by the longer one, with a new time (measured). Two pages
 //!   never share a time (**assumption**: one second apart at least). **Assumption:** an empty
 //!   screen stores nothing and sends nothing.
-//! - **Assumption:** the erase button ([`SimBoard::erase`]) clears the screen and sends nothing
-//!   (not measured yet).
+//! - A page stored while a host is connected and does not stream is described in the long form,
+//!   `12 0d 05 <time> <size> <u32>` (measured; the third number, not understood, is 0 here). It
+//!   is downloaded and deleted like any other (**assumption**, to check on the real tablet). What
+//!   the real tablet does of such a page that no host takes is not understood (two of them were
+//!   gone at the next connection): here it stays.
+//! - The erase button ([`SimBoard::erase`]) clears the screen and, while a host streams, sends
+//!   `11 01 0c` (measured in live mode; nothing was seen outside it).
 //! - One connection at a time; no advertisement while connected (the PC did not hear the
 //!   tablet while the phone held it).
 //! - **Assumption:** a transfer ends with its link: what a download had still to send is lost
@@ -132,6 +137,10 @@ pub struct BoardStats {
     pub live_records: u64,
     /// `12 01 09` events sent.
     pub page_stored_events: u32,
+    /// `11 01 0c` events sent.
+    pub screen_erased_events: u32,
+    /// Pages described in the long form (`12 0d 05`).
+    pub long_descriptions: u32,
 }
 
 /// Handle to one simulated blackboard. Clones share the same tablet.
@@ -156,6 +165,9 @@ struct State {
     screen: Vec<Record>,
     /// The time of the page that holds the screen as stored last, until the screen is erased.
     stored_screen: Option<u32>,
+    /// Times of the pages stored while a host was connected without streaming: described in the
+    /// long form.
+    long_pages: Vec<u32>,
     /// Pen movement, anchored on the virtual clock.
     pen: Vec<Timed>,
     /// End of the anchored movement.
@@ -256,6 +268,7 @@ impl SimBoard {
                     pages: VecDeque::new(),
                     screen: Vec::new(),
                     stored_screen: None,
+                    long_pages: Vec::new(),
                     pen: Vec::new(),
                     pen_end: Duration::ZERO,
                     on_screen: 0,
@@ -326,7 +339,16 @@ impl SimBoard {
     }
 
     /// Writes `strokes` on the screen at once (hovering to each stroke, touching along it,
-    /// leaving after it), stores the screen as a page, and erases it: one call, one page.
+    /// leaving after it), nothing else: the screen keeps them until it is erased.
+    pub fn write(&self, strokes: &[Stroke]) {
+        let now = self.now();
+        let mut state = self.state();
+        state.catch_up(now);
+        state.screen.extend(records_of(strokes));
+    }
+
+    /// Writes `strokes` on the screen at once (as [`write`](Self::write)), stores the screen as
+    /// a page, and erases it: one call, one page.
     pub fn draw_page(&self, strokes: &[Stroke]) {
         let now = self.now();
         let wall = self.wall_seconds();
@@ -334,7 +356,7 @@ impl SimBoard {
         state.catch_up(now);
         state.screen.extend(records_of(strokes));
         state.store(now, wall);
-        state.erase();
+        state.erase(now);
     }
 
     /// Presses the store button: the screen becomes a page (see the module documentation).
@@ -346,12 +368,13 @@ impl SimBoard {
         state.store(now, wall);
     }
 
-    /// Presses the erase button: the screen is cleared (nothing is sent, **assumption**).
+    /// Presses the erase button: the screen is cleared, and a host that streams is told
+    /// (`11 01 0c`).
     pub fn erase(&self) {
         let now = self.now();
         let mut state = self.state();
         state.catch_up(now);
-        state.erase();
+        state.erase(now);
     }
 
     pub fn set_battery(&self, percent: u8) {
@@ -764,6 +787,10 @@ impl State {
         let bytes = encode_records(&self.screen);
         let time = self.push_page(bytes, wall);
         self.stored_screen = Some(time);
+        // A host connected, not streaming: the long description.
+        if self.alive(now) && self.link.as_ref().is_some_and(|link| link.stream.is_none()) {
+            self.long_pages.push(time);
+        }
         if self.alive(now)
             && let Some(link) = self.link.as_mut()
         {
@@ -779,9 +806,24 @@ impl State {
         }
     }
 
-    fn erase(&mut self) {
+    /// The erase button.
+    fn erase(&mut self, now: Duration) {
         self.screen.clear();
         self.stored_screen = None;
+        if self.alive(now)
+            && let Some(link) = self.link.as_mut()
+            && link.stream.is_some()
+        {
+            enqueue(
+                &mut link.queue,
+                Outgoing {
+                    due: now,
+                    channel: Channel::Command,
+                    data: encode(&BoardReply::ScreenErased),
+                },
+            );
+            self.stats.screen_erased_events += 1;
+        }
     }
 
     fn materialize_live(&mut self, now: Duration) {
@@ -820,6 +862,7 @@ impl State {
     fn remove_page(&mut self, time: u32) {
         let before = self.pages.len();
         self.pages.retain(|page| page.time != time);
+        self.long_pages.retain(|long| *long != time);
         if self.pages.len() < before {
             self.stats.deletes += 1;
             if self.stored_screen == Some(time) {
@@ -864,12 +907,15 @@ impl State {
                 })
             }
             BoardRequest::OldestPage => {
-                reply(BoardReply::OldestPage(self.pages.front().map(|page| {
-                    PageInfo {
-                        time: page.time,
-                        size: u32::try_from(page.bytes.len()).unwrap_or(u32::MAX),
-                    }
-                })))
+                let oldest = self.pages.front().map(|page| PageInfo {
+                    time: page.time,
+                    size: u32::try_from(page.bytes.len()).unwrap_or(u32::MAX),
+                    extra: self.long_pages.contains(&page.time).then_some(0),
+                });
+                if oldest.is_some_and(|info| info.extra.is_some()) {
+                    self.stats.long_descriptions += 1;
+                }
+                reply(BoardReply::OldestPage(oldest))
             }
             BoardRequest::Download { time } => {
                 let Some(page) = self.pages.iter().find(|page| page.time == time) else {

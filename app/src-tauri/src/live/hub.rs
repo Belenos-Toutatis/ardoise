@@ -901,6 +901,7 @@ impl Shared {
                 now_ms(),
                 &mut out,
             ),
+            LiveInput::ScreenErased => session.screen_erased(now_ms(), &mut out),
             LiveInput::State(LiveState::Waiting) => {
                 session.set_state(LiveSessionState::Waiting, &mut out);
             }

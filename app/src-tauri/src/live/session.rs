@@ -2038,6 +2038,19 @@ impl LiveSession {
         }
     }
 
+    /// The tablet's screen was erased with its button (the Xiaomi blackboard, SPEC §4.2): what
+    /// is written next is written on a clean screen, so it goes to a new page, whatever the
+    /// button's setting (a new layer would put it over ink the tablet no longer shows). A page
+    /// with no ink yet stays: erasing before the first stroke makes no blank page.
+    pub fn screen_erased(&mut self, now_ms: i64, out: &mut Vec<LiveEvent>) {
+        let blank = self.current_page().note.strokes.is_empty()
+            && self.drawing.is_none()
+            && self.computer.is_none();
+        if !blank {
+            self.command(LiveCommandKind::NewPage, LiveButton::NewPage, now_ms, out);
+        }
+    }
+
     /// Deletes, recolours, moves or resizes strokes of the page on screen
     /// (`docs/design/tablet-live-classroom.md`, "M12"), for a window that chose them on page
     /// `page_index` at `revision`. Refused as a whole when anything is wrong. The stroke in progress

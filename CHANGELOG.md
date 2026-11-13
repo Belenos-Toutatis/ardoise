@@ -2,6 +2,13 @@
 
 ## Non publié
 
+### Corrigé (premiers essais avec la vraie tablette Xiaomi, 2026-11-13)
+
+- **Échec d'import d'une page enregistrée pendant qu'Ardoise est connecté.** La tablette décrit une telle page autrement (12 octets au lieu de 8) : Ardoise prenait cette réponse pour une trame abîmée, attendait cinq secondes et annonçait un échec, à chaque fois. La description longue est maintenant lue. Reste à vérifier sur la tablette que la page se télécharge et s'efface comme les autres.
+- **Mode direct avec la Xiaomi : effacer l'écran de la tablette avec son bouton passe à une nouvelle page**, quel que soit le réglage du bouton de la Bamboo ; une page encore vide reste la page en cours. La tablette signale l'effacement pendant le direct ; ce signal était jusqu'ici inconnu et ignoré.
+- Synchronisation automatique de la Xiaomi : le bouton d'enregistrement de la tablette suffit à la lancer dès qu'une page est là, même quand le nombre de pages n'a pas changé (enregistrer de nouveau un écran non effacé remplace sa page).
+- Tests : un test de la reprise d'une feuille en direct échouait de temps en temps (28 fois sur 320 sur un PC chargé) à cause de l'aide de test qui remettait le dossier de la bibliothèque en deux temps ; elle retient maintenant l'écriture en arrière-plan pendant l'échange.
+
 ### Ajouté (jalon M18 — une seconde tablette : la Xiaomi Mijia « petit tableau noir »)
 
 - **Tablette Xiaomi** (demande de l'utilisateur, Q14) : le panneau **Tablette** et les **Réglages** proposent **Ajouter la tablette Xiaomi**, à côté de **Enregistrer la Bamboo Slate** (inchangé). Pas d'enregistrement : Ardoise cherche la tablette allumée (une minute au plus, **Annuler** à tout moment), liste ce qu'elle entend (le **Signal** s'ajoute s'il y en a plusieurs) et ajoute celle qu'on choisit. Si rien n'est entendu, le message dit quoi vérifier ; la tablette ne parle qu'à une application à la fois, donc Mi Home doit être fermé (ou le Bluetooth du téléphone coupé), et elle reste liée à Mi Home.

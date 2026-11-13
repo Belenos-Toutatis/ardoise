@@ -485,7 +485,7 @@ impl Worker {
     fn board_count_pages(&mut self) {
         self.counted_at = self.session_time();
         self.count_now = false;
-        self.stored_event = false;
+        let stored = std::mem::take(&mut self.stored_event);
         let counted = match self.board.as_mut() {
             Some(board) => board.page_count(),
             None => return,
@@ -503,7 +503,10 @@ impl Worker {
             ));
         }
         let options = self.config.options;
-        if options.auto_sync && options.delete_after_import && pages > before {
+        // More pages than before, or the store button with a page there: storing a screen again
+        // replaces its page, so the count can stay the same with another page behind it.
+        let new_page = pages > before || (stored && pages > 0);
+        if options.auto_sync && options.delete_after_import && new_page {
             self.want_sync = true;
             self.board_permission = self.board_permission.max(Some(BoardPermission::Option));
         }
@@ -833,9 +836,13 @@ impl Worker {
             Channel::Command => {
                 if let Ok(reply) = BoardReply::decode(&notification.data)
                     && let Some(input) = live_input(&reply)
-                    && let Some(run) = self.live.as_mut()
                 {
-                    run.sink.input(input);
+                    if input == LiveInput::ScreenErased {
+                        self.note("the blackboard's screen was erased with its button");
+                    }
+                    if let Some(run) = self.live.as_mut() {
+                        run.sink.input(input);
+                    }
                 }
             }
             Channel::PageData | Channel::Live | Channel::SysEvent => {}
@@ -844,13 +851,13 @@ impl Worker {
     }
 }
 
-/// What a frame of the reply characteristic does to live mode. Nothing today: the "page stored"
-/// event (`12 01 09`) does not interrupt it (SPEC §4.2), and what the erase button sends is not
-/// measured yet (research note §5). Once it is, its frame (a new [`BoardReply`] variant) maps
-/// here to a new page, and nowhere else; unknown frames are already noted by
-/// [`Worker::board_step`] (the session's oddities).
+/// What a frame of the reply characteristic does to live mode: the erase button (`11 01 0c`,
+/// measured on the real tablet: research note §6) tells the sink that the screen is clean, here
+/// and nowhere else; the "page stored" event (`12 01 09`) does not interrupt live mode (SPEC
+/// §4.2). Unknown frames are already noted by [`Worker::board_step`] (the session's oddities).
 fn live_input(reply: &BoardReply) -> Option<LiveInput> {
     match reply {
+        BoardReply::ScreenErased => Some(LiveInput::ScreenErased),
         BoardReply::PageStored
         | BoardReply::Battery { .. }
         | BoardReply::Memory { .. }
