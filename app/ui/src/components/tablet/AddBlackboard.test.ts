@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
 import { resetMockLibrary } from '../../lib/mock-data';
-import { mockTablet, resetMockTablet } from '../../lib/mock-tablet';
+import { mockTablet, mockTabletPatch, resetMockTablet } from '../../lib/mock-tablet';
 import { tablet } from '../../lib/tablet-state.svelte';
 import AddBlackboard from './AddBlackboard.svelte';
 
@@ -148,6 +148,20 @@ describe('adding the Xiaomi tablet', () => {
     expect(step()).toBe('found');
     // And closing from an error needs no cancel.
     expect(onclose).not.toHaveBeenCalled();
+  });
+
+  it('leaves « searching » for an error that repeats the one shown before the search', async () => {
+    const error = { code: 'blackboardNotFound', message: '' };
+    mockTabletPatch({ error });
+    // The request is accepted, but the search ends at once with the same error (no status ever said « adding »).
+    vi.spyOn(api, 'tabletFindBlackboards').mockResolvedValue(undefined);
+    const { q, step, click } = await render();
+    await click('[data-action="search"]');
+    expect(step()).toBe('searching');
+    mockTabletPatch({ error: { ...error } });
+    await settle();
+    expect(step()).toBe('error');
+    expect(q('[data-step="error"]')!.textContent).toContain('Aucune tablette Xiaomi trouvée');
   });
 
   it('can be cancelled at every step, and stops the search', async () => {

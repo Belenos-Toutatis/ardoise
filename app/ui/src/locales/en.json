@@ -467,7 +467,8 @@
       "boardConfirm": "The Xiaomi tablet hands over only its oldest page: to reach the next one, Ardoise has to delete each page from the tablet once its note is written and checked. Sync now and delete the pages?",
       "boardConfirmYes": "Sync and delete",
       "boardWaitingOne": "1 page is waiting on the Xiaomi tablet: it is imported only on request, with \"Sync now\", and will be deleted from the tablet once its note is written.",
-      "boardWaitingMany": "{count} pages are waiting on the Xiaomi tablet: they are imported only on request, with \"Sync now\", and will be deleted from the tablet once their notes are written."
+      "boardWaitingMany": "{count} pages are waiting on the Xiaomi tablet: they are imported only on request, with \"Sync now\", and will be deleted from the tablet once their notes are written.",
+      "boardOnRequest": "The Xiaomi tablet imports its pages only on request: switch it on, then click \"Sync now\" once it is connected."
     },
     "live": {
       "open": "Live mode",
@@ -794,7 +795,7 @@
     "pageNotDeleted": "The Xiaomi tablet still holds a page that Ardoise has just asked it to delete: the sync stopped. The note of that page is already in the library.",
     "notSupported": "This tablet cannot do that (the Xiaomi tablet has no name to change).",
     "blackboardConfirmDelete": "The Xiaomi tablet's pages are imported only with your agreement: they are deleted from the tablet once imported, because it gives only its oldest page. Confirm the sync to go on.",
-    "pageUnreadable": "The Xiaomi tablet sent a page that Ardoise cannot read: nothing was imported and the page stays on the tablet.",
+    "pageUnreadable": "The Xiaomi tablet sent a page that Ardoise cannot read: that page was not imported and stays on the tablet, and so do the pages stored after it (the tablet gives only its oldest page). Import them with Mi Home, and keep the diagnostic log (the _ardoise\\diagnostics folder of the library).",
     "sheetOtherTablet": "This sheet cannot be continued with this tablet: a Bamboo Slate sheet is continued with the Bamboo Slate, a page of the Xiaomi tablet with the Xiaomi tablet. Nothing was written on the note."
   },
   "editor": {

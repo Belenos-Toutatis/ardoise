@@ -63,8 +63,8 @@ const A4 = { width: 29700, height: 21600 };
 const BOARD_PAGE = { width: 20500, height: 27200 };
 const BOARD_NAME = 'Mijia LCD blackboard';
 const BOARD_MODEL = 'Xiaomi Mijia LCD blackboard';
-/** Memory of the simulated blackboard, in bytes, and what one page takes. */
-const BOARD_MEMORY = 8_000_000;
+/** Memory of the simulated blackboard, in bytes (what the real tablet reports in total), and what one page takes. */
+const BOARD_MEMORY = 126_909_952;
 const BOARD_PAGE_BYTES = 180_000;
 const DAY_MS = 86_400_000;
 /** Connections in which the status names the tablet it is about (`active`). */
@@ -674,11 +674,15 @@ export function mockTabletInvoke(command: string, args: Record<string, unknown>)
       const c = s.status.connection;
       if (c === 'notRegistered') failure('tabletNotRegistered', '');
       if (isBusyNow(c)) failure('tabletBusy', '');
+      // The blackboard's pages are deleted once imported: with the option off, only after the user said so (as Rust: from
+      // the moment the blackboard is the tablet being connected).
+      const askedFirst =
+        s.status.active === 'blackboard' &&
+        (c === 'connecting' || c === 'connected') &&
+        !s.status.options.deleteAfterImport &&
+        args.confirmBlackboardDelete !== true;
+      if (askedFirst) failure('blackboardConfirmDelete', '');
       if (c === 'connected') {
-        // The blackboard's pages are deleted once imported: with the option off, only after the user said so.
-        if (s.status.active === 'blackboard' && !s.status.options.deleteAfterImport && args.confirmBlackboardDelete !== true) {
-          failure('blackboardConfirmDelete', '');
-        }
         startSync(s);
       } else {
         update(s, { pending: 'sync' });

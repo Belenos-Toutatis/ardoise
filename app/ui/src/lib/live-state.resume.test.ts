@@ -135,3 +135,20 @@ describe('live state: a resume refused for the tablet that connected', () => {
     expect(live.refused?.code).toBe('sheetOtherTablet');
   });
 });
+
+describe('live state: the tablet the session writes with', () => {
+  it('follows the snapshots, and is null before a tablet connected or on a snapshot without it', () => {
+    const live = new LiveState();
+    expect(live.tablet).toBeNull();
+    live.initial(snapshot({ state: 'waiting' }));
+    expect(live.tablet).toBeNull();
+    live.receive(batch({ type: 'snapshot', snapshot: snapshot({ tablet: 'blackboard' }) }));
+    expect(live.tablet).toBe('blackboard');
+    // Kept while it reconnects.
+    live.receive(batch({ type: 'snapshot', snapshot: snapshot({ state: 'reconnecting', tablet: 'blackboard' }) }));
+    expect(live.tablet).toBe('blackboard');
+    // The share's viewers do not get it.
+    live.receive(batch({ type: 'snapshot', snapshot: snapshot() }));
+    expect(live.tablet).toBeNull();
+  });
+});

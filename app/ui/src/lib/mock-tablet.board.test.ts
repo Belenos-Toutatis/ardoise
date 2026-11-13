@@ -193,6 +193,16 @@ describe('mock blackboard: syncing', () => {
     expect(status.device?.storedPages).toBe(0);
   });
 
+  it('asks for the confirmation from the moment the blackboard is being connected, with the option off', async () => {
+    await api.tabletSetOptions({ ...OPTIONS, deleteAfterImport: false });
+    await addBoard();
+    await beat(1);
+    expect(await api.tabletStatus()).toMatchObject({ connection: 'connecting', active: 'blackboard' });
+    expect((await failureOf(api.tabletSync())).code).toBe('blackboardConfirmDelete');
+    // Nothing was queued by the refusal.
+    expect((await api.tabletStatus()).pending).toBeNull();
+  });
+
   it('brings nothing, without an error, when a sync waited for the blackboard with deletion off', async () => {
     await api.tabletSetOptions({ ...OPTIONS, deleteAfterImport: false });
     await addBoard();
@@ -286,6 +296,7 @@ describe('every error code of the second tablet has its text in both languages',
     'notSupported',
     'blackboardConfirmDelete',
     'pageUnreadable',
+    'sheetOtherTablet',
   ])('%s', (code) => {
     for (const locale of ['fr', 'en'] as const) {
       const text = (catalogs[locale].errorCodes as Record<string, string>)[code];

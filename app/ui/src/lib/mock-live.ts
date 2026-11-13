@@ -175,6 +175,8 @@ class PenScript {
 
 interface Session {
   state: LiveSessionState;
+  /** The kind of tablet the session writes with: set when one first connects, kept after (`LiveSnapshot.tablet`). */
+  tablet: 'slate' | 'blackboard' | null;
   pages: Note[];
   pageIndex: number;
   /** The tablet's layer and the computer's, per page (by note id): a page left keeps them. */
@@ -303,6 +305,11 @@ let activeTablet: 'slate' | 'blackboard' | null = null;
 /** The mock tablet tells which tablet is connected: a resume is refused for a sheet that tablet cannot write on. */
 export function setMockLiveTablet(kind: 'slate' | 'blackboard' | null): void {
   activeTablet = kind;
+  // As in Rust: a session takes the kind of the tablet that first connects, and keeps it while it reconnects.
+  if (session && session.tablet === null && kind !== null) {
+    session.tablet = kind;
+    broadcastSnapshot();
+  }
 }
 
 /** As `resume::tablet_fits`: the blackboard writes only on a page of its own size, the Slate on every other sheet. */
@@ -350,6 +357,7 @@ function snapshot(): LiveSnapshot {
   if (!s) {
     return copy({
       state: 'idle',
+      tablet: null,
       page: { ...blankPage(false), id: '' },
       pageIndex: 0,
       pageCount: 1,
@@ -373,6 +381,7 @@ function snapshot(): LiveSnapshot {
   const layers = layersOf(s, s.pages[s.pageIndex]);
   return copy({
     state: s.state,
+    tablet: s.tablet,
     page: s.pages[s.pageIndex],
     pageIndex: s.pageIndex,
     pageCount: s.pages.length,
@@ -1471,6 +1480,7 @@ function setView(s: Session, requested: LiveViewState): void {
 function openSession(first: { page: Note; sheet: ResumedSheet } | null): LiveSnapshot {
   const s: Session = {
     state: 'waiting',
+    tablet: activeTablet,
     pages: [],
     pageIndex: 0,
     layersOf: new Map(),

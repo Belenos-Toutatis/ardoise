@@ -2,6 +2,7 @@
  * Live mode and the classroom (`app/src-tauri/src/live.rs`, `presentation.rs`).
  * Contract: docs/design/tablet-live-classroom.md.
  */
+import type { TabletKind } from './tablet';
 import type { Tool } from './ink';
 import type { BackgroundImage, Note, Paper, Rgba, Stroke } from './note';
 import type { Orientation } from './orientation';
@@ -145,6 +146,12 @@ export interface LiveSnapshot {
    * resumed sheet held the other way round than the setting, how it is to be held for that page.
    */
   orientation: Orientation;
+  /**
+   * The kind of tablet this live session writes with: set when its tablet first connects, kept while it reconnects, null
+   * before (and on the share's viewers, which do not need it). The window hides what is the Slate's (the position switch,
+   * the hints about its button) for `'blackboard'`.
+   */
+  tablet?: TabletKind | null;
   /**
    * Whether the current page turns with the tablet: false on a resumed sheet, which is never turned, and on a page
    * written over an image (M17) (the quick switch is disabled there). Absent on the share's viewers, which do not need it.

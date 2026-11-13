@@ -8,9 +8,9 @@ import { api, type AppState } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
 import { FakeContext } from '../../lib/live-fake-canvas';
 import { resetMockLibrary } from '../../lib/mock-data';
-import { mockLiveConfig, resetMockLive, setMockLiveOrientation } from '../../lib/mock-live';
+import { mockLiveConfig, mockLiveReconnect, resetMockLive, setMockLiveOrientation } from '../../lib/mock-live';
 import { resetMockNarration } from '../../lib/mock-narration';
-import { mockTablet, resetMockTablet } from '../../lib/mock-tablet';
+import { mockTablet, mockTabletPatch, resetMockTablet } from '../../lib/mock-tablet';
 import { tablet } from '../../lib/tablet-state.svelte';
 import LiveView from './LiveView.svelte';
 
@@ -99,6 +99,20 @@ describe('live mode with the Xiaomi blackboard', () => {
     expect(note.textContent).toContain('Tablette Xiaomi : page en hauteur');
     expect(note.getAttribute('title')).toContain('sans arrêter le direct');
     expect(note.getAttribute('title')).toContain('« Page suivante » se fait depuis l\'ordinateur');
+  });
+
+  it('keeps the position switch hidden while a Xiaomi session reconnects (no tablet is connected then)', async () => {
+    await knowBoard();
+    const view = render();
+    await vi.waitFor(() => expect(view.root().dataset.state).toBe('live'));
+    expect(view.target.querySelector('[data-slot="xiaomi-note"]')).not.toBeNull();
+    // The link is lost: the tablet service waits again (`active` is null), the session reconnects.
+    mockTabletPatch({ connection: 'searching' });
+    mockLiveReconnect(2000);
+    await vi.waitFor(() => expect(view.root().dataset.state).toBe('reconnecting'));
+    expect(tablet.status?.active).toBeNull();
+    expect(view.target.querySelector('[data-slot="orientation"]')).toBeNull();
+    expect(view.target.querySelector('[data-slot="xiaomi-note"]')).not.toBeNull();
   });
 
   it('shows a portrait page (the blackboard writes 20 500 × 27 200)', async () => {

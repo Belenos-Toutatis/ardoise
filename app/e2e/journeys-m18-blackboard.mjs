@@ -151,16 +151,16 @@ export const blackboardJourneys = [
         if (note !== l('live.xiaomi.label')) throw new Error(`unexpected note "${note}"`);
       });
 
-      await check('enregistrer une page avec le bouton de la tablette ne coupe pas le direct', async () => {
+      // The store button is pressed inside this step on purpose: nothing the window shows changes when it is pressed (the
+      // simulated hand writes for 600 s, and the tablet's page count is not read again during live mode), so a step of
+      // its own could not fail. The real check is the notes: the stored page is a 13th note, imported after live mode.
+      await check('enregistrer une page avec le bouton pendant le direct, terminer : la note du direct, puis la page enregistrée sont importées', async () => {
         const before = Number(await app.evaluate(canvasData('strokes')));
         await invoke(app, 'sim_blackboard_store_page');
         await app.waitFor(`Number(${canvasData('strokes')}) > ${before}`, 'strokes after the page was stored', 20_000);
         if (!(await app.evaluate(`document.querySelector('.live-view[data-state="live"]') !== null`))) {
           throw new Error('live mode is no longer live');
         }
-      });
-
-      await check('terminer le direct : la bibliothèque revient avec la note du direct, puis la page enregistrée est importée', async () => {
         await app.click('button[data-action="stop-live"]');
         await app.waitFor(`document.querySelector('.shell:not(.shell-hidden) input.search') !== null`, 'the library', 30_000);
         await app.waitFor(cards('>= 12'), 'the live note in the grid', 30_000);

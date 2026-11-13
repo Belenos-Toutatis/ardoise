@@ -36,6 +36,7 @@
  * - Batches that arrive before the subscription's snapshot are kept and applied after it
  *   (Tauri may deliver a channel message before the command's answer).
  */
+import type { TabletKind } from './tablet';
 import type { InkPoint } from './ink';
 import { wallClock, type PendingSample } from './latency';
 import type {
@@ -125,6 +126,8 @@ export class LiveState {
    */
   refused = $state.raw<{ code: string; message: string } | null>(null);
   state = $state<LiveSessionState>('idle');
+  /** The kind of tablet the session writes with (`LiveSnapshot.tablet`): null until its tablet first connects. */
+  tablet = $state<TabletKind | null>(null);
   pageIndex = $state(0);
   pageCount = $state(1);
   /** How the tablet is held now. */
@@ -470,6 +473,7 @@ export class LiveState {
     }
     this.ready = true;
     this.state = s.state;
+    this.tablet = s.tablet ?? null;
     this.pageIndex = s.pageIndex;
     this.pageCount = Math.max(1, s.pageCount);
     this.orientation = s.orientation;
