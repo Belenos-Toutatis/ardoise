@@ -33,6 +33,19 @@
 //!   (not measured yet).
 //! - One connection at a time; no advertisement while connected (the PC did not hear the
 //!   tablet while the phone held it).
+//! - **Assumption:** a transfer ends with its link: what a download had still to send is lost
+//!   when the link closes (to check at the hardware checkpoint; the host reopens the link to be
+//!   rid of a transfer that did not end cleanly).
+//!
+//! # Faults
+//!
+//! [`SimBoard::power_off`], [`SimBoard::disconnect_after`],
+//! [`SimBoard::disconnect_at_next_request`]; downloads that stop
+//! ([`SimBoard::stall_next_download`]) or whose rest comes late, just after the host's next
+//! download request on the same link ([`SimBoard::delay_next_download`]); a delete ignored
+//! ([`SimBoard::ignore_next_delete`]) or slow ([`SimBoard::delay_next_delete`]); a page that is
+//! not records ([`SimBoard::store_raw_page`]); an action run when the next download starts
+//! ([`SimBoard::on_next_download`], to land a request in the middle of it).
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -147,11 +160,37 @@ struct State {
     link: Option<Link>,
     next_link_id: u64,
     drop_at: Option<Duration>,
-    /// The next downloads send only these many bytes each, then stall.
-    stalls: VecDeque<usize>,
+    /// The next downloads send only these many bytes each, then stall or send the rest late.
+    stalls: VecDeque<Stall>,
     /// The next delete does nothing.
     ignore_next_delete: bool,
+    /// The next delete takes effect only this long after it is asked.
+    delete_delay: Option<Duration>,
+    /// A delete asked, not done yet: (time of the page, when it is done).
+    pending_delete: Option<(u32, Duration)>,
+    /// The link drops when the host writes its next request.
+    drop_at_next_request: bool,
+    /// Run when the next download starts (after its first bytes are queued).
+    on_download: Option<Action>,
     stats: BoardStats,
+}
+
+/// A download that does not go as it should.
+#[derive(Debug, Clone, Copy)]
+struct Stall {
+    /// Bytes sent at once.
+    bytes: usize,
+    /// The rest comes when the host writes its next request on the same link (else never).
+    late: bool,
+}
+
+/// An action of the test, run on the host's thread.
+struct Action(Box<dyn FnOnce() + Send>);
+
+impl std::fmt::Debug for Action {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Action")
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -167,6 +206,10 @@ struct Link {
     /// Next record of `pen` to stream, while the host streams.
     stream: Option<usize>,
     last_write: Duration,
+    /// The rest of a download held back ([`SimBoard::delay_next_download`]): sent just after
+    /// the host's next download request on this link, before that download's own bytes; lost
+    /// with the link.
+    late_tail: Vec<Vec<u8>>,
 }
 
 #[derive(Debug)]
@@ -210,6 +253,10 @@ impl SimBoard {
                     drop_at: None,
                     stalls: VecDeque::new(),
                     ignore_next_delete: false,
+                    delete_delay: None,
+                    pending_delete: None,
+                    drop_at_next_request: false,
+                    on_download: None,
                     stats: BoardStats::default(),
                 }),
             }),
@@ -319,12 +366,44 @@ impl SimBoard {
     /// The next download (after those already stalled) sends only `bytes` bytes of the page,
     /// then nothing.
     pub fn stall_next_download(&self, bytes: usize) {
-        self.state().stalls.push_back(bytes);
+        self.state().stalls.push_back(Stall { bytes, late: false });
+    }
+
+    /// The next download (after those already stalled) sends `bytes` bytes of the page at once
+    /// and the rest only once the host asks for a page again on the same link, before the bytes
+    /// of that new download: a stalled transfer that resumes just as the host tries again (the
+    /// worst moment). The rest is lost if the link closes first.
+    pub fn delay_next_download(&self, bytes: usize) {
+        self.state().stalls.push_back(Stall { bytes, late: true });
     }
 
     /// The next delete request does nothing.
     pub fn ignore_next_delete(&self) {
         self.state().ignore_next_delete = true;
+    }
+
+    /// The next delete request takes effect `after` this long: until then the page is still
+    /// described and counted (a tablet slow to erase).
+    pub fn delay_next_delete(&self, after: Duration) {
+        self.state().delete_delay = Some(after);
+    }
+
+    /// The link drops when the host writes its next request (the write fails).
+    pub fn disconnect_at_next_request(&self) {
+        self.state().drop_at_next_request = true;
+    }
+
+    /// Stores `bytes` as a page, as they are (a tablet storing something that is not records),
+    /// dated by the tablet's clock; nothing is sent to a host.
+    pub fn store_raw_page(&self, bytes: Vec<u8>) {
+        let wall = self.wall_seconds();
+        self.state().push_page(bytes, wall);
+    }
+
+    /// Runs `action` on the host's thread when the next download starts, once its first bytes
+    /// are queued (to land a request in the middle of a download).
+    pub fn on_next_download(&self, action: impl FnOnce() + Send + 'static) {
+        self.state().on_download = Some(Action(Box::new(action)));
     }
 
     // --- inspection -------------------------------------------------------------------------
@@ -406,6 +485,7 @@ impl SimBoard {
             queue: VecDeque::new(),
             stream: None,
             last_write: now,
+            late_tail: Vec::new(),
         });
         state.stats.connections += 1;
         Ok((id, state.advertisement()))
@@ -418,12 +498,30 @@ impl SimBoard {
         if !state.link.as_ref().is_some_and(|l| l.id == id) || !state.alive(now) {
             return Err(TransportError::NotConnected);
         }
+        if std::mem::take(&mut state.drop_at_next_request) {
+            state.lose_link(now);
+            return Err(TransportError::NotConnected);
+        }
         state.stats.requests += 1;
         if let Some(link) = state.link.as_mut() {
             link.last_write = now;
         }
-        // Records already due travel before the reply.
+        // Records already due travel before the reply; so does the rest of a download held
+        // back, when the host asks for a page again.
         state.materialize_live(now);
+        let download = matches!(
+            BoardRequest::decode(bytes),
+            Ok(BoardRequest::Download { .. })
+        );
+        if download && let Some(link) = state.link.as_mut() {
+            let tail = std::mem::take(&mut link.late_tail);
+            link.queue.extend(tail.into_iter().map(|data| Outgoing {
+                due: now,
+                channel: Channel::BoardData,
+                data,
+            }));
+        }
+        let downloads = state.stats.downloads;
         let replies = state.handle(bytes, now, wall);
         if let Some(link) = state.link.as_mut() {
             link.queue
@@ -432,6 +530,16 @@ impl SimBoard {
                     channel,
                     data,
                 }));
+        }
+        let action = if state.stats.downloads > downloads {
+            state.on_download.take()
+        } else {
+            None
+        };
+        // The test's action runs without the tablet's lock.
+        drop(state);
+        if let Some(Action(action)) = action {
+            action();
         }
         Ok(())
     }
@@ -563,6 +671,17 @@ impl State {
         u32::try_from((wall + self.clock_offset).max(0)).unwrap_or(u32::MAX)
     }
 
+    /// Stores `bytes` as the newest page, dated by the tablet's clock (one second after the
+    /// newest page at least); returns its time.
+    fn push_page(&mut self, bytes: Vec<u8>, wall: i64) -> u32 {
+        let mut time = self.tablet_seconds(wall);
+        if let Some(last) = self.pages.iter().map(|page| page.time).max() {
+            time = time.max(last.saturating_add(1));
+        }
+        self.pages.push_back(BoardStoredPage { time, bytes });
+        time
+    }
+
     /// The store button.
     fn store(&mut self, now: Duration, wall: i64) {
         if self.screen.is_empty() {
@@ -571,14 +690,8 @@ impl State {
         if let Some(time) = self.stored_screen.take() {
             self.pages.retain(|page| page.time != time);
         }
-        let mut time = self.tablet_seconds(wall);
-        if let Some(last) = self.pages.iter().map(|page| page.time).max() {
-            time = time.max(last.saturating_add(1));
-        }
-        self.pages.push_back(BoardStoredPage {
-            time,
-            bytes: encode_records(&self.screen),
-        });
+        let bytes = encode_records(&self.screen);
+        let time = self.push_page(bytes, wall);
         self.stored_screen = Some(time);
         if self.alive(now)
             && let Some(link) = self.link.as_mut()
@@ -626,7 +739,25 @@ impl State {
         self.stats.live_records += item.consumed as u64;
     }
 
+    /// Removes the page of `time` (a delete); counted when there was one.
+    fn remove_page(&mut self, time: u32) {
+        let before = self.pages.len();
+        self.pages.retain(|page| page.time != time);
+        if self.pages.len() < before {
+            self.stats.deletes += 1;
+            if self.stored_screen == Some(time) {
+                self.stored_screen = None;
+            }
+        }
+    }
+
     fn handle(&mut self, bytes: &[u8], now: Duration, wall: i64) -> Vec<(Channel, Vec<u8>)> {
+        if let Some((time, due)) = self.pending_delete
+            && due <= now
+        {
+            self.pending_delete = None;
+            self.remove_page(time);
+        }
         let Ok(request) = BoardRequest::decode(bytes) else {
             self.stats.unknown_requests += 1;
             return Vec::new();
@@ -669,8 +800,13 @@ impl State {
                 };
                 self.stats.downloads += 1;
                 let mut bytes = page.bytes.clone();
-                if let Some(limit) = self.stalls.pop_front() {
-                    bytes.truncate(limit);
+                if let Some(stall) = self.stalls.pop_front() {
+                    let tail = bytes.split_off(stall.bytes.min(bytes.len()));
+                    if stall.late
+                        && let Some(link) = self.link.as_mut()
+                    {
+                        link.late_tail = split_chunks(&tail);
+                    }
                 }
                 split_chunks(&bytes)
                     .into_iter()
@@ -681,14 +817,11 @@ impl State {
                 if std::mem::take(&mut self.ignore_next_delete) {
                     return Vec::new();
                 }
-                let before = self.pages.len();
-                self.pages.retain(|page| page.time != time);
-                if self.pages.len() < before {
-                    self.stats.deletes += 1;
-                    if self.stored_screen == Some(time) {
-                        self.stored_screen = None;
-                    }
+                if let Some(delay) = self.delete_delay.take() {
+                    self.pending_delete = Some((time, now + delay));
+                    return Vec::new();
                 }
+                self.remove_page(time);
                 Vec::new()
             }
             BoardRequest::StartLive => {
@@ -927,6 +1060,84 @@ mod tests {
             },
         );
         assert_eq!(board.stored_page_count(), 1);
+    }
+
+    #[test]
+    fn faults_of_downloads_and_deletes() {
+        let board = SimBoard::blackboard();
+        let stroke = Stroke {
+            points: (0..80u16)
+                .map(|i| Point {
+                    x: i,
+                    y: 100,
+                    pressure: 900,
+                })
+                .collect(),
+            ..Stroke::default()
+        };
+        board.draw_page(std::slice::from_ref(&stroke));
+        board.store_raw_page(vec![1, 2, 3]);
+        let pages = board.stored_pages();
+        assert_eq!(pages[1].bytes, [1, 2, 3]);
+        assert!(pages[1].time > pages[0].time);
+        let page = pages[0].clone();
+        let download = BoardRequest::Download { time: page.time };
+        let all = |board: &SimBoard, link| {
+            let mut bytes = Vec::new();
+            while let Some((_, chunk)) = next(board, link) {
+                bytes.extend(chunk);
+            }
+            bytes
+        };
+
+        // The rest of a delayed download comes before the answer to the next request.
+        let (link, _) = board
+            .open_link(&board.config().address, Duration::ZERO)
+            .unwrap();
+        board.delay_next_download(100);
+        let started = Arc::new(Mutex::new(false));
+        let flag = started.clone();
+        board.on_next_download(move || *flag.lock().unwrap() = true);
+        write(&board, link, download);
+        assert!(
+            *started.lock().unwrap(),
+            "the action ran when the download started"
+        );
+        assert_eq!(all(&board, link), page.bytes[..100]);
+        write(&board, link, BoardRequest::Battery);
+        assert_eq!(all(&board, link), [0x11, 0x02, 0x01, 90]);
+        write(&board, link, download);
+        let mut late = all(&board, link);
+        let again = late.split_off(late.len() - page.bytes.len());
+        assert_eq!(late, page.bytes[100..]);
+        assert_eq!(again, page.bytes);
+        // Lost with its link.
+        board.delay_next_download(0);
+        write(&board, link, download);
+        board.close_link(link);
+        let (link, _) = board
+            .open_link(&board.config().address, Duration::ZERO)
+            .unwrap();
+        write(&board, link, download);
+        assert_eq!(all(&board, link), page.bytes);
+
+        // A slow delete: still described a moment, then gone.
+        board.delay_next_delete(Duration::from_millis(200));
+        write(&board, link, BoardRequest::Delete { time: page.time });
+        write(&board, link, BoardRequest::OldestPage);
+        assert_eq!(all(&board, link)[3..7], page.time.to_be_bytes());
+        board.clock().advance(Duration::from_millis(200));
+        write(&board, link, BoardRequest::OldestPage);
+        assert_eq!(all(&board, link)[3..7], pages[1].time.to_be_bytes());
+        assert_eq!(board.stats().deletes, 1);
+
+        // The link drops at the next request.
+        board.disconnect_at_next_request();
+        assert_eq!(
+            board.link_write(link, &BoardRequest::PageCount.encode()),
+            Err(TransportError::NotConnected)
+        );
+        assert!(!board.is_connected());
     }
 
     #[test]
