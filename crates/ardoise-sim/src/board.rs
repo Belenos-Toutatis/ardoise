@@ -13,29 +13,64 @@
 //! - No login: every known request is answered at once, on [`Channel::Command`]; the frames
 //!   are those of [`ardoise_proto::blackboard`]. `11 05 07` sets the clock, `12 05 06`
 //!   deletes, `12 02 08` starts or stops the stream: no reply. `12 01 05` describes the oldest
-//!   page, or answers the bare `12 01 05` when none is stored (measured on the real tablet).
+//!   page, or answers the bare `12 01 05` when none is stored (measured on the real tablet),
+//!   and also when it is asked before any `12 01 04` on the link although a page is stored
+//!   (measured once, research note §6).
 //! - `12 06 03 01 <time>`: the page's bytes on [`Channel::BoardData`] in chunks of at most 244
-//!   bytes, nothing else. **Assumption:** a time that names no page gets no answer; so does a
-//!   delete of a time that names no page.
+//!   bytes, nothing else. **Assumption:** a time that names no page gets no answer. Deleting a
+//!   page that is not there does nothing (measured: no reply, the count unchanged).
 //! - **Assumption:** unknown or malformed requests get no answer (counted in
 //!   [`BoardStats::unknown_requests`]).
 //! - The pen writes on the screen whether a host listens or not. While a host streams
 //!   (`12 02 08 01`), the records follow on [`Channel::BoardData`], up to six per notification,
 //!   [`RECORDS_PER_SECOND`] of them per second: `a0` hovering, `a1` touching, `c0` when the pen
 //!   leaves. Movement is timed from when it is given ([`SimBoard::draw_live`]), as a hand
-//!   writes: what happens while nobody streams is only on the screen.
+//!   writes: what happens while nobody streams is only on the screen. A new link does not
+//!   stream until asked (measured: live mode is not kept across connections).
 //! - The store button ([`SimBoard::press_store`]) stores the screen as a page dated by the
-//!   tablet's clock and sends `12 01 09` to a connected host, streaming or not. Storing again
-//!   without erasing replaces that page by the longer one, with a new time (measured). Two pages
-//!   never share a time (**assumption**: one second apart at least). **Assumption:** an empty
-//!   screen stores nothing and sends nothing.
-//! - A page stored while a host is connected and does not stream is described in the long form,
-//!   `12 0d 05 <time> <size> <u32>` (measured; the third number, not understood, is 0 here). It
-//!   is downloaded and deleted like any other (**assumption**, to check on the real tablet). What
-//!   the real tablet does of such a page that no host takes is not understood (two of them were
-//!   gone at the next connection): here it stays.
-//! - The erase button ([`SimBoard::erase`]) clears the screen and, while a host streams, sends
-//!   `11 01 0c` (measured in live mode; nothing was seen outside it).
+//!   tablet's clock and sends `12 01 09` to a connected host, streaming or not. Two pages never
+//!   share a time (**assumption**: one second apart at least). **Assumption:** an empty screen
+//!   stores nothing and sends nothing.
+//!
+//! ## The open page (measured, research note §6)
+//!
+//! - The page of a screen not erased since it was stored is the *open* page
+//!   ([`SimBoard::open_page`]), whether a host was connected or not, streaming or not. It is
+//!   described in the long form `12 0d 05 <time> <size> <previous>`: `previous` is the time of
+//!   the store before it of the same screen, 0 for the first. Every other page is described in
+//!   the short form.
+//! - Storing again without erasing replaces the open page by one holding the whole screen, with
+//!   a new time; when the host already took it, the new page is added, its `previous` still the
+//!   time of the store taken.
+//! - **The open page is removed by the tablet itself once all its bytes have been sent for a
+//!   download** (three times out of three), counted in [`BoardStats::removed_after_download`]. A
+//!   page in the short form stays until it is deleted. **Assumption** (not measured): a download
+//!   cut short leaves the open page on the tablet: a stalled download
+//!   ([`SimBoard::stall_next_download`]) or a link lost before the last chunk; a delayed one
+//!   ([`SimBoard::delay_next_download`]) removes it once its rest is sent.
+//! - **Assumption:** switching the tablet off changes nothing to the open page.
+//!
+//! ## The erase button ([`SimBoard::erase`])
+//!
+//! It clears the screen and closes the open page (short form from then on, kept). It sends
+//! `11 01 0c` while a host streams, nothing otherwise. What it does to the open page reproduces
+//! the observed cases, not a rule (the tablet's rule is not established):
+//!
+//! | Erased | The open page | Observed | Here |
+//! |---|---|---|---|
+//! | outside live mode | described since it was stored | the whole page pushed on the stream | pushed in chunks of at most 244 bytes, kept closed |
+//! | outside live mode | not described | closed, kept | the same |
+//! | in live mode | described during this live run | `11 01 0c`, then the whole page pushed | the same |
+//! | in live mode | stored during this run, not described | `11 01 0c`, nothing pushed | kept closed |
+//! | in live mode | stored and described before this run | lost (twice) | removed ([`BoardStats::lost_pages`]) |
+//! | in live mode | stored before this run, not described | not measured | **assumption**: removed, the side of loss |
+//!
+//! Starting live mode alone removes nothing (measured). **Assumption:** a page pushed stays,
+//! closed (the general rule of the button; not checked after a push). A live run starts with
+//! each `12 02 08 01` and ends with `12 02 08 02` or its link.
+//!
+//! ## Links
+//!
 //! - One connection at a time; no advertisement while connected (the PC did not hear the
 //!   tablet while the phone held it).
 //! - **Assumption:** a transfer ends with its link: what a download had still to send is lost
@@ -53,7 +88,8 @@
 //! every new link without `12 02 08 01` ([`SimBoard::stream_without_asking`], a tablet that kept
 //! live mode across a reconnection: not measured); a delete ignored
 //! ([`SimBoard::ignore_next_delete`]) or slow ([`SimBoard::delay_next_delete`]); a page that is
-//! not records ([`SimBoard::store_raw_page`]); an action run when the next download starts
+//! not records ([`SimBoard::store_raw_page`]); a store of the screen whose page is not the screen
+//! ([`SimBoard::store_raw_screen`]); an action run when the next download starts
 //! ([`SimBoard::on_next_download`], to land a request in the middle of it) or right after the
 //! next delete ([`SimBoard::on_next_delete`]).
 
@@ -141,6 +177,14 @@ pub struct BoardStats {
     pub screen_erased_events: u32,
     /// Pages described in the long form (`12 0d 05`).
     pub long_descriptions: u32,
+    /// `12 01 05` answered bare because no `12 01 04` was asked yet on the link.
+    pub uncounted_descriptions: u32,
+    /// Open pages the tablet removed by itself once downloaded.
+    pub removed_after_download: u32,
+    /// Pages pushed on the stream by the erase button.
+    pub pushed_pages: u32,
+    /// Open pages lost by the erase button during live mode.
+    pub lost_pages: u32,
 }
 
 /// Handle to one simulated blackboard. Clones share the same tablet.
@@ -163,11 +207,14 @@ struct State {
     pages: VecDeque<BoardStoredPage>,
     /// What the screen shows: every record written since the last erase.
     screen: Vec<Record>,
-    /// The time of the page that holds the screen as stored last, until the screen is erased.
-    stored_screen: Option<u32>,
-    /// Times of the pages stored while a host was connected without streaming: described in the
-    /// long form.
-    long_pages: Vec<u32>,
+    /// The time of the last store of the screen since it was erased (the `previous` of the next
+    /// store), whether the tablet still holds that page or not.
+    last_store: Option<u32>,
+    /// The open page: the page holding the screen as stored last, while the tablet holds it and
+    /// the screen is not erased.
+    open: Option<OpenPage>,
+    /// Live runs started so far (each `12 02 08 01`, and each link streaming unasked).
+    live_runs: u64,
     /// Pen movement, anchored on the virtual clock.
     pen: Vec<Timed>,
     /// End of the anchored movement.
@@ -195,7 +242,23 @@ struct State {
     pace: Duration,
     /// Every new link streams the pen at once, without `12 02 08 01`.
     stream_unasked: bool,
+    /// Set by a download of the open page answered in full: the page to remove once its last
+    /// chunk is sent.
+    removes_after: Option<u32>,
     stats: BoardStats,
+}
+
+/// The page of the screen not erased since it was stored.
+#[derive(Debug, Clone, Copy)]
+struct OpenPage {
+    time: u32,
+    /// The store before it of the same screen, 0 for the first.
+    previous: u32,
+    /// The live run streaming when it was stored, if any.
+    stored_during: Option<u64>,
+    /// It was described to a host since it was stored: `Some(run)` with the live run streaming
+    /// then (`Some(None)`: none).
+    described: Option<Option<u64>>,
 }
 
 /// A download that does not go as it should.
@@ -228,11 +291,17 @@ struct Link {
     queue: VecDeque<Outgoing>,
     /// Next record of `pen` to stream, while the host streams.
     stream: Option<usize>,
+    /// The live run of this link while it streams.
+    run: u64,
+    /// `12 01 04` was asked on this link.
+    counted: bool,
     last_write: Duration,
     /// The rest of a download held back ([`SimBoard::delay_next_download`]): sent just after
     /// the host's next download request on this link, before that download's own bytes; lost
     /// with the link.
     late_tail: Vec<Vec<u8>>,
+    /// The open page whose last bytes are in `late_tail` (removed once they are sent).
+    late_removes: Option<u32>,
 }
 
 #[derive(Debug)]
@@ -240,6 +309,20 @@ struct Outgoing {
     due: Duration,
     channel: Channel,
     data: Vec<u8>,
+    /// The last chunk of a download of the open page of this time: once it is sent, the tablet
+    /// removes that page.
+    removes: Option<u32>,
+}
+
+impl Outgoing {
+    fn now(due: Duration, channel: Channel, data: Vec<u8>) -> Self {
+        Self {
+            due,
+            channel,
+            data,
+            removes: None,
+        }
+    }
 }
 
 /// The next notification of a stream.
@@ -267,8 +350,9 @@ impl SimBoard {
                     clock_offset,
                     pages: VecDeque::new(),
                     screen: Vec::new(),
-                    stored_screen: None,
-                    long_pages: Vec::new(),
+                    last_store: None,
+                    open: None,
+                    live_runs: 0,
                     pen: Vec::new(),
                     pen_end: Duration::ZERO,
                     on_screen: 0,
@@ -284,6 +368,7 @@ impl SimBoard {
                     on_delete: None,
                     pace: Duration::ZERO,
                     stream_unasked: false,
+                    removes_after: None,
                     stats: BoardStats::default(),
                 }),
             }),
@@ -431,10 +516,21 @@ impl SimBoard {
     }
 
     /// Stores `bytes` as a page, as they are (a tablet storing something that is not records),
-    /// dated by the tablet's clock; nothing is sent to a host.
+    /// dated by the tablet's clock; nothing is sent to a host. A page in the short form.
     pub fn store_raw_page(&self, bytes: Vec<u8>) {
         let wall = self.wall_seconds();
         self.state().push_page(bytes, wall);
+    }
+
+    /// Presses the store button, but the page stored holds `bytes` instead of the screen's
+    /// records: an open page whose `previous` is the screen's last store, which it does not hold
+    /// whole (not measured: a fault, for the host's checks).
+    pub fn store_raw_screen(&self, bytes: Vec<u8>) {
+        let now = self.now();
+        let wall = self.wall_seconds();
+        let mut state = self.state();
+        state.catch_up(now);
+        state.store_bytes(bytes, now, wall);
     }
 
     /// Runs `action` on the host's thread when the next download starts, once its first bytes
@@ -469,11 +565,7 @@ impl SimBoard {
             for data in split_chunks(bytes) {
                 enqueue(
                     &mut link.queue,
-                    Outgoing {
-                        due: now,
-                        channel: Channel::BoardData,
-                        data,
-                    },
+                    Outgoing::now(now, Channel::BoardData, data),
                 );
             }
         }
@@ -493,6 +585,12 @@ impl SimBoard {
 
     pub fn stored_page_count(&self) -> usize {
         self.state().pages.len()
+    }
+
+    /// The time of the open page (the page of the screen not erased since it was stored), while
+    /// the tablet holds it.
+    pub fn open_page(&self) -> Option<u32> {
+        self.state().open.map(|open| open.time)
     }
 
     /// What the screen shows now.
@@ -562,12 +660,19 @@ impl SimBoard {
         let stream = state
             .stream_unasked
             .then(|| state.pen.partition_point(|timed| timed.due < now));
+        if stream.is_some() {
+            state.live_runs += 1;
+        }
+        let run = state.live_runs;
         state.link = Some(Link {
             id,
             queue: VecDeque::new(),
             stream,
+            run,
+            counted: false,
             last_write: now,
             late_tail: Vec::new(),
+            late_removes: None,
         });
         state.stats.connections += 1;
         Ok((id, state.advertisement()))
@@ -596,31 +701,39 @@ impl SimBoard {
         let delete = matches!(request, Ok(BoardRequest::Delete { .. }));
         if download && let Some(link) = state.link.as_mut() {
             let tail = std::mem::take(&mut link.late_tail);
-            for data in tail {
-                enqueue(
-                    &mut link.queue,
-                    Outgoing {
-                        due: now,
-                        channel: Channel::BoardData,
-                        data,
-                    },
-                );
+            let removes = link.late_removes.take();
+            let last = tail.len();
+            for (n, data) in tail.into_iter().enumerate() {
+                let mut chunk = Outgoing::now(now, Channel::BoardData, data);
+                if n + 1 == last {
+                    chunk.removes = removes;
+                }
+                enqueue(&mut link.queue, chunk);
             }
         }
         let downloads = state.stats.downloads;
         let replies = state.handle(bytes, now, wall);
-        // A download's chunks one `pace` apart (all at once by default).
-        let pace = if download { state.pace } else { Duration::ZERO };
+        // The open page leaves the tablet once the last chunk of its download is sent.
+        let removes = state.removes_after.take();
+        // A download's or a push's chunks one `pace` apart (all at once by default).
+        let pace = state.pace;
         if let Some(link) = state.link.as_mut() {
             let mut chunks = 0u32;
-            for (channel, data) in replies {
+            let last = replies
+                .iter()
+                .rposition(|(channel, _)| *channel == Channel::BoardData);
+            for (n, (channel, data)) in replies.into_iter().enumerate() {
                 let due = if channel == Channel::BoardData {
                     chunks += 1;
                     now + pace * (chunks - 1)
                 } else {
                     now
                 };
-                enqueue(&mut link.queue, Outgoing { due, channel, data });
+                let mut item = Outgoing::now(due, channel, data);
+                if Some(n) == last {
+                    item.removes = removes;
+                }
+                enqueue(&mut link.queue, item);
             }
         }
         let action = if state.stats.downloads > downloads {
@@ -672,6 +785,9 @@ impl SimBoard {
                 let from_queue = queued.is_some_and(|q| live.as_ref().is_none_or(|l| q <= l.due));
                 if from_queue {
                     let outgoing = state.link.as_mut().and_then(|l| l.queue.pop_front());
+                    if let Some(time) = outgoing.as_ref().and_then(|o| o.removes) {
+                        state.downloaded(time);
+                    }
                     Ok(outgoing.map(|o| TransportEvent::Notification {
                         channel: o.channel,
                         data: o.data,
@@ -776,53 +892,107 @@ impl State {
         time
     }
 
+    /// The live run of the connected host while it streams.
+    fn streaming_run(&self, now: Duration) -> Option<u64> {
+        self.link
+            .as_ref()
+            .filter(|link| link.stream.is_some() && self.alive(now))
+            .map(|link| link.run)
+    }
+
     /// The store button.
     fn store(&mut self, now: Duration, wall: i64) {
         if self.screen.is_empty() {
             return;
         }
-        if let Some(time) = self.stored_screen.take() {
-            self.pages.retain(|page| page.time != time);
-        }
         let bytes = encode_records(&self.screen);
-        let time = self.push_page(bytes, wall);
-        self.stored_screen = Some(time);
-        // A host connected, not streaming: the long description.
-        if self.alive(now) && self.link.as_ref().is_some_and(|link| link.stream.is_none()) {
-            self.long_pages.push(time);
+        self.store_bytes(bytes, now, wall);
+    }
+
+    /// Stores `bytes` as the page of the screen: it replaces the open page (or follows the
+    /// store the host took) and is the open page from now on.
+    fn store_bytes(&mut self, bytes: Vec<u8>, now: Duration, wall: i64) {
+        if let Some(open) = self.open.take() {
+            self.pages.retain(|page| page.time != open.time);
         }
+        let previous = self.last_store.unwrap_or(0);
+        let time = self.push_page(bytes, wall);
+        self.last_store = Some(time);
+        self.open = Some(OpenPage {
+            time,
+            previous,
+            stored_during: self.streaming_run(now),
+            described: None,
+        });
         if self.alive(now)
             && let Some(link) = self.link.as_mut()
         {
             enqueue(
                 &mut link.queue,
-                Outgoing {
-                    due: now,
-                    channel: Channel::Command,
-                    data: encode(&BoardReply::PageStored),
-                },
+                Outgoing::now(now, Channel::Command, encode(&BoardReply::PageStored)),
             );
             self.stats.page_stored_events += 1;
         }
     }
 
-    /// The erase button.
+    /// The erase button: the cases observed (module documentation).
     fn erase(&mut self, now: Duration) {
         self.screen.clear();
-        self.stored_screen = None;
-        if self.alive(now)
+        self.last_store = None;
+        let run = self.streaming_run(now);
+        if run.is_some()
             && let Some(link) = self.link.as_mut()
-            && link.stream.is_some()
         {
             enqueue(
                 &mut link.queue,
-                Outgoing {
-                    due: now,
-                    channel: Channel::Command,
-                    data: encode(&BoardReply::ScreenErased),
-                },
+                Outgoing::now(now, Channel::Command, encode(&BoardReply::ScreenErased)),
             );
             self.stats.screen_erased_events += 1;
+        }
+        let Some(open) = self.open.take() else {
+            return;
+        };
+        let push = match run {
+            // Described during this live run: pushed after `11 01 0c`.
+            Some(run) if open.described == Some(Some(run)) => true,
+            // Stored before this live run: lost (described then: measured twice; not described:
+            // supposed).
+            Some(run) if open.stored_during != Some(run) => {
+                self.pages.retain(|page| page.time != open.time);
+                self.stats.lost_pages += 1;
+                return;
+            }
+            // Stored during this run, not described: kept, closed.
+            Some(_) => false,
+            // Outside live mode: pushed when described since it was stored.
+            None => open.described.is_some(),
+        };
+        let bytes = self
+            .pages
+            .iter()
+            .find(|page| page.time == open.time)
+            .map(|page| page.bytes.clone());
+        if push
+            && self.alive(now)
+            && let (Some(bytes), Some(link)) = (bytes, self.link.as_mut())
+        {
+            for (n, data) in split_chunks(&bytes).into_iter().enumerate() {
+                let due = now + self.pace * u32::try_from(n).unwrap_or(u32::MAX);
+                enqueue(
+                    &mut link.queue,
+                    Outgoing::now(due, Channel::BoardData, data),
+                );
+            }
+            self.stats.pushed_pages += 1;
+        }
+    }
+
+    /// The last chunk of a download of the open page `time` was sent: the tablet removes it.
+    fn downloaded(&mut self, time: u32) {
+        if self.open.is_some_and(|open| open.time == time) {
+            self.open = None;
+            self.pages.retain(|page| page.time != time);
+            self.stats.removed_after_download += 1;
         }
     }
 
@@ -841,11 +1011,7 @@ impl State {
             if let Some(link) = self.link.as_mut() {
                 enqueue(
                     &mut link.queue,
-                    Outgoing {
-                        due: item.due,
-                        channel: Channel::BoardData,
-                        data: item.data,
-                    },
+                    Outgoing::now(item.due, Channel::BoardData, item.data),
                 );
             }
         }
@@ -858,15 +1024,15 @@ impl State {
         self.stats.live_records += item.consumed as u64;
     }
 
-    /// Removes the page of `time` (a delete); counted when there was one.
+    /// Removes the page of `time` (a delete); counted when there was one. A page that is not
+    /// there: nothing (measured).
     fn remove_page(&mut self, time: u32) {
         let before = self.pages.len();
         self.pages.retain(|page| page.time != time);
-        self.long_pages.retain(|long| *long != time);
         if self.pages.len() < before {
             self.stats.deletes += 1;
-            if self.stored_screen == Some(time) {
-                self.stored_screen = None;
+            if self.open.is_some_and(|open| open.time == time) {
+                self.open = None;
             }
         }
     }
@@ -900,6 +1066,9 @@ impl State {
                 Vec::new()
             }
             BoardRequest::PageCount => {
+                if let Some(link) = self.link.as_mut() {
+                    link.counted = true;
+                }
                 let bytes: usize = self.pages.iter().map(|page| page.bytes.len()).sum();
                 reply(BoardReply::PageCount {
                     count: u16::try_from(self.pages.len()).unwrap_or(u16::MAX),
@@ -907,13 +1076,25 @@ impl State {
                 })
             }
             BoardRequest::OldestPage => {
+                // Asked before any `12 01 04` on the link: the bare frame (measured once).
+                if !self.link.as_ref().is_some_and(|link| link.counted) {
+                    self.stats.uncounted_descriptions += 1;
+                    return reply(BoardReply::OldestPage(None));
+                }
+                let run = self.streaming_run(now);
+                let open = self.open;
                 let oldest = self.pages.front().map(|page| PageInfo {
                     time: page.time,
                     size: u32::try_from(page.bytes.len()).unwrap_or(u32::MAX),
-                    extra: self.long_pages.contains(&page.time).then_some(0),
+                    extra: open
+                        .filter(|open| open.time == page.time)
+                        .map(|open| open.previous),
                 });
                 if oldest.is_some_and(|info| info.extra.is_some()) {
                     self.stats.long_descriptions += 1;
+                    if let Some(open) = self.open.as_mut() {
+                        open.described = Some(run);
+                    }
                 }
                 reply(BoardReply::OldestPage(oldest))
             }
@@ -923,12 +1104,25 @@ impl State {
                 };
                 self.stats.downloads += 1;
                 let mut bytes = page.bytes.clone();
+                let open = self.open.is_some_and(|open| open.time == time);
+                // The open page leaves once all its bytes are sent (measured); a download cut
+                // short leaves it (supposed).
+                let mut whole = true;
                 if let Some(stall) = self.stalls.pop_front() {
                     let tail = bytes.split_off(stall.bytes.min(bytes.len()));
+                    whole = tail.is_empty();
                     if stall.late
                         && let Some(link) = self.link.as_mut()
                     {
                         link.late_tail = split_chunks(&tail);
+                        link.late_removes = (open && !tail.is_empty()).then_some(time);
+                    }
+                }
+                if open && whole {
+                    if bytes.is_empty() {
+                        self.downloaded(time);
+                    } else {
+                        self.removes_after = Some(time);
                     }
                 }
                 split_chunks(&bytes)
@@ -949,8 +1143,11 @@ impl State {
             }
             BoardRequest::StartLive => {
                 let cursor = self.pen.partition_point(|timed| timed.due < now);
+                self.live_runs += 1;
+                let run = self.live_runs;
                 if let Some(link) = self.link.as_mut() {
                     link.stream = Some(cursor);
+                    link.run = run;
                 }
                 Vec::new()
             }
@@ -1254,7 +1451,9 @@ mod tests {
         write(&board, link, download);
         assert_eq!(all(&board, link), page.bytes);
 
-        // A slow delete: still described a moment, then gone.
+        // A slow delete: still described a moment, then gone (the link counts first).
+        write(&board, link, BoardRequest::PageCount);
+        assert_eq!(all(&board, link)[..3], [0x12, 0x07, 0x04]);
         board.delay_next_delete(Duration::from_millis(200));
         write(&board, link, BoardRequest::Delete { time: page.time });
         write(&board, link, BoardRequest::OldestPage);
@@ -1398,6 +1597,257 @@ mod tests {
         assert!(pages[0].time > first.time);
         board.erase();
         assert!(board.screen().is_empty());
+    }
+
+    /// What came on the link until it went quiet: the frames of the reply characteristic and
+    /// the stream's bytes, apart.
+    fn received(board: &SimBoard, link: u64) -> (Vec<Vec<u8>>, Vec<u8>) {
+        let (mut frames, mut stream) = (Vec::new(), Vec::new());
+        while let Some((channel, data)) = next(board, link) {
+            match channel {
+                Channel::BoardData => stream.extend(data),
+                _ => frames.push(data),
+            }
+        }
+        (frames, stream)
+    }
+
+    fn describe(board: &SimBoard, link: u64) -> Option<PageInfo> {
+        write(board, link, BoardRequest::OldestPage);
+        let (frames, _) = received(board, link);
+        match BoardReply::decode(frames.last().unwrap()).unwrap() {
+            BoardReply::OldestPage(info) => info,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn count(board: &SimBoard, link: u64) -> u16 {
+        write(board, link, BoardRequest::PageCount);
+        let (frames, _) = received(board, link);
+        match BoardReply::decode(frames.last().unwrap()).unwrap() {
+            BoardReply::PageCount { count, .. } => count,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn pen(x: u16, n: usize) -> PenScript {
+        PenScript::new().near(vec![
+            Point {
+                x,
+                y: 2,
+                pressure: 300
+            };
+            n
+        ])
+    }
+
+    /// Research note §6: the open page has the long description, `previous` names the store it
+    /// replaces, and the tablet removes it once it has been downloaded; a page in the short form
+    /// stays; deleting a page that is not there does nothing.
+    #[test]
+    fn an_open_page_is_described_in_full_and_leaves_once_downloaded() {
+        let board = SimBoard::blackboard();
+        board.draw_live(pen(1, 10));
+        board.clock().advance(Duration::from_secs(1));
+        board.press_store();
+        let first = board.stored_pages()[0].clone();
+        assert_eq!(board.open_page(), Some(first.time));
+        let (link, _) = board
+            .open_link(&board.config().address, Duration::ZERO)
+            .unwrap();
+        // Asked before the count: the bare frame (measured once); after it, the page.
+        assert_eq!(describe(&board, link), None);
+        assert_eq!(board.stats().uncounted_descriptions, 1);
+        assert_eq!(count(&board, link), 1);
+        let info = describe(&board, link).unwrap();
+        assert_eq!(
+            (info.time, info.size, info.extra),
+            (first.time, 77, Some(0)),
+            "the long form, a first store"
+        );
+        write(&board, link, BoardRequest::Download { time: first.time });
+        let (_, bytes) = received(&board, link);
+        assert_eq!(bytes, first.bytes);
+        assert_eq!(count(&board, link), 0, "removed by the tablet itself");
+        assert_eq!(board.stats().removed_after_download, 1);
+        assert_eq!(board.open_page(), None);
+        write(&board, link, BoardRequest::Delete { time: first.time });
+        assert_eq!(board.stats().deletes, 0, "nothing to delete");
+
+        // The screen, not erased, written on and stored again: a page holding the whole
+        // screen, replacing the store the host took.
+        board.draw_live(pen(5, 4));
+        board.clock().advance(Duration::from_secs(1));
+        board.press_store();
+        let second = board.stored_pages()[0].clone();
+        assert!(second.bytes.starts_with(&first.bytes));
+        assert_eq!(second.bytes.len(), 77 + 35);
+        assert_eq!(describe(&board, link).unwrap().extra, Some(first.time));
+        // Erased: closed, the short form, and it stays when downloaded.
+        board.erase();
+        assert_eq!(board.open_page(), None);
+        let info = describe(&board, link).unwrap();
+        assert_eq!((info.time, info.extra), (second.time, None));
+        assert_eq!(
+            board.stats().pushed_pages,
+            1,
+            "described, then erased: pushed"
+        );
+        let (_, pushed) = received(&board, link);
+        assert!(
+            pushed.is_empty(),
+            "already taken in by the description above"
+        );
+        write(&board, link, BoardRequest::Download { time: second.time });
+        let (_, bytes) = received(&board, link);
+        assert_eq!(bytes, second.bytes);
+        assert_eq!(count(&board, link), 1, "a short-form page stays");
+        // A page stored with nothing connected and not erased is open at the next connection.
+        board.close_link(link);
+        board.draw_live(pen(9, 3));
+        board.clock().advance(Duration::from_secs(1));
+        board.press_store();
+        let (link, _) = board
+            .open_link(&board.config().address, Duration::ZERO)
+            .unwrap();
+        assert_eq!(count(&board, link), 2);
+        write(&board, link, BoardRequest::Delete { time: second.time });
+        let info = describe(&board, link).unwrap();
+        assert_eq!(info.extra, Some(0), "a first store of the new screen");
+    }
+
+    /// The six observed cases of the erase button (research note §6), and the one supposed.
+    #[test]
+    fn the_erase_button_pushes_or_loses_the_open_page_as_observed() {
+        let stored = |board: &SimBoard| {
+            board.draw_live(pen(3, 8));
+            board.clock().advance(Duration::from_secs(1));
+            board.press_store();
+            board.stored_pages().last().unwrap().clone()
+        };
+        let fresh = || {
+            let board = SimBoard::blackboard();
+            let (link, _) = board
+                .open_link(&board.config().address, Duration::ZERO)
+                .unwrap();
+            count(&board, link);
+            (board, link)
+        };
+
+        // Outside live mode, described since it was stored: pushed whole, kept closed.
+        let (board, link) = fresh();
+        let page = stored(&board);
+        received(&board, link);
+        describe(&board, link);
+        board.erase();
+        let (frames, pushed) = received(&board, link);
+        assert!(frames.is_empty(), "no frame outside live mode");
+        assert_eq!(pushed, page.bytes);
+        assert_eq!(describe(&board, link).unwrap().extra, None);
+        // Outside live mode, not described: closed, kept, nothing pushed.
+        let (board, link) = fresh();
+        stored(&board);
+        board.erase();
+        assert_eq!(
+            received(&board, link),
+            (vec![vec![0x12, 0x01, 0x09]], vec![])
+        );
+        assert_eq!((count(&board, link), board.stats().pushed_pages), (1, 0));
+
+        // In live mode, described during this live run: `11 01 0c`, then the page pushed in
+        // chunks like a download's.
+        let (board, link) = fresh();
+        write(&board, link, BoardRequest::StartLive);
+        let page = stored(&board);
+        received(&board, link);
+        describe(&board, link);
+        board.erase();
+        let mut chunks = Vec::new();
+        while let Some(item) = next(&board, link) {
+            chunks.push(item);
+        }
+        assert_eq!(chunks[0], (Channel::Command, vec![0x11, 0x01, 0x0c]));
+        let pushed: Vec<u8> = chunks[1..].iter().flat_map(|(_, d)| d.clone()).collect();
+        assert_eq!(pushed, page.bytes);
+        assert_eq!(count(&board, link), 1, "kept");
+        // In live mode, stored during this run, not described: `11 01 0c`, kept, not pushed.
+        let (board, link) = fresh();
+        write(&board, link, BoardRequest::StartLive);
+        stored(&board);
+        board.erase();
+        let (frames, _) = received(&board, link);
+        assert!(frames.contains(&vec![0x11, 0x01, 0x0c]));
+        assert_eq!((count(&board, link), board.stats().pushed_pages), (1, 0));
+        // In live mode, stored and described before this run: lost, nothing pushed (twice).
+        let (board, link) = fresh();
+        stored(&board);
+        describe(&board, link);
+        write(&board, link, BoardRequest::StartLive);
+        received(&board, link);
+        assert_eq!(count(&board, link), 1, "starting live mode removes nothing");
+        board.erase();
+        assert_eq!(count(&board, link), 0);
+        assert_eq!(
+            (board.stats().lost_pages, board.stats().pushed_pages),
+            (1, 0)
+        );
+        // Supposed: stored before this run and not described: lost all the same.
+        let (board, link) = fresh();
+        stored(&board);
+        write(&board, link, BoardRequest::StartLive);
+        board.erase();
+        assert_eq!(count(&board, link), 0);
+        // A new link does not stream until asked (live mode is not kept across connections).
+        board.close_link(link);
+        let (link, _) = board
+            .open_link(&board.config().address, Duration::ZERO)
+            .unwrap();
+        assert!(!board.is_streaming());
+        board.close_link(link);
+    }
+
+    /// Supposed (not measured): a download cut short leaves the open page; one whose rest comes
+    /// late removes it once the rest is sent.
+    #[test]
+    fn a_download_cut_short_leaves_the_open_page() {
+        let board = SimBoard::blackboard();
+        board.draw_live(pen(1, 80));
+        board.clock().advance(Duration::from_secs(2));
+        board.press_store();
+        let page = board.stored_pages()[0].clone();
+        let (link, _) = board
+            .open_link(&board.config().address, Duration::ZERO)
+            .unwrap();
+        count(&board, link);
+        board.stall_next_download(100);
+        write(&board, link, BoardRequest::Download { time: page.time });
+        assert_eq!(received(&board, link).1.len(), 100);
+        assert_eq!(board.open_page(), Some(page.time), "stalled: stays");
+        // Paced, and the link lost before the last chunk: stays.
+        board.pace_downloads(Duration::from_millis(10));
+        write(&board, link, BoardRequest::Download { time: page.time });
+        next(&board, link);
+        board.close_link(link);
+        assert_eq!(
+            board.open_page(),
+            Some(page.time),
+            "lost with the link: stays"
+        );
+        board.pace_downloads(Duration::ZERO);
+        // Its rest late: removed once the rest is sent.
+        let (link, _) = board
+            .open_link(&board.config().address, Duration::ZERO)
+            .unwrap();
+        count(&board, link);
+        board.delay_next_download(140);
+        write(&board, link, BoardRequest::Download { time: page.time });
+        received(&board, link);
+        assert_eq!(board.open_page(), Some(page.time));
+        write(&board, link, BoardRequest::Download { time: page.time });
+        let (_, bytes) = received(&board, link);
+        assert_eq!(bytes[..page.bytes.len() - 140], page.bytes[140..]);
+        assert_eq!(board.open_page(), None);
+        assert_eq!(board.stats().removed_after_download, 1);
     }
 
     #[test]

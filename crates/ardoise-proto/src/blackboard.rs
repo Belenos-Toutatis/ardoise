@@ -44,9 +44,10 @@ pub mod code {
     pub const SET_TIME: u8 = 0x07;
     /// `12 01 04` → `12 07 04 <count u16> <bytes u32>`.
     pub const PAGE_COUNT: u8 = 0x04;
-    /// `12 01 05` → `12 09 05 <time u32> <size u32>`, or `12 0d 05 <time u32> <size u32> <u32>`
-    /// for a page stored while a host was connected outside live mode, or the bare `12 01 05` on
-    /// an empty tablet.
+    /// `12 01 05` → `12 09 05 <time u32> <size u32>`, or `12 0d 05 <time u32> <size u32>
+    /// <previous u32>` for the page of a screen not erased since it was stored (the *open* page,
+    /// [`PageInfo::extra`]), or the bare `12 01 05` on an empty tablet (and when asked before any
+    /// `12 01 04` on a link: research note §6).
     pub const OLDEST_PAGE: u8 = 0x05;
     /// `12 06 03 01 <time u32>`: the page's bytes follow on the stream characteristic.
     pub const DOWNLOAD: u8 = 0x03;
@@ -309,10 +310,11 @@ pub struct PageInfo {
     /// Size of the page in bytes (a multiple of 7 in every capture).
     pub size: u32,
     /// The third number of the long description (`12 0d 05`), `None` in the short one
-    /// (`12 09 05`). The tablet gives the long one for a page stored with its button while a host
-    /// was connected outside live mode (research note §6). **Its meaning is not known**: a time 61
-    /// seconds before the page's in one journal, 0 in the others. It is only logged; the page is
-    /// asked for and deleted by its `time`, like any other.
+    /// (`12 09 05`). Measured (research note §6): the tablet gives the long form for the *open*
+    /// page, the page of a screen not erased since it was stored, whether a host was connected
+    /// or not; the number is the time of the store before this one of the same screen, 0 for the
+    /// first. **The tablet removes an open page by itself once it has been downloaded**; a page
+    /// in the short form stays until it is deleted.
     pub extra: Option<u32>,
 }
 
@@ -324,6 +326,18 @@ impl PageInfo {
             size,
             extra: None,
         }
+    }
+
+    /// The page of a screen not erased since it was stored (long description): the tablet
+    /// removes it once it has been downloaded.
+    pub fn is_open(&self) -> bool {
+        self.extra.is_some()
+    }
+
+    /// The time of the page this one replaces (an earlier store of the same screen, which this
+    /// page holds whole): `None` for a first store or a page in the short form.
+    pub fn previous(&self) -> Option<u32> {
+        self.extra.filter(|previous| *previous != 0)
     }
 }
 
@@ -455,7 +469,10 @@ impl fmt::Display for BoardReply {
                     info.size
                 )?;
                 match info.extra {
-                    Some(extra) => write!(f, ", long description, third number {extra:#010x}"),
+                    Some(0) => f.write_str(", open (screen not erased), first store"),
+                    Some(previous) => {
+                        write!(f, ", open (screen not erased), replaces {}", utc(previous))
+                    }
                     None => Ok(()),
                 }
             }
@@ -770,6 +787,31 @@ mod tests {
             "BOARD_DATA 14 bytes: 2 records, 1 touch, 1 hover"
         );
         assert_eq!(describe_stream(&[0xa1; 10]), "BOARD_DATA 10 bytes");
+        // The open page (long description): its third number is the store it replaces.
+        assert_eq!(
+            describe_reply(&bytes("12 0d 05 68 00 00 3d 00 00 06 2e 68 00 00 00")),
+            "BOARD OLDEST_PAGE stored 2025-04-16 19:08:45 UTC, 1582 bytes, open (screen not \
+             erased), replaces 2025-04-16 19:07:44 UTC"
+        );
+        assert!(
+            describe_reply(&bytes("12 0d 05 68 00 01 32 00 00 07 ee 00 00 00 00"))
+                .ends_with("open (screen not erased), first store")
+        );
+        let open = PageInfo {
+            time: 0x6800_003d,
+            size: 1582,
+            extra: Some(0x6800_0000),
+        };
+        assert!(open.is_open());
+        assert_eq!(open.previous(), Some(0x6800_0000));
+        let first = PageInfo {
+            extra: Some(0),
+            ..open
+        };
+        assert!(first.is_open());
+        assert_eq!(first.previous(), None);
+        assert!(!PageInfo::new(1, 7).is_open());
+        assert_eq!(PageInfo::new(1, 7).previous(), None);
         assert_eq!(utc(0), "1970-01-01 00:00:00 UTC");
         assert_eq!(utc(951_825_600), "2000-02-29 12:00:00 UTC");
     }
