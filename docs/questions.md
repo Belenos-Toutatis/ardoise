@@ -224,13 +224,27 @@ En construisant M18, trois comportements ont dû être fixés que le SPEC ne dit
 
 **Proposition pour le SPEC, si l'utilisateur confirme** : une phrase en §4.2 pour 1 et 2 (« Une feuille se reprend avec la tablette qui l'a écrite ; un direct reste sur la tablette avec laquelle il a commencé. »), et la précision de 3 en §4.1.
 
-## Q16 — Xiaomi : la page enregistrée pendant qu'Ardoise est connecté (2026-11-13) — **ouverte**
+## Q16 — Xiaomi : ce que les premiers essais sur la vraie tablette ont montré (2026-11-13) — **ouverte**
 
-Premiers essais de l'utilisateur avec la vraie tablette (journaux du 2026-11-13, `docs/research/xiaomi-blackboard.md` §6). Le téléchargement et l'effacement depuis le PC fonctionnent pour les pages enregistrées tablette non connectée ou pendant le mode direct. Restent quatre points.
+Premiers essais de l'utilisateur avec la vraie tablette, puis mesures faites avec lui devant la tablette (`docs/research/xiaomi-blackboard.md` §6). Le téléchargement et l'effacement depuis le PC fonctionnent. Trois comportements de la tablette, absents des captures de Mi Home, changent ce qu'Ardoise doit faire.
 
-1. **Une page enregistrée avec le bouton pendant qu'Ardoise est connecté, hors mode direct, est décrite en 12 octets au lieu de 8.** Ardoise prenait cette réponse pour une trame abîmée (« échec d'importation », trois fois sur trois). Elle est maintenant lue, et la page est demandée puis effacée par les mêmes commandes que les autres. **À mesurer** : ce téléchargement n'a jamais été vu, ni dans les captures de Mi Home ni depuis Ardoise. Ce sont des commandes observées, envoyées dans une situation qui ne l'a pas été (SPEC §4.1 : « Ardoise n'envoie à cette tablette que des commandes observées ») : essai à faire avec l'accord de l'utilisateur, sur une page d'essai (`docs/hardware-tests.md`, H8, « C ter »).
-2. **Une telle page, non récupérée, n'était plus dans la tablette à la connexion suivante** (deux fois sur deux). Ce qui l'enlève n'est pas compris. Tant que ce ne l'est pas, avec « Synchroniser automatiquement » ou « Effacer de la tablette après import » désactivé, une page enregistrée pendant qu'Ardoise est connecté risque d'être perdue. Faut-il alors le dire dans le panneau et le guide, ou proposer l'import tout de suite ?
-3. **Le troisième nombre de la description longue n'est pas compris** (une fois une heure, 61 secondes avant celle de la page ; deux fois 0). S'il désigne la version précédente du même écran, Ardoise pourrait remplacer la note précédente au lieu d'en ajouter une quand on enregistre deux fois un écran sans l'effacer.
-4. **Le bouton d'effacement pendant le direct** : la trame `11 01 0c` est prise pour son signal (reçue trois fois, seulement en direct ; la page enregistrée ensuite ne contient que ce qui a été écrit après). À confirmer par l'utilisateur, puis par l'essai D4 de H8.
+**Mesuré.**
 
-Une capture de Mi Home dans la situation du point 1 (Mi Home connecté hors miroir, bouton d'enregistrement, puis encore une fois sans effacer, puis après effacement) donnerait la réponse sûre pour les points 1 à 3.
+1. La page d'un écran **pas encore effacé** est décrite en 12 octets au lieu de 8 (Ardoise la refusait : « échec d'importation » à chaque fois ; corrigé). Le troisième nombre est l'heure du précédent enregistrement du même écran.
+2. **La tablette retire d'elle-même une telle page dès qu'elle est téléchargée**, sans attendre l'ordre d'effacement. C'est le cas courant : on écrit, on enregistre, on synchronise sans avoir effacé l'écran.
+3. Enregistrer de nouveau un écran non effacé remplace sa page par une page qui contient tout l'écran.
+4. Le bouton d'effacement, pendant le direct, envoie `11 01 0c` (Ardoise passe à une nouvelle page ; corrigé). Il peut aussi faire **envoyer toute la page** par la tablette sur le canal du tracé, ou la faire **disparaître** : une page enregistrée avant le direct et pas encore récupérée a été perdue quand l'écran a été effacé pendant le direct (deux fois).
+5. La tablette ne reste pas en mode direct après une coupure de la liaison.
+
+**À faire dans Ardoise** (dans le sens du SPEC, sans le modifier).
+
+- a. Ne jamais laisser tomber les octets d'une page que la tablette a retirée : si la note ne peut pas être écrite ou vérifiée, ou si le transfert est douteux, garder une copie de secours et la reprendre à la synchronisation suivante. Aujourd'hui ces cas supposent que la page est restée dans la tablette, ce qui est faux pour ces pages.
+- b. Pendant le direct, ne pas tracer une page que la tablette renvoie à l'effacement (elle arrive par gros paquets, que le stylet ne produit jamais).
+- c. Avant de lancer un direct, récupérer les pages de la tablette quand la synchronisation automatique et l'effacement après import sont activés.
+
+**À décider par l'utilisateur.**
+
+- d. Quand « Synchroniser automatiquement » ou « Effacer de la tablette après import » est désactivé et que la tablette contient des pages : lancer le direct quand même, avec un avertissement (effacer l'écran pendant le direct peut faire perdre la page de l'écran en cours), ou demander d'abord de les importer ?
+- e. Quand un écran est enregistré une seconde fois sans avoir été effacé, la nouvelle page contient l'ancienne : ajouter une seconde note (comportement actuel, rien n'est jamais remplacé), ou mettre à jour la première note si elle n'a pas été modifiée entre-temps ? La tablette donne l'heure de la version précédente, ce qui permet de la reconnaître.
+
+**Pas encore mesuré** : une page dont le téléchargement est coupé en route est-elle retirée quand même ; un transfert s'arrête-t-il quand la liaison se ferme ; un appui sur le bouton d'enregistrement avec un écran vide ; ce que devient la page d'un écran non effacé quand on éteint la tablette ; l'unité (une règle).

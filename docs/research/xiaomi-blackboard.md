@@ -9,9 +9,10 @@ State on 2026-11-12: the tablet's own commands, its live pen samples and its sto
 download of stored pages is known from a capture of Mi Home and has not been replayed from the PC yet
 (section 5).
 
-State on 2026-11-13: Ardoise drives the tablet. The download and the deletion of stored pages work from the PC;
-two things Mi Home's captures did not show were met at once (section 6): a longer description for a page stored
-while the application is connected, and the frame of the erase button.
+State on 2026-11-13: Ardoise drives the tablet. The download and the deletion of stored pages work from the PC.
+What Mi Home's captures did not show was met at once, then measured with the user at the tablet (section 6): the
+page of a screen not erased yet has a longer description and leaves the tablet as soon as it is downloaded; the
+erase button has a frame in live mode, can push that page to the host, and can lose it.
 
 Conventions: hex bytes are written `12 01 09`. "(measured)" was observed on the user's own tablet with
 `cargo run -p ardoise-ble --example survey`. "(reported)" comes from a public source and was not verified by us.
@@ -184,10 +185,9 @@ an empty tablet was measured from the PC.)
 ## 5. Open questions, in the order that decides feasibility
 
 1. Do the download and the deletion of a page work from the PC without the Xiaomi login, as the other commands
-   do? **Yes** for the pages stored while no host is connected or during live mode (section 6). Open for a page
-   stored while a host is connected outside live mode, which the tablet describes otherwise.
-2. What does the tablet's erase button send? `11 01 0c` in live mode (section 6, inferred). An empty tablet
-   answers the bare `12 01 05`.
+   do? **Yes** (section 6); the page of a screen not erased yet is removed by the tablet itself once downloaded.
+2. What does the tablet's erase button send? `11 01 0c` in live mode, nothing outside it; it can also push or
+   lose the page of the erased screen (section 6). An empty tablet answers the bare `12 01 05`.
 3. The exact unit of the coordinates (a ruler). The live stream goes on when a page is stored (section 6).
 4. Does the tablet accept two clients, or does a PC connection keep Mi Home out (and the reverse)? While the
    phone was connected, the PC did not hear the tablet.
@@ -196,34 +196,71 @@ Answered: the commands, the live samples and the stored pages are in clear; the 
 tried so far from a client that has not logged in on `fe95`; a stored page is a run of live records (section 3).
 Both the live mode and the import of stored pages are feasible, the second subject to question 1.
 
-## 6. Sessions of Ardoise with the real tablet (measured, 2026-11-13)
+## 6. Sessions with the real tablet (measured, 2026-11-13)
 
-From the diagnostic logs of the first sessions of Ardoise with the user's tablet (five logs over eleven minutes,
-kept outside git). Ardoise wrote nothing to `fe95` and sent only the frames of section 3.
+Two sources: the diagnostic logs of the first sessions of Ardoise with the user's tablet, and runs of
+`survey -- send` with the user at the tablet, pressing its buttons when asked (records kept outside git). Nothing
+was written to `fe95`, and only the frames of section 3 were sent.
 
-- **The download and the deletion work from the PC.** Four pages (1 771 to 20 769 bytes) were described
-  (`12 09 05`), downloaded, written as notes and deleted; the count then read 0. The 20 769 bytes of the
-  largest came in 1.3 s; a page deleted is gone when the next request is answered, about 50 ms later. These pages
-  had been stored while no host was connected, or during live mode.
-- **A page stored during live mode holds what was streamed**: its 20 769 bytes are, to the byte, the records
-  streamed between the frame `11 01 0c` below and the press of the store button. The store button does not
-  interrupt the stream.
-- **A longer page description.** A page stored with the button while Ardoise was connected outside live mode is
-  described by `12 0d 05 <time u32> <size u32> <u32>`: 12 bytes instead of 8. Three times out of three; the page
-  count counts such a page. The third number was once a time 61 s before the page's (33 s before the connection
-  itself), and twice 0: **its meaning is not known**. Ardoise took the frame for malformed and stopped there, so
-  whether such a page is downloaded and deleted by the same two commands is **not measured yet**.
-- **Such a page did not stay on the tablet.** The first (1 582 bytes) was gone at the next connection, three
-  minutes later: the tablet then held one page, stored during the live mode that had followed. The second was not
-  among the pages found four minutes after it, all stored after the application had closed. What removes such a
-  page (the erase button, the next press of the store button, live mode, the end of the connection) is not known;
-  until it is, a page stored while the application is connected must be taken at once.
-- **The erase button sends `11 01 0c`** in live mode (inferred): the frame came three times, never outside live
-  mode, and the page stored after one of them holds only what was written after it, although the screen had been
-  stored with other strokes before. Nothing tells that the button was pressed outside live mode.
-- The tablet sends its battery level unasked when it changes (`11 02 01 50`).
-- The link was lost twice during live mode (9 s after a press of the store button, 2 s after `11 01 0c`); the
-  tablet was found again in under 2 s and connected in 2 to 3 s. Cause not known.
+### What works as in Mi Home's captures
+
+- **The download and the deletion work from the PC**, without the Xiaomi login. A page of 20 769 bytes came in
+  1.3 s; a deleted page is gone when the next request is answered, about 50 ms later. A page downloaded from the PC
+  is, byte for byte, the live stream recorded while it was being written.
+- Deleting a page that is not there does nothing: no reply, the count unchanged.
+- The count and the description are answered during live mode.
+- The tablet's clock, set at each connection by Ardoise, was right an hour later.
+- The tablet sends its battery level unasked when it changes (`11 02 01 <per cent>`).
+
+### `12 01 05` wants `12 01 04` first
+
+Asked first on a connection, `12 01 05` answered the bare frame although a page was stored; after a `12 01 04`
+on the same connection it described the page (one observation). Mi Home always counts first, and so does Ardoise.
+
+### The open page: a longer description, and a page that leaves on its own
+
+A stored page whose screen has not been erased since (the *open* page) is described by
+`12 0d 05 <time u32> <size u32> <previous u32>`: 12 bytes instead of 8.
+
+- A host need not be connected: a page stored with nothing connected and not erased is described that way at the
+  next connection, and keeps that form from one connection to the next. Pages stored during live mode are open
+  pages too.
+- `previous` is the time of the store before this one of the same screen, 0 for the first. Pressing the store
+  button again on a screen that was not erased replaces its page by one holding the whole screen, with a new time
+  (917 bytes, then 1 694: the 917 and the 777 written since).
+- **The tablet removes an open page once it has been downloaded.** After `12 06 03 01 <time>` and the page's
+  bytes, the count read 0 with nothing else sent, and still 0 at the next connection (three times out of three). A
+  page described in the short form stays until it is deleted (downloaded three times in a row, still there).
+- So `previous` can be the time of a page the host already took: the host can tell that the new page replaces it.
+
+### The erase button
+
+- Outside live mode it sends no frame. In live mode it sends `11 01 0c` (five times out of five).
+- It closes the open page: its description is the short one from then on, and it stays until it is deleted.
+- **It can push the page.** When the page of the erased screen had been described to the host since it was stored,
+  the tablet sent the whole page on the stream characteristic at once, unasked: 917 bytes outside live mode;
+  1 694 bytes during live mode, right after `11 01 0c`, in chunks like a download's (live notifications hold six
+  records at most). When the page had not been described (Ardoise does not ask during live mode), nothing was
+  pushed.
+- **It can lose the page.** A page stored before live mode started, and described then, was gone once the screen
+  was erased during live mode, nothing pushed (twice: in Ardoise's own sessions, then on purpose). Starting live
+  mode did not remove it. With six cases the tablet's rule is not established; what is, is that an open page not
+  fetched before live mode can be lost there.
+
+### Live mode and the link
+
+- A new connection is silent until `12 02 08 01`: after a link closed without `12 02 08 02`, the tablet sent
+  nothing for 15 s while the user was writing, and streamed again once asked. It does not keep live mode across
+  connections.
+- Records can still arrive within 100 ms of `12 02 08 02` (five records once).
+- The link was lost twice during live mode in Ardoise's sessions (cause not known); the tablet was found again in
+  under 2 s and connected in 2 to 3 s.
+
+### Still not measured
+
+Whether an open page whose download is cut short is removed all the same; whether a transfer stops when the link
+closes; a press of the store button with an empty screen; what switching the tablet off does to an open page; the
+unit (a ruler).
 
 ## 7. Method
 

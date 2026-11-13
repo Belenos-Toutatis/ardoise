@@ -517,9 +517,13 @@ when nothing failed.
 - First sessions with the real tablet on 2026-11-13 (research note §6): the download and the deletion work from the
   PC; the erase button sends `11 01 0c` in live mode; a page stored while the application is connected outside live
   mode is described in a longer form (`12 0d 05`, `PageInfo::extra`), which the sync took for a malformed frame.
-  The long form is now read; **whether such a page is downloaded and deleted like the others is still to measure**,
-  and what the tablet does of one that is not taken (two were gone at the next connection). Since the store button
-  can replace a page without changing the count, the "page stored" event alone starts the automatic sync when a page
+  The long form is now read. Measured since with the user at the tablet (research note §6): that form is the page
+  of a screen not erased yet; **the tablet removes such a page as soon as it is downloaded**, so the sync must never
+  drop its bytes (to do: a rescue copy when the note cannot be written or the transfer is doubtful; today those
+  paths assume the page stayed on the tablet); the erase button can push the page on the stream during live mode
+  (to do: such bytes are not pen records) and can lose a page not fetched before live mode (to do: sync before
+  live mode when allowed). `docs/questions.md` Q16 lists what is to do and to decide. Since the store button can
+  replace a page without changing the count, the "page stored" event alone starts the automatic sync when a page
   is there. Still to measure at H8: the unit (ruler), whether Windows delivers 244-byte notifications whole (the
   count does not depend on it), whether the blackboard drops a silent link (the link was lost twice during live
   mode, cause unknown).

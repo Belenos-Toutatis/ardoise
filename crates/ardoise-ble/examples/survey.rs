@@ -15,9 +15,12 @@
 //!   notifications" descriptors.
 //! - `send` connects to `ADDRESS`, enables the notifications of the service that holds `CHARACTERISTIC` (a
 //!   UUID, or its 16-bit form), then runs the steps in order and prints every notification received
-//!   meanwhile. A step is a frame to write to the characteristic, in hexadecimal (`120104`), or a pause in
-//!   seconds (`wait:20`). It writes exactly the frames given, nothing else: only frames whose meaning is known
-//!   (seen in a capture of the vendor's application) belong on its command line.
+//!   meanwhile. A step is a frame to write to the characteristic, in hexadecimal (`120104`), a pause in
+//!   seconds (`wait:20`), or a wait for a notification that starts with given bytes, for so many seconds at
+//!   most (`until:120109:90`: until the "page stored" event). In a frame, `{time}` stands for the four bytes
+//!   that follow `12 xx 05` in the last page description received (`12060301{time}`); such a frame is skipped
+//!   when no page was described. It writes exactly the frames given, nothing else: only frames whose meaning is
+//!   known (seen in a capture of the vendor's application) belong on its command line.
 //!
 //! `--out FILE` also records one JSON object per line. That file holds Bluetooth addresses: keep it
 //! out of git (`testdata/private/`).
@@ -64,8 +67,28 @@ enum Command {
 enum Step {
     /// Write this frame to the characteristic.
     Write(Vec<u8>),
+    /// Write these bytes, the time of the page described last, then these bytes.
+    WriteTimed(Vec<u8>, Vec<u8>),
     /// Only listen, for this many seconds.
     Wait(u64),
+    /// Listen until a notification starts with these bytes, for this many seconds at most.
+    Until(Vec<u8>, u64),
+}
+
+/// The bytes of `word`, written in hexadecimal (`_` allowed between bytes); `None` when it is not.
+fn hex_bytes(word: &str) -> Option<Vec<u8>> {
+    let digits: Vec<u8> = word.bytes().filter(|b| *b != b'_').collect();
+    if !digits.len().is_multiple_of(2) {
+        return None;
+    }
+    digits
+        .chunks(2)
+        .map(|pair| {
+            std::str::from_utf8(pair)
+                .ok()
+                .and_then(|text| u8::from_str_radix(text, 16).ok())
+        })
+        .collect()
 }
 
 impl Step {
@@ -76,20 +99,28 @@ impl Step {
                 .map(Self::Wait)
                 .map_err(|_| format!("not a number of seconds: {seconds}"));
         }
-        let digits: Vec<u8> = word.bytes().filter(|b| *b != b'_').collect();
-        if digits.is_empty() || !digits.len().is_multiple_of(2) {
-            return Err(format!("not a frame in hexadecimal: {word}"));
+        if let Some(rest) = word.strip_prefix("until:") {
+            let wrong = || format!("not until:BYTES:SECONDS: {word}");
+            let (prefix, seconds) = rest.split_once(':').ok_or_else(wrong)?;
+            let prefix = hex_bytes(prefix)
+                .filter(|p| !p.is_empty())
+                .ok_or_else(wrong)?;
+            return Ok(Self::Until(prefix, seconds.parse().map_err(|_| wrong())?));
         }
-        digits
-            .chunks(2)
-            .map(|pair| {
-                std::str::from_utf8(pair)
-                    .ok()
-                    .and_then(|text| u8::from_str_radix(text, 16).ok())
-            })
-            .collect::<Option<Vec<u8>>>()
+        let wrong = || format!("not a frame in hexadecimal: {word}");
+        if let Some((before, after)) = word.split_once("{time}") {
+            let before = hex_bytes(before)
+                .filter(|b| !b.is_empty())
+                .ok_or_else(wrong)?;
+            return Ok(Self::WriteTimed(
+                before,
+                hex_bytes(after).ok_or_else(wrong)?,
+            ));
+        }
+        hex_bytes(word)
+            .filter(|frame| !frame.is_empty())
             .map(Self::Write)
-            .ok_or_else(|| format!("not a frame in hexadecimal: {word}"))
+            .ok_or_else(wrong)
     }
 }
 
@@ -635,33 +666,79 @@ mod windows_impl {
 
         let mut count = 0usize;
         let mut open = true;
+        // The time of the page described last (`12 xx 05 <time> ...`), for `{time}`.
+        let mut page_time: Option<[u8; 4]> = None;
         for step in steps {
-            let pause = match step {
-                Step::Write(frame) => {
-                    record.line(
-                        &format!("-> {}  [{}]", short(target), hex(frame)),
-                        json!({"type": "write", "uuid": short(target), "hex": hex(frame)}),
-                    );
-                    timeout(STEP, peripheral.write(command, frame, write_type))
-                        .await
-                        .map_err(|_| "the write timed out".to_owned())?
-                        .map_err(|e| format!("the write failed: {e}"))?;
-                    Duration::from_millis(600)
-                }
-                Step::Wait(seconds) => Duration::from_secs(*seconds),
+            let frame = match step {
+                Step::Write(frame) => Some(frame.clone()),
+                Step::WriteTimed(before, after) => match page_time {
+                    Some(time) => Some([before.as_slice(), &time, after.as_slice()].concat()),
+                    None => {
+                        record.line(
+                            &format!(
+                                "skipped (no page described): {}{{time}}{}",
+                                hex(before),
+                                hex(after)
+                            ),
+                            json!({"type": "skipped"}),
+                        );
+                        continue;
+                    }
+                },
+                Step::Wait(_) | Step::Until(..) => None,
             };
+            if let Some(frame) = &frame {
+                record.line(
+                    &format!("-> {}  [{}]", short(target), hex(frame)),
+                    json!({"type": "write", "uuid": short(target), "hex": hex(frame)}),
+                );
+                timeout(STEP, peripheral.write(command, frame, write_type))
+                    .await
+                    .map_err(|_| "the write timed out".to_owned())?
+                    .map_err(|e| format!("the write failed: {e}"))?;
+            }
+            let (pause, awaited) = match step {
+                Step::Write(_) | Step::WriteTimed(..) => (Duration::from_millis(600), None),
+                Step::Wait(seconds) => (Duration::from_secs(*seconds), None),
+                Step::Until(prefix, seconds) => (Duration::from_secs(*seconds), Some(prefix)),
+            };
+            if let Some(prefix) = awaited {
+                record.line(
+                    &format!(
+                        "waiting for [{}], {} s at most",
+                        hex(prefix),
+                        pause.as_secs()
+                    ),
+                    json!({"type": "waiting", "hex": hex(prefix)}),
+                );
+            }
             let deadline = tokio::time::Instant::now() + pause;
             while open {
                 tokio::select! {
-                    () = tokio::time::sleep_until(deadline) => break,
+                    () = tokio::time::sleep_until(deadline) => {
+                        if awaited.is_some() {
+                            record.line("not received in time", json!({"type": "timeout"}));
+                        }
+                        break;
+                    }
                     notification = notifications.next() => match notification {
                         Some(notification) => {
                             count += 1;
                             let uuid = short(notification.uuid);
+                            let value = &notification.value;
                             record.line(
-                                &format!("<- {uuid}  [{}]", hex(&notification.value)),
-                                json!({"type": "notification", "uuid": uuid, "hex": hex(&notification.value)}),
+                                &format!("<- {uuid}  [{}]", hex(value)),
+                                json!({"type": "notification", "uuid": uuid, "hex": hex(value)}),
                             );
+                            if let [0x12, _, 0x05, rest @ ..] = value.as_slice() {
+                                page_time = match rest {
+                                    [t0, t1, t2, t3, ..] => Some([*t0, *t1, *t2, *t3]),
+                                    _ => None,
+                                };
+                            }
+                            if awaited.is_some_and(|prefix| value.starts_with(prefix)) {
+                                break;
+                            }
                         }
                         None => open = false,
                     },
@@ -909,6 +986,24 @@ mod tests {
         assert!(Command::parse(&words("send 00:00:5E:00:53:01 2a00 0a0")).is_err());
         assert!(Command::parse(&words("send 00:00:5E:00:53:01 2a00 zz")).is_err());
         assert!(Command::parse(&words("send 00:00:5E:00:53:01 2a00 wait:soon")).is_err());
+        assert_eq!(
+            Step::parse("until:12_01_09:90"),
+            Ok(Step::Until(vec![0x12, 0x01, 0x09], 90))
+        );
+        assert_eq!(
+            Step::parse("12060301{time}"),
+            Ok(Step::WriteTimed(vec![0x12, 0x06, 0x03, 0x01], Vec::new()))
+        );
+        for wrong in [
+            "until:1201",
+            "until::5",
+            "until:12:soon",
+            "{time}",
+            "1{time}",
+            "",
+        ] {
+            assert!(Step::parse(wrong).is_err(), "{wrong}");
+        }
         assert!(Command::parse(&words("gatt")).is_err());
         assert!(Command::parse(&words("scan soon")).is_err());
         assert!(Command::parse(&words("scan 1 2")).is_err());
