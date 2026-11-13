@@ -2,6 +2,7 @@
 // The simulated Xiaomi blackboard of the mock (M18, docs/design/blackboard.md §5).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from './api';
+import { BOARD_POSITIONS, boardPage, drawingTurns, type BoardPosition } from './board-position';
 import { catalogs } from './i18n.svelte';
 import { mockLibrary, resetMockLibrary } from './mock-data';
 import { mockTablet, resetMockTablet } from './mock-tablet';
@@ -164,6 +165,61 @@ describe('mock blackboard: syncing', () => {
     expect(created[1] - created[0]).toBeGreaterThan(86_000_000);
   });
 
+  it.each(BOARD_POSITIONS)('turns the pages upright for the position %s, landscape on the side', async (position) => {
+    await api.tabletSetOptions({ ...OPTIONS, boardPosition: position });
+    const before = mockLibrary().notes.size;
+    await addBoard();
+    await beat(1.5 + 0.5 + 3);
+    const notes = [...mockLibrary().notes.values()].map((entry) => entry.note).slice(before);
+    expect(notes).toHaveLength(3);
+    const wide = drawingTurns(position) % 2 === 1;
+    for (const note of notes) {
+      expect(note.page).toEqual(wide ? { width: 27200, height: 20500 } : { width: 20500, height: 27200 });
+      expect(note.page).toEqual(boardPage(position));
+      // Every point stays on the page (a turned point that fell outside would be a wrong turn).
+      for (const point of note.strokes.flatMap((s) => s.points)) {
+        expect(point.x).toBeGreaterThanOrEqual(0);
+        expect(point.x).toBeLessThanOrEqual(note.page.width);
+        expect(point.y).toBeGreaterThanOrEqual(0);
+        expect(point.y).toBeLessThanOrEqual(note.page.height);
+      }
+    }
+  });
+
+  it('turns the strokes as the position says: the first corner of the square goes where the Rust side puts it', async () => {
+    // Page 1 starts with a square whose first point is (3000, 3000) on the Slate; on the blackboard (x × 0.7, y × 1.2):
+    // (2100, 3600) in the tablet's frame (20 500 × 27 200), then turned clockwise by the quarter turns of the position.
+    const expected: Record<BoardPosition, [number, number]> = {
+      buttonsBottom: [2100, 3600],
+      buttonsLeft: [27200 - 3600, 2100],
+      buttonsTop: [20500 - 2100, 27200 - 3600],
+      buttonsRight: [3600, 20500 - 2100],
+    };
+    for (const position of BOARD_POSITIONS) {
+      resetMockLibrary();
+      resetMockTablet();
+      mockTablet.inRange = false;
+      await api.tabletSetOptions({ ...OPTIONS, boardPosition: position });
+      const before = mockLibrary().notes.size;
+      await addBoard();
+      await beat(1.5 + 0.5 + 3);
+      const first = [...mockLibrary().notes.values()].map((entry) => entry.note).slice(before)[0].strokes[0].points[0];
+      expect([first.x, first.y], position).toEqual(expected[position].map((v) => expect.closeTo(v, 5)));
+    }
+  });
+
+  it('takes the position in force when the sync starts for all its pages', async () => {
+    await api.tabletSetOptions({ ...OPTIONS, boardPosition: 'buttonsLeft' });
+    const before = mockLibrary().notes.size;
+    await addBoard();
+    await beat(1.5 + 0.5 + 1);
+    await api.tabletSetOptions({ ...OPTIONS, boardPosition: 'buttonsBottom' });
+    await beat(3);
+    const notes = [...mockLibrary().notes.values()].map((entry) => entry.note).slice(before);
+    expect(notes).toHaveLength(3);
+    for (const note of notes) expect(note.page).toEqual({ width: 27200, height: 20500 });
+  });
+
   it('counts the pages down one by one', async () => {
     await addBoard();
     await beat(1.5 + 0.5 + 0.7);
@@ -297,6 +353,7 @@ describe('every error code of the second tablet has its text in both languages',
     'blackboardConfirmDelete',
     'pageUnreadable',
     'sheetOtherTablet',
+    'sheetBoardPosition',
   ])('%s', (code) => {
     for (const locale of ['fr', 'en'] as const) {
       const text = (catalogs[locale].errorCodes as Record<string, string>)[code];

@@ -18,8 +18,8 @@ import type { InkPoint } from './ink';
 import { UNHANDLED, fileName, freshStamp, mockLibrary, notifyLibraryChanged } from './mock-data';
 import { failure, freePath, mockLibraryInvoke } from './mock-library';
 import type { Note, Stroke, TabletInfo } from './note';
-import { mockLiveBoardConnected, setMockLiveGate, setMockLiveOrientation, setMockLiveTablet } from './mock-live';
-import { DEFAULT_BOARD_POSITION, isBoardPosition } from './board-position';
+import { mockLiveBoardConnected, setMockLiveBoardPosition, setMockLiveGate, setMockLiveOrientation, setMockLiveTablet } from './mock-live';
+import { boardPage, DEFAULT_BOARD_POSITION, drawingTurns, isBoardPosition, type BoardPosition } from './board-position';
 import { isOrientation, pageSizeFor, quarterTurns, turnStrokes, type Orientation } from './orientation';
 import type {
   Connection,
@@ -114,6 +114,7 @@ export function resetMockTablet(): void {
   if (sim) for (const timer of sim.timers) clearTimeout(timer);
   sim = null;
   setMockLiveOrientation('landscape');
+  setMockLiveBoardPosition(DEFAULT_BOARD_POSITION);
   setMockLiveTablet(null);
   mockTablet.stepMs = 1000;
   mockTablet.autoPress = true;
@@ -387,12 +388,17 @@ function pageStrokes(page: number): Stroke[] {
   }
 }
 
-/** A blackboard page: the same drawings, fitted to its portrait page (never turned). */
-function boardStrokes(page: number): Stroke[] {
-  return pageStrokes(page).map((s) => ({
+/**
+ * A blackboard page: the same drawings, fitted to its portrait page in the tablet's own frame, then turned for the
+ * position it is held in so that they are upright (`pages::orient_board`: `buttonsLeft` a quarter turn clockwise,
+ * `buttonsTop` half a turn, `buttonsRight` three), on the page of that position (`boardPage`).
+ */
+function boardStrokes(page: number, position: BoardPosition): Stroke[] {
+  const upright = pageStrokes(page).map((s) => ({
     ...s,
     points: s.points.map((p) => ({ ...p, x: p.x * 0.7, y: p.y * 1.2 })),
   }));
+  return turnStrokes(upright, BOARD_PAGE.width, BOARD_PAGE.height, drawingTurns(position));
 }
 
 /** The strokes of a tablet page turned to the way the tablet is held (as `pages::orient`). */
@@ -400,8 +406,11 @@ function orient(strokes: Stroke[], width: number, height: number, orientation: O
   return turnStrokes(strokes, width, height, quarterTurns(orientation));
 }
 
-/** `age`: how long ago the blackboard stored the page, in days (its notes are dated by the page). */
-function writeNote(s: Sim, page: number, kind: TabletKind, age = 0): string {
+/**
+ * `age`: how long ago the blackboard stored the page, in days (its notes are dated by the page). `position`: how the
+ * blackboard was held when the sync started, for all its pages (as `SyncRun::context`).
+ */
+function writeNote(s: Sim, page: number, kind: TabletKind, age = 0, position: BoardPosition = s.status.options.boardPosition): string {
   const info = s.status.registered ?? { ...A4 };
   const board = kind === 'blackboard';
   const now = Date.now();
@@ -411,12 +420,12 @@ function writeNote(s: Sim, page: number, kind: TabletKind, age = 0): string {
     title: '',
     created,
     modified: created,
-    page: board ? { ...BOARD_PAGE } : pageSizeFor(s.status.options.orientation, info.width, info.height),
+    page: board ? boardPage(position) : pageSizeFor(s.status.options.orientation, info.width, info.height),
     background: { paper: 'white', template: 'blank', texture: false },
     tags: [],
     layers: [{ name: 'Calque 1', visible: true }],
     strokes: board
-      ? boardStrokes(page)
+      ? boardStrokes(page, position)
       : orient(pageStrokes(page), info.width, info.height, s.status.options.orientation),
     timing: board ? 'synthesized' : 'recorded',
     origin: { kind: 'tablet' },
@@ -437,6 +446,7 @@ function startSync(s: Sim): void {
   // that one is deleted. Without deletion a sync of the Slate therefore reads one page; the
   // blackboard's sync always deletes (it is the only way to its next page).
   const deletes = board || s.status.options.deleteAfterImport;
+  const position = s.status.options.boardPosition;
   const waiting = board ? s.boardStored : s.stored;
   const pages = deletes ? [...waiting] : waiting.slice(0, 1);
   const saved: string[] = [];
@@ -468,7 +478,7 @@ function startSync(s: Sim): void {
       const page = pages[index];
       // A page kept on the Slate earlier is not written twice.
       if (board || !s.imported.has(page)) {
-        saved.push(writeNote(s, page, kind, board ? pages.length - index : 0));
+        saved.push(writeNote(s, page, kind, board ? pages.length - index : 0, position));
         if (!board) s.imported.add(page);
       }
       if (deletes) {
@@ -758,6 +768,7 @@ export function mockTabletInvoke(command: string, args: Record<string, unknown>)
       }
       update(s, { options: { ...options } });
       setMockLiveOrientation(options.orientation);
+      setMockLiveBoardPosition(options.boardPosition);
       return structuredClone(s.status);
     }
 

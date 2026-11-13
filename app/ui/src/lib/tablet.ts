@@ -28,7 +28,7 @@ export type { Orientation };
 
 /**
  * How the Xiaomi blackboard is held: where its two buttons (erase, store) are. Held upright, they are at the bottom
- * (the default). Contract: docs/design/blackboard.md §10.
+ * (the default). The interface: docs/design/blackboard.md §10; what Rust does with it: §11.
  */
 export type BoardPosition = 'buttonsBottom' | 'buttonsTop' | 'buttonsRight' | 'buttonsLeft';
 
@@ -42,7 +42,10 @@ export interface TabletOptions {
   deleteAfterImport: boolean;
   /** How the Slate is held (four positions; the live window switches it too). The blackboard's is `boardPosition`. */
   orientation: Orientation;
-  /** How the blackboard is held (four positions). Absent from an older Rust side: read it with `boardPositionOf`. */
+  /**
+   * How the blackboard is held (four positions; `[tablet] board_position` in the settings file). Rust refuses options
+   * without it; a status without it (an older Rust side) is read with `boardPositionOf`.
+   */
   boardPosition: BoardPosition;
   button: LiveButton;
 }

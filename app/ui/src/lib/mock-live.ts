@@ -68,6 +68,15 @@ import { fileName, freshStamp, mockLibrary, notePath, notifyLibraryChanged, same
 import { backgroundDataUrl } from './mock-notes';
 import type { Background, BackgroundImage, FileStamp, Note, PageSize, Paper, Rgba, Stroke } from './note';
 import { isPortrait, orientPoint, pageSizeFor, turnPoint, turnsFrom, turnStrokes, type Orientation } from './orientation';
+import {
+  BOARD_PAGE,
+  boardPage,
+  boardRunOrientation,
+  DEFAULT_BOARD_POSITION,
+  isBoardPage,
+  isLandscapePosition,
+  type BoardPosition,
+} from './board-position';
 
 /** Pace of the stand-in; tests change it (and `resetMockLive` restores it). */
 export const mockLiveConfig = {
@@ -106,6 +115,8 @@ type PenSample = { kind: 'down'; x: number; y: number; p: number } | { kind: 'ho
 class PenScript {
   private seed = 0x2545f491;
   private queue: PenSample[] = [];
+  /** The tablet's area: the pen stays inside it. */
+  constructor(private readonly area: { width: number; height: number } = PAGE) {}
   private x = 2000;
   private y = 3000;
   private strokes = 0;
@@ -134,10 +145,10 @@ class PenScript {
   /** The next stroke and how the pen gets there. */
   private plan(): void {
     const length = Math.round(this.between(1500, 4000));
-    if (this.x + length > PAGE.width - 2000) {
+    if (this.x + length > this.area.width - 2000) {
       this.x = 2000;
       this.y += 1800;
-      if (this.y > PAGE.height - 1500) this.y = 3000;
+      if (this.y > this.area.height - 1500) this.y = 3000;
     }
     this.strokes += 1;
     if (this.strokes % 6 === 0) {
@@ -198,6 +209,12 @@ interface Session {
   /** Record at which each page was created (its `created` instant). */
   pageStart: Map<string, number>;
   pen: PenScript;
+  /**
+   * The blackboard's position for this run, as the Slate's word for the same quarter turns: taken when the run starts
+   * (the tablet connects) and kept to its end, a change of `boardPosition` in between applies to the next run
+   * (docs/design/blackboard.md §11). Null for a Slate run, whose orientation is the setting and may change.
+   */
+  run: Orientation | null;
   /** What can be undone on each page, by note id. */
   histories: Map<string, PageHistory>;
   /** The sheets resumed (M12), by note id. */
@@ -299,6 +316,23 @@ let pageCounter = 0;
 let lastRevision = 0;
 /** How the (simulated) tablet is held; the real one is `[tablet] orientation`. */
 let heldAs: Orientation = 'landscape';
+/** How the (simulated) blackboard is held (`[tablet] board_position`): a run takes it when it starts. */
+let boardPosition: BoardPosition = DEFAULT_BOARD_POSITION;
+
+/** The blackboard is held another way (`tablet_set_options`): the next run takes it, one under way keeps its own. */
+export function setMockLiveBoardPosition(position: BoardPosition): void {
+  boardPosition = position;
+}
+
+/** What a run that starts now with the blackboard has: its page held as the position says (`Started`). */
+function boardRunStart(): Orientation {
+  return boardRunOrientation(boardPosition);
+}
+
+/** The area the points of a session arrive in, and how it is held: the blackboard's run, or the Slate's setting. */
+function frameOf(s: Session | null): { area: { width: number; height: number }; held: Orientation } {
+  return s?.run ? { area: BOARD_PAGE, held: s.run } : { area: PAGE, held: heldAs };
+}
 /** The tablet connected (`status.active` of the mock tablet); null when none is, or it is not known. */
 let activeTablet: 'slate' | 'blackboard' | null = null;
 
@@ -307,9 +341,32 @@ export function setMockLiveTablet(kind: 'slate' | 'blackboard' | null): void {
   activeTablet = kind;
   // As in Rust: a session takes the kind of the tablet that first connects, and keeps it while it reconnects.
   if (session && session.tablet === null && kind !== null) {
-    session.tablet = kind;
+    const s = session;
+    s.tablet = kind;
+    if (kind === 'blackboard') startBoardRun(s);
+    // A resumed sheet that tablet cannot write on ends the run at once (`refused`, `LiveSession::refusal`).
+    // (Quarter turns of an odd count are the landscape positions of the blackboard: `isPortrait` counts the turns.)
+    const landscape = s.run !== null && isPortrait(s.run);
+    const refusal = s.pages.filter((page) => s.resumed.has(page.id)).map((page) => sheetRefusal(kind, page.page, landscape)).find((code) => code !== null);
+    if (refusal) {
+      mockLiveRefuse(refusal, 'the tablet cannot write on this sheet');
+      return;
+    }
     broadcastSnapshot();
   }
+}
+
+/** The blackboard connected to a run that was waiting for it: the run takes the position set now, and the pages its size. */
+function startBoardRun(s: Session): void {
+  s.run = boardRunStart();
+  s.pen = new PenScript(BOARD_PAGE);
+  for (const page of s.pages) {
+    // A sheet resumed keeps its own size (it was accepted or refused by it); a blank page takes the run's.
+    if (s.resumed.has(page.id) || page.strokes.length > 0) continue;
+    page.page = pageSizeFor(s.run, BOARD_PAGE.width, BOARD_PAGE.height);
+    pageOrientation.set(page.id, s.run);
+  }
+  s.view = { ...s.view, x: s.pages[s.pageIndex].page.width / 2, y: s.pages[s.pageIndex].page.height / 2 };
 }
 
 /**
@@ -350,11 +407,25 @@ export function mockLiveBoardConnected(): void {
   else mockLiveRefuse('blackboardPagesFirst', pagesFirstMessage(pages));
 }
 
-/** As `resume::tablet_fits`: the blackboard writes only on a page of its own size, the Slate on every other sheet. */
+/**
+ * As `resume::tablet_fits`: the blackboard writes only on a page of its own size, upright or turned, the Slate on every
+ * other sheet.
+ */
 function tabletFits(kind: 'slate' | 'blackboard' | null, page: { width: number; height: number }): boolean {
   if (kind === null) return true;
-  const blackboardPage = page.width === 20500 && page.height === 27200;
-  return (kind === 'blackboard') === blackboardPage;
+  return (kind === 'blackboard') === isBoardPage(page);
+}
+
+/**
+ * As `resume::sheet_refusal`: why the tablet cannot write on a sheet of size `page`, null when it can. First the other
+ * tablet's sheet (`sheetOtherTablet`), then, for the blackboard, a sheet that is not the way round the blackboard is held
+ * (`sheetBoardPosition`: a landscape page in a portrait position, or the opposite). The position is the one set now for a
+ * resume asked of a connected tablet, the run's for one that connects later.
+ */
+function sheetRefusal(kind: 'slate' | 'blackboard' | null, page: { width: number; height: number }, landscape: boolean): string | null {
+  if (!tabletFits(kind, page)) return 'sheetOtherTablet';
+  if (kind !== 'blackboard') return null;
+  return page.width > page.height === landscape ? null : 'sheetBoardPosition';
 }
 /** The orientation each page was written in (by note id): the page on screen follows `heldAs`. */
 const pageOrientation = new Map<string, Orientation>();
@@ -368,17 +439,18 @@ function copy<T>(value: T): T {
 }
 
 /** A new page: blank, slate under the blackboard; `from` gives the paper, template and texture of the page it follows. */
-function blankPage(board: boolean, from?: { paper: Paper; template: Background['template']; texture: boolean }): Note {
+function blankPage(s: Session | null, board: boolean, from?: { paper: Paper; template: Background['template']; texture: boolean }): Note {
   pageCounter += 1;
   const created = Date.now();
   const id = `00000000-0000-4000-8000-${pageCounter.toString(16).padStart(12, '0')}`;
-  pageOrientation.set(id, heldAs);
+  const { area, held } = frameOf(s);
+  pageOrientation.set(id, held);
   return {
     id,
     title: '',
     created,
     modified: created,
-    page: pageSizeFor(heldAs, PAGE.width, PAGE.height),
+    page: pageSizeFor(held, area.width, area.height),
     background: { paper: board ? 'slate' : (from?.paper ?? 'white'), template: from?.template ?? 'blank', texture: from?.texture ?? false },
     tags: [],
     layers: [{ name: 'Calque 1', visible: true }],
@@ -396,7 +468,7 @@ function snapshot(): LiveSnapshot {
     return copy({
       state: 'idle',
       tablet: null,
-      page: { ...blankPage(false), id: '' },
+      page: { ...blankPage(null, false), id: '' },
       pageIndex: 0,
       pageCount: 1,
       orientation: heldAs,
@@ -811,6 +883,8 @@ function restoreCleared(s: Session): boolean {
  * way round (a quarter turn on the same side: the button stays away from the writing hand).
  */
 function holdFor(page: Note, s: Session): Orientation {
+  // The blackboard is held as its position says: a sheet the other way round was refused, never followed.
+  if (s.run) return s.run;
   if (!heldFixed(s, page)) return heldAs;
   const { width, height } = page.page;
   if (width === height || isPortrait(heldAs) === height > width) return heldAs;
@@ -1362,7 +1436,7 @@ function tick(s: Session): void {
   let hoverAt: { x: number; y: number } | null = null;
   for (let j = 0; j < 3; j++) {
     s.record += 1;
-    const sample = orientSample(s.pen.next());
+    const sample = orientSample(s, s.pen.next());
     const page = s.pages[s.pageIndex];
     if (sample.kind === 'down') {
       hoverAt = null;
@@ -1404,9 +1478,10 @@ function tick(s: Session): void {
 }
 
 /** The pen's samples are in the tablet's frame; the page gets them turned, as the service does. */
-function orientSample(sample: PenSample): PenSample {
+function orientSample(s: Session, sample: PenSample): PenSample {
   if (sample.kind === 'away') return sample;
-  const [x, y] = orientPoint(sample.x, sample.y, PAGE.width, PAGE.height, heldAs);
+  const { area, held } = frameOf(s);
+  const [x, y] = orientPoint(sample.x, sample.y, area.width, area.height, held);
   return { ...sample, x, y };
 }
 
@@ -1425,7 +1500,7 @@ function addPage(s: Session): void {
   // The paper of the page on screen goes on (its own paper, not the slate of the board; no image).
   const from = s.pages[s.pageIndex];
   const own = from ? ownPaper(s, from) : undefined;
-  const page = blankPage(s.view.board, from && own ? { paper: own, template: from.background.template, texture: from.background.texture } : undefined);
+  const page = blankPage(s, s.view.board, from && own ? { paper: own, template: from.background.template, texture: from.background.texture } : undefined);
   if (own) s.own.set(page.id, own);
   s.pages.push(page);
   s.pageStart.set(page.id, s.record);
@@ -1524,7 +1599,8 @@ function openSession(first: { page: Note; sheet: ResumedSheet } | null): LiveSna
     layersOf: new Map(),
     style: DEFAULT_STYLE,
     styleBeforeBoard: null,
-    view: { ...IDLE_VIEW },
+    // The whole page in view: the blackboard's own, when that tablet is the one connected.
+    view: activeTablet === 'blackboard' ? { ...IDLE_VIEW, x: boardPage(boardPosition).width / 2, y: boardPage(boardPosition).height / 2 } : { ...IDLE_VIEW },
     hover: null,
     current: null,
     computer: null,
@@ -1532,7 +1608,8 @@ function openSession(first: { page: Note; sheet: ResumedSheet } | null): LiveSna
     failed: new Set(),
     record: 0,
     pageStart: new Map(),
-    pen: new PenScript(),
+    pen: new PenScript(activeTablet === 'blackboard' ? BOARD_PAGE : PAGE),
+    run: activeTablet === 'blackboard' ? boardRunStart() : null,
     histories: new Map(),
     resumed: new Map(),
     own: new Map(),
@@ -1576,17 +1653,18 @@ function startSession(): LiveSnapshot {
 /** `live_resume`: refused first (the running session, if any, goes on), then like a stop and a start. */
 function resumeSession(path: string): LiveSnapshot {
   const library = mockLibrary();
-  const refusal = mockLiveConfig.resumeError;
-  if (refusal !== null) throw { code: refusal, message: path };
+  const failure = mockLiveConfig.resumeError;
+  if (failure !== null) throw { code: failure, message: path };
   const stored = library.notes.get(path);
   if (!stored) throw { code: path.startsWith(library.root) ? 'noteNotFound' : 'notInLibrary', message: path };
   // Nothing started, the session shown before goes on.
-  if (!tabletFits(activeTablet, stored.note.page)) throw { code: 'sheetOtherTablet', message: path };
+  const refusal = sheetRefusal(activeTablet, stored.note.page, isLandscapePosition(boardPosition));
+  if (refusal) throw { code: refusal, message: path };
   refuseWhenPagesFirst();
   stopSession();
   liveGate?.asked();
   const page = copy(stored.note);
-  pageOrientation.set(page.id, heldAs);
+  pageOrientation.set(page.id, activeTablet === 'blackboard' ? boardRunStart() : heldAs);
   const last = page.strokes.reduce((end, stroke) => Math.max(end, stroke.points.at(-1)?.t ?? 0), 0);
   const sheet: ResumedSheet = {
     path,
@@ -1752,6 +1830,7 @@ export function resetMockLive(): void {
   lastRevision = 0;
   stoppedOnce = false;
   heldAs = 'landscape';
+  boardPosition = DEFAULT_BOARD_POSITION;
   activeTablet = null;
   pageOrientation.clear();
   Object.assign(mockLiveConfig, { waitMs: 1200, tickMs: 15, pen: true, monitors: 2, saveError: null, resumeError: null });
@@ -1796,9 +1875,10 @@ export function mockLiveTick(count = 1): void {
 function followTablet(page: Note): void {
   // A resumed sheet, or a page with an image and ink, is never turned: the session follows it instead (`holdFor`).
   if (session && heldFixed(session, page)) return;
+  const held = frameOf(session).held;
   const from = pageOrientation.get(page.id) ?? 'landscape';
-  const turns = turnsFrom(heldAs, from);
-  pageOrientation.set(page.id, heldAs);
+  const turns = turnsFrom(held, from);
+  pageOrientation.set(page.id, held);
   if (turns === 0) return;
   const { width, height } = page.page;
   page.strokes = turnStrokes(page.strokes, width, height, turns);
@@ -1838,6 +1918,11 @@ function followTablet(page: Note): void {
  */
 export function setMockLiveOrientation(orientation: Orientation): void {
   if (orientation === heldAs) return;
+  // The Slate's setting does not turn a blackboard run: it keeps the position it started with.
+  if (session?.run) {
+    heldAs = orientation;
+    return;
+  }
   const s = session;
   const before = s ? { ...s.pages[s.pageIndex].page } : null;
   const turns = s && !heldFixed(s, s.pages[s.pageIndex]) ? turnsFrom(orientation, pageOrientation.get(s.pages[s.pageIndex].id) ?? 'landscape') : 0;

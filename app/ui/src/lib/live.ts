@@ -310,9 +310,14 @@ export type LiveEvent =
    */
   | { type: 'sheetForked'; pageIndex: number; reason: SheetForkReason; original: string; path: string }
   /**
-   * The tablet that connected cannot write on the sheet this session resumes (`sheetOtherTablet`: a Bamboo Slate sheet
-   * with the Xiaomi tablet, a page of the Xiaomi tablet with the Slate): the session ended at once, a snapshot `idle`
-   * follows, nothing was written on the note. `code` selects `errorCodes.*`. Sent once, to the windows subscribed then.
+   * The tablet that connected cannot write on the sheet this session resumes: the session ended at once, a snapshot
+   * `idle` follows, nothing was written on the note. `code` selects `errorCodes.*`; it is one of
+   * - `sheetOtherTablet`: a Bamboo Slate sheet with the Xiaomi tablet, a page of the Xiaomi tablet with the Slate;
+   * - `sheetBoardPosition`: a page of the Xiaomi tablet the other way round than the position it is held in (a wide
+   *   page with `buttonsBottom` or `buttonsTop`, an upright one with `buttonsRight` or `buttonsLeft`; docs/design/
+   *   blackboard.md §11). `live_resume` gives the same two codes at once when that tablet is already connected;
+   * - `blackboardPagesFirst`: not an error, the question of the stored pages (`live-pages-first.ts`).
+   * Sent once, to the windows subscribed then.
    */
   | { type: 'refused'; code: string; message: string }
   | LiveStrokesEdited;
