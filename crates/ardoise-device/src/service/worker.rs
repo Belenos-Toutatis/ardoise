@@ -350,6 +350,7 @@ impl Worker {
             return;
         }
         self.load_record();
+        self.end_live_of_forgotten_tablet();
         // Live mode waiting for its tablet after a lost link: only that one is looked for.
         let live_kind = self.live_kind();
         match (self.record.clone(), self.board_record.clone()) {
@@ -369,14 +370,67 @@ impl Worker {
         }
     }
 
-    /// The tablet a live run streamed from, while that tablet is still known.
+    /// The tablet a live run streamed from (`None` before one streamed).
     fn live_kind(&self) -> Option<TabletKind> {
-        let kind = self.live.as_ref().and_then(|run| run.kind)?;
-        let known = match kind {
+        self.live.as_ref().and_then(|run| run.kind)
+    }
+
+    /// Whether this library knows the tablet of `kind`.
+    fn knows(&self, kind: TabletKind) -> bool {
+        match kind {
             TabletKind::Slate => self.record.is_some(),
             TabletKind::Blackboard => self.board_record.is_some(),
+        }
+    }
+
+    /// A live run whose tablet is no longer known (its file gone or unreadable: forgotten from
+    /// another computer through the shared library) while the other tablet is known ends: the
+    /// other one would otherwise be searched for, and must not take the run (its page has that
+    /// tablet's size and way of holding). As `forget` does here: the sink is told live mode
+    /// stopped, nothing else shown. With no tablet known at all the run waits, as before the
+    /// blackboard existed (a Slate registered again takes it).
+    fn end_live_of_forgotten_tablet(&mut self) {
+        let Some(kind) = self.live_kind() else {
+            return;
         };
-        known.then_some(kind)
+        let other = match kind {
+            TabletKind::Slate => TabletKind::Blackboard,
+            TabletKind::Blackboard => TabletKind::Slate,
+        };
+        if self.knows(kind) || !self.knows(other) {
+            return;
+        }
+        self.note(format!(
+            "live mode ends: its tablet ({}) is no longer known",
+            kind.name()
+        ));
+        self.stop_live();
+    }
+
+    /// A live run belongs to the tablet it started on (docs/design/blackboard.md §2.10): when
+    /// the other tablet holds the link (`link`), the run ends before anything is asked of that
+    /// tablet, nothing of it reaches the sink, and the status says why (`sheetOtherTablet`). The
+    /// sink is told live mode stopped, as after `stop_live`; the link stays. `true` when it did.
+    /// Not expected to happen (the run's tablet is the only one looked for while it waits, the
+    /// registration and the search for a blackboard wait for it): the last guard.
+    fn live_belongs_elsewhere(&mut self, link: TabletKind) -> bool {
+        let Some(owner) = self.live_kind().filter(|kind| *kind != link) else {
+            return false;
+        };
+        self.note(format!(
+            "live mode ends: it was written with the {}, the {} holds the link",
+            owner.name(),
+            link.name()
+        ));
+        self.keep("live mode met the other tablet");
+        if let Some(mut run) = self.live.take() {
+            run.sink.input(LiveInput::State(LiveState::Stopped));
+        }
+        self.write_journal();
+        self.show_error(&DeviceError::LiveOnOtherTablet { owner });
+        self.counted_at = self.session_time();
+        self.publish(Connection::Connected);
+        true
     }
 
     /// The tablet holding the link, if any.
@@ -1047,6 +1101,9 @@ impl Worker {
 
     /// Enters live mode if needed, then forwards one notification.
     fn live_step(&mut self) {
+        if self.live_belongs_elsewhere(TabletKind::Slate) {
+            return;
+        }
         let Some(session) = self.session.as_mut() else {
             return;
         };
@@ -1205,7 +1262,13 @@ impl Worker {
     // --- registration -----------------------------------------------------------------------
 
     fn register(&mut self) {
-        if self.sync.is_some() || self.live.as_ref().is_some_and(|run| run.active) {
+        // Live mode under way, or waiting for the blackboard it was written with: the Slate
+        // registered would take the link, and the run must not change tablets. A run waiting for
+        // a Slate (or for any tablet) lets the wizard run, as before the blackboard existed.
+        let busy_live = self.live.as_ref().is_some_and(|run| {
+            run.active || run.kind.is_some_and(|kind| kind != TabletKind::Slate)
+        });
+        if self.sync.is_some() || busy_live {
             self.show_error(&DeviceError::Busy);
             return;
         }

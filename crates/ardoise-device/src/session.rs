@@ -111,6 +111,11 @@ pub enum DeviceError {
     /// `confirmBlackboardDelete`).
     #[error("syncing the blackboard deletes its pages: confirm first")]
     BlackboardConfirmDelete,
+    /// Live mode was written with the tablet `owner`, and the other one holds the link: a live
+    /// session never changes tablets (its page has that tablet's size and way of holding), so it
+    /// ended and nothing of the other tablet was written.
+    #[error("this live session was written with the {}: the other tablet cannot continue it", owner.name())]
+    LiveOnOtherTablet { owner: TabletKind },
 }
 
 /// What the tablet says about itself.

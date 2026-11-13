@@ -26,10 +26,18 @@
 //!    mode ([`DeviceError::StreamDirty`]), and its owner must close it and open a fresh one.
 //!    Only a fresh link is known to carry nothing of the old transfer (**supposed**: that the
 //!    tablet ends a transfer with its link is to check at the hardware checkpoint).
-//! 2. **Quiet window.** Once the count reaches the announced size, the stream must stay quiet
-//!    for [`QUIET_WINDOW`] before the page is returned; any byte more makes it incomplete.
+//! 2. **Quiet window.** A download is asked only once the stream has been quiet for
+//!    [`QUIET_WINDOW`] (at once on a stream already quiet, the usual case; a stream that does
+//!    not go quiet within [`DATA_IDLE_TIMEOUT`] makes the session dirty: a tablet still
+//!    streaming would mix its bytes into the page). Once the count reaches the announced size,
+//!    the stream must stay quiet for [`QUIET_WINDOW`] again before the page is returned; any
+//!    byte more makes it incomplete.
 //! 3. **Record check.** The page must be whole 7-byte records of a known status
 //!    ([`ardoise_proto::blackboard::check_page`]), else [`DeviceError::PageUnreadable`].
+//!
+//! Every unclean transfer of a page uses up its one retry ([`BoardSession::sync_page`]): a
+//! tablet that always misbehaves ends the sync with [`DeviceError::TransferIncomplete`], never in
+//! a loop of fresh links.
 //!
 //! # Sync
 //!
@@ -132,8 +140,9 @@ pub enum PageStep<T> {
     Kept { info: PageInfo, kept: T },
     /// Nothing more to read: the tablet holds no page, or [`MAX_SYNC_PAGES`] were read.
     Done,
-    /// The stream is dirty (a transfer did not end cleanly, the first time for this page, or
-    /// bytes came after the last one): close this link, open a fresh one and step again there.
+    /// The stream is dirty (a transfer of this page did not end cleanly, the first time, or
+    /// bytes came after the page deleted last): close this link, open a fresh one and step again
+    /// there.
     Reopen,
 }
 
@@ -165,6 +174,12 @@ pub struct BoardSession {
     /// A download ended and nothing took the stream since: stream bytes now are more of that
     /// page than announced.
     after_download: bool,
+    /// Stream bytes that came after the last download ended (more than it announced).
+    extra: usize,
+    /// When the last stream byte came, whatever it was, or when the link opened while none came
+    /// yet (session clock): a tablet streaming from the start of a link may not have sent its
+    /// first bytes when the first download is asked.
+    last_stream: Duration,
     reply_timeout: Duration,
     data_timeout: Duration,
 }
@@ -172,6 +187,7 @@ pub struct BoardSession {
 impl BoardSession {
     /// Starts a conversation on an open link. Nothing is sent: the tablet needs no login.
     pub fn open(transport: Box<dyn Transport>, clock: Arc<dyn Clock>) -> Self {
+        let opened = clock.monotonic();
         Self {
             transport,
             clock,
@@ -186,6 +202,8 @@ impl BoardSession {
             memory_total: None,
             dirty: false,
             after_download: false,
+            extra: 0,
+            last_stream: opened,
             reply_timeout: REPLY_TIMEOUT,
             data_timeout: DATA_IDLE_TIMEOUT,
         }
@@ -288,18 +306,22 @@ impl BoardSession {
     }
 
     /// Downloads the page `info` describes (`12 06 03 01 <time>`): its bytes come on the stream
-    /// characteristic, with no header, no end mark and no checksum, so they are counted against
-    /// the size announced, then the stream must stay quiet for [`QUIET_WINDOW`], then the page
-    /// must be whole records of a known status. Nothing is deleted here.
+    /// characteristic, with no header, no end mark and no checksum, so the request is written
+    /// only once the stream has been quiet for [`QUIET_WINDOW`] (at once when it already is),
+    /// the bytes are counted against the size announced, then the stream must stay quiet for
+    /// [`QUIET_WINDOW`], then the page must be whole records of a known status. Nothing is
+    /// deleted here.
     ///
-    /// - No byte for [`DATA_IDLE_TIMEOUT`], or more bytes than announced:
-    ///   [`DeviceError::TransferIncomplete`].
+    /// - No byte for [`DATA_IDLE_TIMEOUT`], more bytes than announced, or a stream that did not
+    ///   go quiet within [`DATA_IDLE_TIMEOUT`] before the request (then nothing is sent, 0 bytes
+    ///   received): [`DeviceError::TransferIncomplete`].
     /// - Not whole records of a known status, or announced larger than the tablet's memory
     ///   (then nothing is sent): [`DeviceError::PageUnreadable`].
     /// - On a dirty stream: [`DeviceError::StreamDirty`], nothing sent.
     ///
     /// Any failure but a lost link, the oversized announcement excepted, leaves the stream
-    /// dirty.
+    /// dirty (a cancellation while waiting for the quiet stream too: nothing was asked, but the
+    /// stream was busy).
     pub fn download(&mut self, info: PageInfo) -> Result<DownloadedPage, DeviceError> {
         // Stream bytes still in flight (the end of a live stream) must not join the page, nor
         // an earlier reply pass for anything; late bytes of the last page make the stream dirty.
@@ -318,7 +340,29 @@ impl BoardSession {
                 ),
             });
         }
+        // A tablet still streaming (live mode kept across a reconnection, a transfer nobody
+        // asked for) would mix its bytes into the page: ask only once the stream is quiet.
+        match self.wait_for_quiet() {
+            Ok(true) => {}
+            Ok(false) => {
+                self.dirty = true;
+                return Err(DeviceError::TransferIncomplete {
+                    expected: info.size,
+                    received: 0,
+                });
+            }
+            Err(DeviceError::Disconnected) => return Err(DeviceError::Disconnected),
+            Err(error) => {
+                self.dirty = true;
+                return Err(error);
+            }
+        }
+        // More of the page downloaded before came meanwhile.
+        if self.dirty {
+            return Err(DeviceError::StreamDirty);
+        }
         self.after_download = false;
+        self.extra = 0;
         let result = self.receive_page(info);
         match &result {
             Ok(_) => self.after_download = true,
@@ -359,6 +403,31 @@ impl BoardSession {
             announced_size: info.size,
             kind: TabletKind::Blackboard,
         })
+    }
+
+    /// Waits until no stream byte came for [`QUIET_WINDOW`] (since the link opened, when none
+    /// came yet), for at most the data timeout ([`DATA_IDLE_TIMEOUT`]): `Ok(false)` when the
+    /// stream never went quiet. No wait at all on a stream already quiet: a page ends with a
+    /// quiet window; on a fresh link, at most what is left of the window after the information
+    /// was read (once per link).
+    fn wait_for_quiet(&mut self) -> Result<bool, DeviceError> {
+        let start = self.clock.monotonic();
+        loop {
+            let now = self.clock.monotonic();
+            let quiet = now.saturating_sub(self.last_stream);
+            if quiet >= QUIET_WINDOW {
+                return Ok(true);
+            }
+            let waited = now.saturating_sub(start);
+            if waited >= self.data_timeout {
+                return Ok(false);
+            }
+            self.check_cancel()?;
+            let wait = (QUIET_WINDOW - quiet)
+                .min(self.data_timeout - waited)
+                .min(WAIT_SLICE);
+            self.pump(wait)?;
+        }
     }
 
     /// Writes `request`, then counts the bytes until the announced size and a quiet window.
@@ -406,11 +475,14 @@ impl BoardSession {
     /// page, so reading the next one needs this deletion: a sync always deletes.
     ///
     /// - [`PageStep::Done`] when the tablet holds no page, or after [`MAX_SYNC_PAGES`].
-    /// - [`PageStep::Reopen`] on a dirty stream, when the page's transfer did not end cleanly
-    ///   for the first time, or when more stream bytes came while `keep` ran (the page, kept,
-    ///   is then not deleted): the caller opens a fresh link and steps again with the same
-    ///   `sync`, so that the page's one retry happens on the new link, never on this one.
-    /// - [`DeviceError::TransferIncomplete`] when the retry fails too; the page stays.
+    /// - [`PageStep::Reopen`] on a dirty stream, or when the page's transfer did not end cleanly
+    ///   for the first time: stopped, too long, a stream that never went quiet before the
+    ///   request, or more stream bytes while `keep` ran (the page, kept, is then not deleted).
+    ///   The caller opens a fresh link and steps again with the same `sync`, so that the page's
+    ///   one retry happens on the new link, never on this one.
+    /// - [`DeviceError::TransferIncomplete`] when the retry is unclean too, whichever way; the
+    ///   page stays (its note too, when it was kept: a second note may come if the page is read
+    ///   differently next time).
     /// - [`DeviceError::PageNotDeleted`] when the tablet still describes the page just deleted
     ///   after [`DELETE_SETTLE`] (rather than import it again and again).
     /// - Any error of `keep` is returned as it is: the page stays on the tablet.
@@ -450,12 +522,20 @@ impl BoardSession {
             }
             Err(error) => return Err(error),
         };
+        let size = page.bytes.len();
         let kept = keep(page)?;
         // Bytes that came while the page was kept are more of a transfer that was thought
         // complete: the page may be wrong, so it stays on the tablet (its note too, in the
-        // library) and is read again on a fresh link.
+        // library) and is read again on a fresh link, with the page's one retry.
         self.drain()?;
         if self.dirty {
+            if sync.retried == Some(info.time) {
+                return Err(DeviceError::TransferIncomplete {
+                    expected: info.size,
+                    received: size.saturating_add(self.extra),
+                });
+            }
+            sync.retried = Some(info.time);
             return Ok(PageStep::Reopen);
         }
         // Only now, the page safe in the library, may it leave the tablet; a cancellation
@@ -650,9 +730,11 @@ impl BoardSession {
                 self.commands.push_back(data);
             }
             Channel::BoardData => {
+                let now = self.clock.monotonic();
+                self.last_stream = now;
                 if let Some(download) = self.download.as_mut() {
                     download.bytes.extend_from_slice(&data);
-                    download.last = self.clock.monotonic();
+                    download.last = now;
                 } else if self.live_mode {
                     self.push_live(channel, data, received);
                 } else {
@@ -661,6 +743,7 @@ impl BoardSession {
                     // end cleanly after all.
                     if self.after_download {
                         self.dirty = true;
+                        self.extra = self.extra.saturating_add(data.len());
                     }
                 }
             }
@@ -906,6 +989,60 @@ mod tests {
     }
 
     #[test]
+    fn a_download_is_asked_only_once_the_stream_is_quiet() {
+        let page = page_bytes(3);
+        let info = PageInfo {
+            time: 0x6800_0001,
+            size: 21,
+        };
+        // A fresh link counts as quiet from when it opened: the first download waits for what
+        // is left of the window (here all of it, nothing else was asked), the next one, after
+        // the quiet window that ends a page, is asked at once.
+        let (mut board, _) = session(vec![
+            ("12 06 03 01 68 00 00 01", vec![data(&page)]),
+            ("12 06 03 01 68 00 00 01", vec![data(&page)]),
+        ]);
+        let start = board.clock().monotonic();
+        assert_eq!(board.download(info).unwrap().bytes, page);
+        assert_eq!(board.clock().monotonic() - start, 2 * QUIET_WINDOW);
+        let start = board.clock().monotonic();
+        assert_eq!(board.download(info).unwrap().bytes, page);
+        assert_eq!(board.clock().monotonic() - start, QUIET_WINDOW);
+
+        // Stream bytes nobody asked for just before (the end of a live stream): asked once
+        // they stopped for the quiet window, the stream not dirty.
+        let (mut board, _, _) = session_with(
+            vec![("12 06 03 01 68 00 00 01", vec![data(&page)])],
+            vec![(0, data(&page[..14])), (100, data(&page[..7]))],
+        );
+        let start = board.clock().monotonic();
+        assert_eq!(board.download(info).unwrap().bytes, page);
+        let took = board.clock().monotonic() - start;
+        assert!(
+            took >= Duration::from_millis(100) + 2 * QUIET_WINDOW,
+            "{took:?}"
+        );
+        assert_eq!(board.take_oddities().stray_bytes, 21);
+        assert!(!board.is_dirty());
+
+        // A stream that never goes quiet (a tablet still in live mode after a reconnection):
+        // nothing is asked, the stream is dirty, the transfer incomplete with 0 bytes.
+        let records: Vec<(u64, TransportEvent)> =
+            (0..40).map(|i| (i * 50, data(&page[..7]))).collect();
+        let (board, writes, _) = session_with(vec![], records);
+        let mut board = board.with_timeouts(REPLY_TIMEOUT, Duration::from_secs(1));
+        assert_eq!(
+            board.download(info),
+            Err(DeviceError::TransferIncomplete {
+                expected: 21,
+                received: 0
+            })
+        );
+        assert!(writes.lock().unwrap().is_empty(), "no request written");
+        assert!(board.is_dirty());
+    }
+
+    #[test]
     fn a_page_that_cannot_be_kept_is_not_deleted() {
         let (mut board, writes) = session(vec![
             ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
@@ -994,6 +1131,44 @@ mod tests {
         assert_eq!(step, Ok(PageStep::Reopen));
         assert_eq!(deletes(&writes), 0);
         assert!(board.is_dirty());
+
+        // That used up the page's retry: the same again on the fresh link ends the sync, rather
+        // than reopen the link again and again (the page and its note stay).
+        let (mut board, writes, clock) = session_with(
+            vec![
+                ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
+                ("12 06 03 01 68 00 00 01", vec![data(&page)]),
+            ],
+            vec![(1_000, data(&page[..14]))],
+        );
+        let step = board.sync_page(&mut sync, |_| {
+            clock.0.fetch_add(2_000, Ordering::SeqCst);
+            Ok(())
+        });
+        assert_eq!(
+            step,
+            Err(DeviceError::TransferIncomplete {
+                expected: 21,
+                received: 35
+            })
+        );
+        assert_eq!(deletes(&writes), 0);
+        // A stall after bytes during the keep: the retry is used up the same way.
+        let (board, writes) = session(vec![
+            ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
+            ("12 06 03 01 68 00 00 01", vec![data(&page[..7])]),
+        ]);
+        let mut board = board.with_timeouts(REPLY_TIMEOUT, Duration::from_secs(1));
+        let mut sync = BoardSync {
+            retried: Some(0x6800_0001),
+            ..BoardSync::default()
+        };
+        let step = board.sync_page(&mut sync, |_| -> Result<(), DeviceError> { panic!() });
+        assert!(
+            matches!(step, Err(DeviceError::TransferIncomplete { .. })),
+            "{step:?}"
+        );
+        assert_eq!(deletes(&writes), 0);
 
         // Bytes after the delete of page 1: the next page is not downloaded on this link.
         let (mut board, writes) = session(vec![

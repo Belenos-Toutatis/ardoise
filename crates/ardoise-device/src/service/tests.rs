@@ -342,6 +342,12 @@ fn device_errors_map_to_translated_codes() {
         ),
         (DeviceError::StreamDirty, "tablet"),
         (
+            DeviceError::LiveOnOtherTablet {
+                owner: TabletKind::Blackboard,
+            },
+            "sheetOtherTablet",
+        ),
+        (
             DeviceError::Transport(TransportError::Backend("x".into())),
             "tablet",
         ),

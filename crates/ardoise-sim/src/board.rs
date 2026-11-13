@@ -42,10 +42,15 @@
 //! [`SimBoard::power_off`], [`SimBoard::disconnect_after`],
 //! [`SimBoard::disconnect_at_next_request`]; downloads that stop
 //! ([`SimBoard::stall_next_download`]) or whose rest comes late, just after the host's next
-//! download request on the same link ([`SimBoard::delay_next_download`]); a delete ignored
+//! download request on the same link ([`SimBoard::delay_next_download`]); downloads whose chunks
+//! come over time ([`SimBoard::pace_downloads`], about 10 ms apart in Mi Home's capture; at once
+//! otherwise); stream bytes sent now, nobody asking ([`SimBoard::send_stream`]); a pen streamed to
+//! every new link without `12 02 08 01` ([`SimBoard::stream_without_asking`], a tablet that kept
+//! live mode across a reconnection: not measured); a delete ignored
 //! ([`SimBoard::ignore_next_delete`]) or slow ([`SimBoard::delay_next_delete`]); a page that is
 //! not records ([`SimBoard::store_raw_page`]); an action run when the next download starts
-//! ([`SimBoard::on_next_download`], to land a request in the middle of it).
+//! ([`SimBoard::on_next_download`], to land a request in the middle of it) or right after the
+//! next delete ([`SimBoard::on_next_delete`]).
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -172,6 +177,12 @@ struct State {
     drop_at_next_request: bool,
     /// Run when the next download starts (after its first bytes are queued).
     on_download: Option<Action>,
+    /// Run right after the next delete request is handled.
+    on_delete: Option<Action>,
+    /// Time between two chunks of a download (zero: all at once).
+    pace: Duration,
+    /// Every new link streams the pen at once, without `12 02 08 01`.
+    stream_unasked: bool,
     stats: BoardStats,
 }
 
@@ -257,6 +268,9 @@ impl SimBoard {
                     pending_delete: None,
                     drop_at_next_request: false,
                     on_download: None,
+                    on_delete: None,
+                    pace: Duration::ZERO,
+                    stream_unasked: false,
                     stats: BoardStats::default(),
                 }),
             }),
@@ -406,6 +420,48 @@ impl SimBoard {
         self.state().on_download = Some(Action(Box::new(action)));
     }
 
+    /// Runs `action` on the host's thread right after the next delete request is handled
+    /// (whatever the delete did).
+    pub fn on_next_delete(&self, action: impl FnOnce() + Send + 'static) {
+        self.state().on_delete = Some(Action(Box::new(action)));
+    }
+
+    /// From the next download on, the chunks of a page come `interval` apart on the virtual
+    /// clock (the first at once), as a real transfer takes time; `Duration::ZERO` (the default)
+    /// sends them all at once. What a download had still to send is lost with its link.
+    pub fn pace_downloads(&self, interval: Duration) {
+        self.state().pace = interval;
+    }
+
+    /// The tablet sends `bytes` on the stream now, to the connected host, in chunks of at most
+    /// 244 bytes, nobody asking (more of a transfer that was thought finished). Nothing without a
+    /// link.
+    pub fn send_stream(&self, bytes: &[u8]) {
+        let now = self.now();
+        let mut state = self.state();
+        if !state.alive(now) {
+            return;
+        }
+        if let Some(link) = state.link.as_mut() {
+            for data in split_chunks(bytes) {
+                enqueue(
+                    &mut link.queue,
+                    Outgoing {
+                        due: now,
+                        channel: Channel::BoardData,
+                        data,
+                    },
+                );
+            }
+        }
+    }
+
+    /// While `on`, every new link streams the pen from the moment it opens, without
+    /// `12 02 08 01` (a tablet that kept live mode across a reconnection: not measured).
+    pub fn stream_without_asking(&self, on: bool) {
+        self.state().stream_unasked = on;
+    }
+
     // --- inspection -------------------------------------------------------------------------
 
     pub fn stored_pages(&self) -> Vec<BoardStoredPage> {
@@ -480,10 +536,13 @@ impl SimBoard {
         }
         let id = state.next_link_id;
         state.next_link_id += 1;
+        let stream = state
+            .stream_unasked
+            .then(|| state.pen.partition_point(|timed| timed.due < now));
         state.link = Some(Link {
             id,
             queue: VecDeque::new(),
-            stream: None,
+            stream,
             last_write: now,
             late_tail: Vec::new(),
         });
@@ -509,30 +568,42 @@ impl SimBoard {
         // Records already due travel before the reply; so does the rest of a download held
         // back, when the host asks for a page again.
         state.materialize_live(now);
-        let download = matches!(
-            BoardRequest::decode(bytes),
-            Ok(BoardRequest::Download { .. })
-        );
+        let request = BoardRequest::decode(bytes);
+        let download = matches!(request, Ok(BoardRequest::Download { .. }));
+        let delete = matches!(request, Ok(BoardRequest::Delete { .. }));
         if download && let Some(link) = state.link.as_mut() {
             let tail = std::mem::take(&mut link.late_tail);
-            link.queue.extend(tail.into_iter().map(|data| Outgoing {
-                due: now,
-                channel: Channel::BoardData,
-                data,
-            }));
+            for data in tail {
+                enqueue(
+                    &mut link.queue,
+                    Outgoing {
+                        due: now,
+                        channel: Channel::BoardData,
+                        data,
+                    },
+                );
+            }
         }
         let downloads = state.stats.downloads;
         let replies = state.handle(bytes, now, wall);
+        // A download's chunks one `pace` apart (all at once by default).
+        let pace = if download { state.pace } else { Duration::ZERO };
         if let Some(link) = state.link.as_mut() {
-            link.queue
-                .extend(replies.into_iter().map(|(channel, data)| Outgoing {
-                    due: now,
-                    channel,
-                    data,
-                }));
+            let mut chunks = 0u32;
+            for (channel, data) in replies {
+                let due = if channel == Channel::BoardData {
+                    chunks += 1;
+                    now + pace * (chunks - 1)
+                } else {
+                    now
+                };
+                enqueue(&mut link.queue, Outgoing { due, channel, data });
+            }
         }
         let action = if state.stats.downloads > downloads {
             state.on_download.take()
+        } else if delete {
+            state.on_delete.take()
         } else {
             None
         };
@@ -696,11 +767,14 @@ impl State {
         if self.alive(now)
             && let Some(link) = self.link.as_mut()
         {
-            link.queue.push_back(Outgoing {
-                due: now,
-                channel: Channel::Command,
-                data: encode(&BoardReply::PageStored),
-            });
+            enqueue(
+                &mut link.queue,
+                Outgoing {
+                    due: now,
+                    channel: Channel::Command,
+                    data: encode(&BoardReply::PageStored),
+                },
+            );
             self.stats.page_stored_events += 1;
         }
     }
@@ -723,11 +797,14 @@ impl State {
             }
             self.consume_live(&item);
             if let Some(link) = self.link.as_mut() {
-                link.queue.push_back(Outgoing {
-                    due: item.due,
-                    channel: Channel::BoardData,
-                    data: item.data,
-                });
+                enqueue(
+                    &mut link.queue,
+                    Outgoing {
+                        due: item.due,
+                        channel: Channel::BoardData,
+                        data: item.data,
+                    },
+                );
             }
         }
     }
@@ -839,6 +916,16 @@ impl State {
             }
         }
     }
+}
+
+/// Queues `item` after everything due no later than it: notifications leave in the order they
+/// are due (a reply overtakes the chunks of a paced download still to come).
+fn enqueue(queue: &mut VecDeque<Outgoing>, item: Outgoing) {
+    let at = queue
+        .iter()
+        .position(|queued| queued.due > item.due)
+        .unwrap_or(queue.len());
+    queue.insert(at, item);
 }
 
 /// Up to [`MAX_LIVE_RECORDS`] records from `cursor`, the group ending at a `c0`; due with its
@@ -1138,6 +1225,90 @@ mod tests {
             Err(TransportError::NotConnected)
         );
         assert!(!board.is_connected());
+    }
+
+    #[test]
+    fn paced_downloads_and_unasked_streams() {
+        let board = SimBoard::blackboard();
+        let stroke = Stroke {
+            points: (0..200u16)
+                .map(|i| Point {
+                    x: i,
+                    y: 100,
+                    pressure: 900,
+                })
+                .collect(),
+            ..Stroke::default()
+        };
+        board.draw_page(std::slice::from_ref(&stroke));
+        let page = board.stored_pages()[0].clone();
+        let chunks = split_chunks(&page.bytes).len();
+        assert!(chunks > 3);
+        let (link, _) = board
+            .open_link(&board.config().address, Duration::ZERO)
+            .unwrap();
+
+        // Chunks 10 ms apart; a reply asked meanwhile overtakes the chunks still to come.
+        board.pace_downloads(Duration::from_millis(10));
+        let start = board.clock().monotonic();
+        write(&board, link, BoardRequest::Download { time: page.time });
+        assert_eq!(next(&board, link).unwrap().0, Channel::BoardData);
+        write(&board, link, BoardRequest::Battery);
+        assert_eq!(
+            next(&board, link).unwrap(),
+            (Channel::Command, vec![0x11, 0x02, 0x01, 90])
+        );
+        let mut bytes = split_chunks(&page.bytes)[0].clone();
+        while let Some((channel, chunk)) = next(&board, link) {
+            assert_eq!(channel, Channel::BoardData);
+            bytes.extend(chunk);
+        }
+        assert_eq!(bytes, page.bytes);
+        let took = board.clock().monotonic() - start;
+        assert!(
+            took >= Duration::from_millis(10) * u32::try_from(chunks - 1).unwrap(),
+            "{took:?}"
+        );
+        // Lost with the link.
+        write(&board, link, BoardRequest::Download { time: page.time });
+        board.close_link(link);
+        let (link, _) = board
+            .open_link(&board.config().address, Duration::ZERO)
+            .unwrap();
+        assert_eq!(next(&board, link), None);
+
+        // Bytes sent nobody asking, and an action right after a delete.
+        board.send_stream(&page.bytes[..14]);
+        assert_eq!(
+            next(&board, link).unwrap(),
+            (Channel::BoardData, page.bytes[..14].to_vec())
+        );
+        let after = board.clone();
+        board.on_next_delete(move || after.send_stream(&[0xa1; 7]));
+        write(&board, link, BoardRequest::Delete { time: page.time });
+        assert_eq!(board.stored_page_count(), 0);
+        assert_eq!(
+            next(&board, link).unwrap(),
+            (Channel::BoardData, vec![0xa1; 7])
+        );
+
+        // A pen streamed to a new link without being asked.
+        board.close_link(link);
+        board.stream_without_asking(true);
+        board.draw_live(PenScript::new().near(vec![
+            Point {
+                x: 5,
+                y: 6,
+                pressure: 0
+            };
+            12
+        ]));
+        let (link, _) = board
+            .open_link(&board.config().address, Duration::ZERO)
+            .unwrap();
+        assert!(board.is_streaming());
+        assert_eq!(next(&board, link).unwrap().0, Channel::BoardData);
+        assert_eq!(board.stats().unknown_requests, 0);
     }
 
     #[test]

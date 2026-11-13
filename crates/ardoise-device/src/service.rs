@@ -466,6 +466,7 @@ pub fn error_code(error: &DeviceError) -> &'static str {
         DeviceError::TabletNotFound(_) => "blackboardNotFound",
         DeviceError::PageUnreadable { .. } => "pageUnreadable",
         DeviceError::BlackboardConfirmDelete => "blackboardConfirmDelete",
+        DeviceError::LiveOnOtherTablet { .. } => "sheetOtherTablet",
         DeviceError::Transport(_)
         | DeviceError::Unexpected(_)
         | DeviceError::CrcMismatch { .. }

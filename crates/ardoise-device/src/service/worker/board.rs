@@ -62,8 +62,10 @@ impl Worker {
     // --- adding ---------------------------------------------------------------------------
 
     /// Starts the search for blackboards to add (closes a link open meanwhile: one at a time).
+    /// Refused during a sync and while live mode runs or waits for its tablet: a blackboard
+    /// added then would connect, and a live run never changes tablets.
     pub(super) fn find_blackboards(&mut self) {
-        if self.sync.is_some() || self.live.as_ref().is_some_and(|run| run.active) {
+        if self.sync.is_some() || self.live.is_some() {
             self.show_error(&DeviceError::Busy);
             return;
         }
@@ -675,8 +677,9 @@ impl Worker {
             // The link is opened again at the next step; the sync carries on there.
             Ok(PageStep::Reopen) => {
                 self.note(
-                    "a page transfer did not end cleanly (stopped, too long, or more bytes after \
-                     it): the page stays on the blackboard and is read again on a fresh link",
+                    "a page transfer did not end cleanly (stopped, too long, more bytes after it, \
+                     or a stream that never went quiet before it was asked): the page stays on \
+                     the blackboard and is read again on a fresh link",
                 );
                 self.keep("a page transfer of the blackboard did not end cleanly");
             }
@@ -757,12 +760,26 @@ impl Worker {
 
     /// Starts the stream if needed, then forwards one notification.
     fn board_live_step(&mut self) {
+        if self.live_belongs_elsewhere(TabletKind::Blackboard) {
+            return;
+        }
         let Some(board) = self.board.as_mut() else {
             return;
         };
         if !board.in_live_mode() {
-            if let Err(error) = board.start_live() {
-                return self.live_failed(error);
+            match board.start_live() {
+                Ok(()) => {}
+                // Late bytes of a page found just before (a transfer thought complete): live
+                // mode waits, the next step opens a fresh link, and it starts there.
+                Err(DeviceError::StreamDirty) => {
+                    self.note(
+                        "bytes of a page came before live mode started: the link is opened \
+                         again first",
+                    );
+                    self.keep("a page transfer of the blackboard did not end cleanly");
+                    return;
+                }
+                Err(error) => return self.live_failed(error),
             }
             let Some(mut run) = self.live.take() else {
                 return;
