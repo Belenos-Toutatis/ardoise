@@ -8,7 +8,7 @@ import { api, type AppState } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
 import { FakeContext } from '../../lib/live-fake-canvas';
 import { freshStamp, mockLibrary, resetMockLibrary } from '../../lib/mock-data';
-import { mockLiveConfig, mockLiveTick, resetMockLive } from '../../lib/mock-live';
+import { mockLiveConfig, mockLiveRefuse, mockLiveTick, resetMockLive, setMockLiveTablet } from '../../lib/mock-live';
 import { resetMockNarration } from '../../lib/mock-narration';
 import { resetMockTablet } from '../../lib/mock-tablet';
 import { tablet } from '../../lib/tablet-state.svelte';
@@ -298,5 +298,76 @@ describe('a sheet that went on in a new note', () => {
     await vi.waitFor(() => expect(view.slot('sheet-forked')).not.toBeNull());
     expect(view.slot('sheet-forked')!.querySelector('strong')).toBeNull();
     expect(view.slot('sheet-forked')!.textContent).toContain('Cette feuille a été modifiée ailleurs');
+  });
+});
+
+describe('live view: a sheet the connected tablet cannot write on', () => {
+  const SENTENCE = {
+    fr: ['Cette feuille ne peut pas être continuée avec cette tablette', 'une page de la tablette Xiaomi avec la tablette Xiaomi', "Cette tablette n'a rien écrit sur la note"],
+    en: ['This sheet cannot be continued with this tablet', 'a page of the Xiaomi tablet with the Xiaomi tablet', 'This tablet wrote nothing on the note'],
+  } as const;
+
+  it.each(['fr', 'en'] as const)('shows why at once when the Xiaomi tablet is connected and the sheet is the Slate\'s (%s)', async (locale) => {
+    setLocale(locale);
+    setMockLiveTablet('blackboard');
+    const stop = vi.spyOn(api, 'liveStop');
+    const view = render();
+    await vi.waitFor(() => expect(view.slot('resume-failed')).not.toBeNull());
+    const banner = view.slot('resume-failed')!;
+    expect(banner.getAttribute('role')).toBe('alert');
+    for (const part of SENTENCE[locale]) expect(banner.textContent).toContain(part);
+    expect(view.root().dataset.state).toBe('idle');
+    view.target.querySelector<HTMLButtonElement>('button[data-action="resume-back"]')!.click();
+    expect(view.onclose).toHaveBeenCalledOnce();
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it('refuses the Xiaomi page with the Slate, and resumes the sheets each tablet can write on', async () => {
+    const path = sheetPath();
+    const stored = mockLibrary().notes.get(path)!;
+    // A page of the Xiaomi tablet, resumed while the Slate is connected.
+    stored.note.page = { width: 20500, height: 27200 };
+    setMockLiveTablet('slate');
+    const refused = render();
+    await vi.waitFor(() => expect(refused.slot('resume-failed')).not.toBeNull());
+    cleanup?.();
+    cleanup = null;
+    // The same page with the Xiaomi tablet: it goes on.
+    setMockLiveTablet('blackboard');
+    const view = render();
+    await live(view);
+    expect(view.slot('resume-failed')).toBeNull();
+  });
+
+  it('shows the refusal that comes later, when the tablet connects, and lets the user try again', async () => {
+    mockLiveConfig.waitMs = 5000;
+    const view = render();
+    await vi.waitFor(() => expect(view.root().dataset.state).toBe('waiting'));
+    expect(view.slot('resume-failed')).toBeNull();
+
+    mockLiveRefuse();
+    await vi.waitFor(() => expect(view.slot('resume-failed')).not.toBeNull());
+    const banner = view.slot('resume-failed')!;
+    expect(banner.getAttribute('role')).toBe('alert');
+    expect(banner.textContent).toContain('Cette feuille ne peut pas être continuée avec cette tablette');
+    expect(banner.textContent).toContain("Le mode direct n'a pas pu reprendre cette feuille.");
+    expect(view.root().dataset.state).toBe('idle');
+
+    // Starting again (the Slate is the tablet that connects now): the banner goes.
+    mockLiveConfig.waitMs = 30;
+    setMockLiveTablet('slate');
+    view.button('Réessayer').click();
+    await live(view);
+    expect(view.slot('resume-failed')).toBeNull();
+  });
+
+  it('can be left after a refusal that came later', async () => {
+    mockLiveConfig.waitMs = 5000;
+    const view = render();
+    await vi.waitFor(() => expect(view.root().dataset.state).toBe('waiting'));
+    mockLiveRefuse();
+    await vi.waitFor(() => expect(view.slot('resume-failed')).not.toBeNull());
+    view.target.querySelector<HTMLButtonElement>('button[data-action="resume-back"]')!.click();
+    expect(view.onclose).toHaveBeenCalledOnce();
   });
 });

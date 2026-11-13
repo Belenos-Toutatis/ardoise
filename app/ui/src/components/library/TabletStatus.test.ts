@@ -123,6 +123,7 @@ describe('sidebar tablet block', () => {
       connected: ['Connectée', 'Connected'],
       syncing: ['Synchronisation…', 'Syncing…'],
       live: ['Mode direct', 'Live mode'],
+      adding: ["Recherche d'une tablette Xiaomi…", 'Looking for a Xiaomi tablet…'],
     };
     for (const [index, locale] of (['fr', 'en'] as const).entries()) {
       const { root } = await render(locale);

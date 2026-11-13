@@ -130,7 +130,7 @@ describe('« Reprendre en mode direct » in the note card menu', () => {
     ['en', 'Resuming in live mode needs a registered tablet: register it from the tablet panel.'],
   ] as const)('is disabled, with a hint, when no tablet is registered (%s)', async (locale, hint) => {
     const home = await ready(locale);
-    tablet.status = { ...tablet.status!, registered: null, connection: 'notRegistered' };
+    tablet.status = { ...tablet.status!, registered: null, known: [], connection: 'notRegistered' };
     const items = await menuOf(home, 'Liste de courses');
     const resume = item(items, locale === 'fr' ? 'Reprendre en mode direct' : 'Resume in live mode');
     expect(resume.getAttribute('aria-disabled')).toBe('true');

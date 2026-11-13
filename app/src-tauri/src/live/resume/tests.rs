@@ -14,6 +14,7 @@ use ardoise_core::note::{
 use ardoise_core::settings::{LiveButton, Orientation, Settings};
 use ardoise_device::pages::orient;
 use ardoise_device::service::{LiveInput, LiveSink};
+use ardoise_device::transport::TabletKind;
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
 use ardoise_media::microphone::simulated_narration;
 use ardoise_media::replay::ReplayOptions;
@@ -38,8 +39,8 @@ use super::super::tests::{
     options, pen, send, stream_simulated_start, stroke, stroke_count, wait_until,
 };
 use super::{
-    PenMapping, RESUME_GAP_MS, ResumeSeed, hold_for, merged_keeping_both, placed_for_merge,
-    time_base,
+    PenMapping, RESUME_GAP_MS, ResumeSeed, held_for, hold_for, merged_keeping_both,
+    placed_for_merge, tablet_fits, time_base,
 };
 use crate::background::tests::halves;
 use crate::background::{Staged, Staging, key_of};
@@ -739,6 +740,7 @@ fn resume(hub: &LiveHub, library: &Library, path: &Path, tablet: PageSize) -> Hu
         width: tablet.width,
         height: tablet.height,
         orientation: Orientation::Landscape,
+        kind: TabletKind::Slate,
     });
     sink
 }
@@ -1679,6 +1681,7 @@ fn a_running_session_is_written_out_before_the_resume_and_a_bad_note_leaves_it_r
             width: A5.width,
             height: A5.height,
             orientation: Orientation::Landscape,
+            kind: TabletKind::Slate,
         });
         sink
     };
@@ -1740,6 +1743,7 @@ fn resuming_the_page_of_the_session_just_shown_finds_all_of_its_ink() {
         width: A5.width,
         height: A5.height,
         orientation: Orientation::Landscape,
+        kind: TabletKind::Slate,
     });
     stroke(&mut sink, 3000, 5);
     wait_until("the note", || notes_in(&library).len() == 1);
@@ -2006,6 +2010,7 @@ fn a_sound_kept_apart_has_its_place_in_note_time_on_a_page_of_the_session() {
         width: A5.width,
         height: A5.height,
         orientation: Orientation::Landscape,
+        kind: TabletKind::Slate,
     });
     stroke(&mut sink, 3000, 5);
     wait_until("the note", || notes_in(&library).len() == 1);
@@ -2086,6 +2091,7 @@ fn a_page_that_cannot_take_its_sound_does_not_cost_the_next_pages_theirs() {
         width: A5.width,
         height: A5.height,
         orientation: Orientation::Landscape,
+        kind: TabletKind::Slate,
     });
     stroke(&mut sink, 3000, 5);
     wait_until("the first note", || notes_in(&library).len() == 1);
@@ -2973,4 +2979,190 @@ fn a_sheet_changed_elsewhere_goes_on_in_a_new_note_with_its_paper_and_image() {
     assert_eq!(written.background.as_ref(), Some(&member));
     assert_eq!(written.note.background, seyes_white());
     assert_eq!(written.note.strokes.len(), 3);
+}
+
+// --- The sheet and the tablet that writes on it (M18) ---------------------------------------------
+
+#[test]
+fn the_blackboard_writes_on_its_own_page_as_it_comes_and_only_there() {
+    use Orientation::{Landscape, LandscapeFlipped, PortraitLeft};
+    use ardoise_device::pages::{BLACKBOARD_PAGE, oriented_size};
+    // Who may write where: the blackboard on its page only, the Slate everywhere else.
+    assert!(tablet_fits(TabletKind::Blackboard, BLACKBOARD_PAGE));
+    for sheet in [A4_LANDSCAPE, A4_PORTRAIT, A5] {
+        assert!(!tablet_fits(TabletKind::Blackboard, sheet), "{sheet:?}");
+        assert!(tablet_fits(TabletKind::Slate, sheet), "{sheet:?}");
+    }
+    assert!(!tablet_fits(TabletKind::Slate, BLACKBOARD_PAGE));
+    // Every size the blackboard ever wrote with counts (a calibration adds one, keeps the old).
+    use ardoise_device::pages::BLACKBOARD_PAGES;
+    assert_eq!(BLACKBOARD_PAGES[0], BLACKBOARD_PAGE);
+    for page in BLACKBOARD_PAGES {
+        assert!(tablet_fits(TabletKind::Blackboard, page), "{page:?}");
+        assert!(!tablet_fits(TabletKind::Slate, page), "{page:?}");
+    }
+    // A turned blackboard note is a sheet like any other.
+    let turned = PageSize {
+        width: BLACKBOARD_PAGE.height,
+        height: BLACKBOARD_PAGE.width,
+    };
+    assert!(!tablet_fits(TabletKind::Blackboard, turned));
+    assert_eq!(
+        held_for(BLACKBOARD_PAGE, Landscape, TabletKind::Blackboard),
+        Landscape
+    );
+    assert_eq!(
+        held_for(BLACKBOARD_PAGE, Landscape, TabletKind::Slate),
+        PortraitLeft
+    );
+
+    // Its own page resumed with the blackboard: every record lands as it came, never turned nor
+    // scaled, whatever the Slate is set to, and whatever area the session was made for.
+    let board = BLACKBOARD_PAGE;
+    for (setting, made_for) in [
+        (Landscape, board),
+        (Landscape, oriented_size(A4_LANDSCAPE, Landscape)),
+        (PortraitLeft, oriented_size(A4_LANDSCAPE, PortraitLeft)),
+        (LandscapeFlipped, board),
+    ] {
+        let mut session = LiveSession::new(
+            1,
+            made_for,
+            LiveStyle::default(),
+            LiveViewState::whole(made_for),
+            true,
+            RESUMED_AT,
+        )
+        .with_orientation(setting)
+        .resuming(seed_of(NoteFile::new(sheet(board))), RESUMED_AT);
+        let mut out = Vec::new();
+        session.set_state(LiveSessionState::Waiting, &mut out);
+        assert!(session.accepts(TabletKind::Blackboard));
+        assert!(!session.accepts(TabletKind::Slate));
+        session.set_tablet(TabletKind::Blackboard);
+        session.started(board.width, board.height, Landscape, &mut out);
+        for (x, y) in [(0, 0), (12_345, 20_000), (20_499, 27_199)] {
+            let point = write_at(&mut session, x, y, RESUMED_AT + 1_000);
+            assert_eq!(
+                (point.x, point.y),
+                (f32::from(x), f32::from(y)),
+                "{setting:?}, {made_for:?}"
+            );
+        }
+        assert_eq!(session.snapshot().orientation, Landscape, "not turned");
+        assert_eq!(session.pages()[0].note.page, board);
+    }
+
+    // A session that resumes nothing takes any tablet.
+    let fresh = LiveSession::new(
+        1,
+        A4_LANDSCAPE,
+        LiveStyle::default(),
+        LiveViewState::whole(A4_LANDSCAPE),
+        true,
+        RESUMED_AT,
+    );
+    assert!(fresh.accepts(TabletKind::Blackboard) && fresh.accepts(TabletKind::Slate));
+}
+
+/// Resumes `path` and streams from a tablet of `kind`, whose area is `area` (not turned).
+fn resume_on(
+    hub: &LiveHub,
+    library: &Library,
+    path: &Path,
+    area: PageSize,
+    kind: TabletKind,
+) -> HubSink {
+    let start = StartOptions {
+        size: area,
+        ..options(library, fixed(LiveButton::NewPage))
+    };
+    let Start::New { mut sink, .. } = hub.resume(start, path).unwrap() else {
+        panic!("a session is already running");
+    };
+    sink.input(LiveInput::Started {
+        width: area.width,
+        height: area.height,
+        orientation: Orientation::Landscape,
+        kind,
+    });
+    sink
+}
+
+#[test]
+fn a_sheet_resumed_with_a_tablet_that_does_not_fit_it_ends_at_once_with_nothing_written() {
+    use ardoise_device::pages::BLACKBOARD_PAGE;
+    let slate = PageSize {
+        width: 29_700,
+        height: 21_600,
+    };
+    // A Slate sheet (landscape or turned) with the blackboard; a blackboard page with the Slate.
+    for (sheet_page, area, kind) in [
+        (A4_LANDSCAPE, BLACKBOARD_PAGE, TabletKind::Blackboard),
+        (A4_PORTRAIT, BLACKBOARD_PAGE, TabletKind::Blackboard),
+        (BLACKBOARD_PAGE, slate, TabletKind::Slate),
+    ] {
+        let (_dir, library) = library();
+        let path = filed(&library, "Classe", &NoteFile::new(sheet(sheet_page)));
+        let before = std::fs::read(library.root().join(&path)).unwrap();
+        let hub = LiveHub::new(config());
+        let window = Arc::new(Window::default());
+        hub.subscribe("main", window.clone());
+        let mut sink = resume_on(&hub, &library, &path, area, kind);
+        // The service is told to leave live mode.
+        assert!(!sink.active());
+        wait_until("the refusal", || {
+            window
+                .events()
+                .iter()
+                .any(|event| matches!(event, LiveEvent::Refused { .. }))
+        });
+        let refused: Vec<(String, String)> = window
+            .events()
+            .into_iter()
+            .filter_map(|event| match event {
+                LiveEvent::Refused { code, message } => Some((code, message)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(refused.len(), 1, "{sheet_page:?} with the {}", kind.name());
+        assert_eq!(refused[0].0, "sheetOtherTablet");
+        assert_eq!(hub.snapshot().state, LiveSessionState::Idle);
+        // Whatever comes after is not written anywhere.
+        stroke(&mut sink, 3000, 5);
+        assert_eq!(hub.snapshot().page.strokes.len(), 2);
+        hub.stop().unwrap();
+        assert_eq!(
+            std::fs::read(library.root().join(&path)).unwrap(),
+            before,
+            "the sheet untouched"
+        );
+        assert_eq!(
+            notes_in(&library),
+            std::slice::from_ref(&path),
+            "no other note"
+        );
+    }
+
+    // The pairs that fit go on: a blackboard page with the blackboard, its ink as it came.
+    let (_dir, library) = library();
+    let path = filed(&library, "Classe", &NoteFile::new(sheet(BLACKBOARD_PAGE)));
+    let hub = LiveHub::new(config());
+    let mut sink = resume_on(
+        &hub,
+        &library,
+        &path,
+        BLACKBOARD_PAGE,
+        TabletKind::Blackboard,
+    );
+    assert!(sink.active());
+    assert_eq!(hub.snapshot().state, LiveSessionState::Live);
+    stroke(&mut sink, 3000, 5);
+    wait_until("the note rewritten", || {
+        stroke_count(&library, &path) == Some(3)
+    });
+    let written = library.read(&path).unwrap().file;
+    let point = written.note.strokes[2].points[0];
+    assert_eq!((point.x, point.y), (3000.0, 1000.0));
+    hub.stop().unwrap();
 }

@@ -1,5 +1,6 @@
 //! Wacom smartpad protocol as spoken by the Bamboo Slate: message encoding and decoding,
-//! stored-page decoding and live-mode decoding.
+//! stored-page decoding and live-mode decoding; and, in [`blackboard`], the vendor protocol of the
+//! second tablet, the Xiaomi Mijia LCD blackboard (storage edition).
 //!
 //! The crate does no I/O, keeps no clock and spawns nothing: every function works on byte
 //! slices, so the device layer (host side), the simulator (tablet side) and the tests share the
@@ -21,7 +22,10 @@
 //! - [`describe`]: one-line English interpretation of any frame or packet, for the diagnostic
 //!   log. It never fails.
 //! - [`hex`]: `e6 06 ab ...` hex dumps, as written in the diagnostic log.
+//! - [`blackboard`]: the Xiaomi blackboard (docs/research/xiaomi-blackboard.md): its frames, the
+//!   7-byte records of its live stream and stored pages, and its advertisement (MiBeacon).
 
+pub mod blackboard;
 pub mod crc;
 pub mod describe;
 pub mod frame;

@@ -7,6 +7,10 @@
 //! ([`ImportedPages`]) instead of being stored twice. A copy that failed its check never counts
 //! as imported ([`LibrarySink::store`]). Points are turned to the way the tablet is held ([`orient`]: landscape
 //! or portrait, either way up), in synced pages and in live mode alike.
+//!
+//! A page of the Xiaomi blackboard ([`DownloadedPage::kind`]) is read as its 7-byte records
+//! ([`blackboard_note`]): its page is the blackboard's own, portrait, never turned, and its times
+//! are synthesised from the record rate (the tablet sends none).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -18,10 +22,33 @@ use ardoise_core::note::{Background, Layer, Note, Origin, PageSize, Timing};
 use ardoise_core::settings::Orientation;
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
 use ardoise_proto::SLATE_MAX_PRESSURE;
+use ardoise_proto::blackboard::{self, BOARD_HEIGHT, BOARD_MAX_PRESSURE, BOARD_WIDTH};
 use ardoise_proto::live::LiveRecord;
-use ardoise_proto::stroke::{self, StrokeError, StrokeTime};
+use ardoise_proto::stroke::{self, INTUOS_PRO_MAGIC, SLATE_MAGIC, StrokeError, StrokeTime};
 
 use crate::session::DownloadedPage;
+use crate::transport::TabletKind;
+
+/// The blackboard's page, portrait, in the notes' units (10 µm, taken 1:1 from its units): the
+/// size of the notes it writes now.
+pub const BLACKBOARD_PAGE: PageSize = PageSize {
+    width: BOARD_WIDTH,
+    height: BOARD_HEIGHT,
+};
+/// Every page size the blackboard has ever written with, [`BLACKBOARD_PAGE`] first. A
+/// calibration of `BOARD_WIDTH` and `BOARD_HEIGHT` (docs/design/blackboard.md §3) adds the new
+/// size here and keeps the old ones: the notes written before stay blackboard pages (resumed
+/// with the blackboard, never with the Slate).
+pub const BLACKBOARD_PAGES: [PageSize; 1] = [BLACKBOARD_PAGE];
+
+/// Whether `size` is a page the blackboard wrote ([`BLACKBOARD_PAGES`]).
+pub fn is_blackboard_page(size: PageSize) -> bool {
+    BLACKBOARD_PAGES.contains(&size)
+}
+/// A blackboard page dated before this (2020-01-01 00:00:00 UTC, Unix seconds) has a clock that
+/// was never set: its note is dated by the import ([`blackboard_note`]). The tablet was sold from
+/// December 2021 (research note §1).
+pub const EARLIEST_BOARD_PAGE: i64 = 1_577_836_800;
 
 /// Nominal diameter of the tablet's pen, in device units (0.6 mm, the editor's default pen).
 pub const TABLET_PEN_WIDTH: f32 = 60.0;
@@ -257,9 +284,35 @@ fn stroke_starts(file: &stroke::StrokeFile) -> Vec<u64> {
     starts
 }
 
+/// The tablet whose page `bytes` are, for bytes kept without it (`original.bin`): a Slate (or
+/// Intuos Pro) file starts with its header; whole 7-byte records starting with a pen status of
+/// the blackboard are a blackboard page. Anything else is taken for a Slate file (whose decoder
+/// then says what is wrong).
+pub fn page_kind(bytes: &[u8]) -> TabletKind {
+    let header = bytes.starts_with(&SLATE_MAGIC) || bytes.starts_with(&INTUOS_PRO_MAGIC);
+    let records = !bytes.is_empty()
+        && bytes.len().is_multiple_of(blackboard::record::RECORD_LEN)
+        && bytes.first().is_some_and(|status| {
+            [
+                blackboard::record::TOUCH,
+                blackboard::record::HOVER,
+                blackboard::record::OUT,
+            ]
+            .contains(status)
+        });
+    if !header && records {
+        TabletKind::Blackboard
+    } else {
+        TabletKind::Slate
+    }
+}
+
 /// The note of one downloaded page: black ballpoint strokes on a page of the tablet's size
 /// (`size`, swapped in portrait), turned to the way the tablet is held ([`orient`]), `created` at the page's timestamp (or `now_ms`),
 /// `original.bin` = the bytes received (untouched).
+///
+/// A page of the blackboard (`page.kind`) ignores `size` and `orientation`: see
+/// [`blackboard_note`].
 pub fn note_from_page(
     page: &DownloadedPage,
     size: PageSize,
@@ -268,6 +321,9 @@ pub fn note_from_page(
     layer_name: &str,
     now_ms: i64,
 ) -> Result<NoteFile, PageError> {
+    if page.kind == TabletKind::Blackboard {
+        return Ok(blackboard_note(page, id, layer_name, now_ms));
+    }
     let file = stroke::decode(&page.bytes)?;
     let starts = stroke_starts(&file);
     let max_pressure = f32::from(SLATE_MAX_PRESSURE);
@@ -322,6 +378,74 @@ pub fn note_from_page(
     let mut note_file = NoteFile::new(note);
     note_file.original = Some(page.bytes.clone());
     Ok(note_file)
+}
+
+/// The note of a page of the Xiaomi blackboard: black ballpoint strokes, the runs of touching
+/// records, on the blackboard's page ([`BLACKBOARD_PAGE`], portrait, never turned: the
+/// blackboard has no orientation, and its x and y are the notes' units 1:1); each record one
+/// period of [`blackboard::record::RECORDS_PER_SECOND`] after the previous one, half a second
+/// more after the pen left the range (`Timing::Synthesized`: the tablet keeps no time per
+/// point); `created` at the page's time (when it was stored, by the tablet's clock), else (no
+/// time, or one before [`EARLIEST_BOARD_PAGE`]) `now_ms`; `original.bin` = the bytes received.
+/// Never fails: unknown records are skipped.
+pub fn blackboard_note(
+    page: &DownloadedPage,
+    id: String,
+    layer_name: &str,
+    now_ms: i64,
+) -> NoteFile {
+    let decoded = blackboard::decode_page(&page.bytes);
+    let max_pressure = f32::from(BOARD_MAX_PRESSURE);
+    let strokes = decoded
+        .strokes
+        .iter()
+        .filter(|s| !s.points.is_empty())
+        .map(|s| Stroke {
+            tool: Tool::Ballpoint,
+            color: Rgba::BLACK,
+            width: TABLET_PEN_WIDTH,
+            layer: 0,
+            points: s
+                .points
+                .iter()
+                .map(|p| Point {
+                    x: f32::from(p.x),
+                    y: f32::from(p.y),
+                    pressure: (f32::from(p.pressure) / max_pressure).clamp(0.0, 1.0),
+                    t: p.t,
+                })
+                .collect(),
+        })
+        .collect();
+    // A tablet whose clock was never set (after its battery ran out, say) dates its pages near
+    // 1970: such a note is dated by the import instead. Its id still comes from the page's time
+    // and bytes (`page_note_id`), so the page is recognised all the same.
+    let created = page
+        .timestamp
+        .filter(|seconds| *seconds >= EARLIEST_BOARD_PAGE)
+        .and_then(|seconds| seconds.checked_mul(1000))
+        .unwrap_or(now_ms);
+    let note = Note {
+        id,
+        title: String::new(),
+        created,
+        modified: now_ms.max(created),
+        page: BLACKBOARD_PAGE,
+        background: Background::default(),
+        background_image: None,
+        tags: Vec::new(),
+        favorite: false,
+        layers: vec![Layer {
+            name: layer_name.to_owned(),
+            visible: true,
+        }],
+        strokes,
+        timing: Timing::Synthesized,
+        origin: Origin::Tablet,
+    };
+    let mut note_file = NoteFile::new(note);
+    note_file.original = Some(page.bytes.clone());
+    note_file
 }
 
 /// Called once a synced note is safely in the library (automatic export).
@@ -534,6 +658,7 @@ mod tests {
             bytes,
             // 2026-10-24 09:30:00 UTC.
             timestamp: Some(1_792_834_200),
+            kind: TabletKind::Slate,
         }
     }
 
@@ -596,6 +721,7 @@ mod tests {
             bytes: vec![1, 2, 3],
             timestamp: None,
             announced_size: 3,
+            kind: TabletKind::Slate,
         };
         assert!(sink.store(bad).is_err());
         assert_eq!(library.list().notes.len(), 2);
@@ -925,6 +1051,7 @@ mod tests {
             bytes: vec![1, 2, 3],
             timestamp: Some(0),
             announced_size,
+            kind: TabletKind::Slate,
         };
         assert_eq!(
             page_note_id(&small(3)),
@@ -933,6 +1060,118 @@ mod tests {
         assert_eq!(page_note_id(&small(3)), page_note_id(&small(99)));
         let random = new_note_id().unwrap();
         assert_eq!(&random[14..15], "4", "{random}");
+    }
+
+    fn board_page() -> DownloadedPage {
+        use ardoise_proto::blackboard::{Record, RecordStatus, record::encode_records};
+        let rec = |status, x, y, pressure| Record {
+            status,
+            x,
+            y,
+            pressure,
+        };
+        let bytes = encode_records(&[
+            rec(RecordStatus::Hover, 100, 200, 0),
+            rec(RecordStatus::Touch, 100, 200, 1024),
+            rec(RecordStatus::Touch, 110, 210, 2047),
+            rec(RecordStatus::Out, 110, 210, 0),
+            rec(RecordStatus::Touch, 20_401, 27_067, 500),
+        ]);
+        DownloadedPage {
+            announced_size: bytes.len() as u32,
+            bytes,
+            timestamp: Some(1_792_834_200),
+            kind: TabletKind::Blackboard,
+        }
+    }
+
+    #[test]
+    fn a_blackboard_page_becomes_a_portrait_note_with_synthesised_times() {
+        let page = board_page();
+        // The size and orientation given are the Slate's: a blackboard page ignores them.
+        let file = note_from_page(
+            &page,
+            A4_LANDSCAPE,
+            Orientation::PortraitLeft,
+            "id".into(),
+            "Calque 1",
+            5,
+        )
+        .unwrap();
+        let note = &file.note;
+        assert_eq!(note.page, BLACKBOARD_PAGE);
+        assert!(note.page.width < note.page.height, "portrait");
+        assert_eq!(note.timing, Timing::Synthesized);
+        assert_eq!(note.origin, Origin::Tablet);
+        assert_eq!(note.created, 1_792_834_200_000);
+        assert_eq!(file.original.as_deref(), Some(page.bytes.as_slice()));
+        assert_eq!(note.strokes.len(), 2);
+        let first = &note.strokes[0];
+        assert_eq!((first.points[0].x, first.points[0].y), (100.0, 200.0));
+        assert!((first.points[0].pressure - 1024.0 / 2047.0).abs() < 1e-6);
+        assert_eq!(
+            first.points.iter().map(|p| p.t).collect::<Vec<_>>(),
+            [8, 16]
+        );
+        // Untouched coordinates, half a second after the pen left.
+        let second = &note.strokes[1].points[0];
+        assert_eq!((second.x, second.y), (20_401.0, 27_067.0));
+        assert_eq!(second.t, 33 + 500);
+        // Kept bytes are recognised without their tablet.
+        assert_eq!(page_kind(&page.bytes), TabletKind::Blackboard);
+        assert_eq!(
+            page_kind(&stroke::encode_slate(&[raw_stroke(0, 100, 5)])),
+            TabletKind::Slate
+        );
+        assert_eq!(page_kind(&[]), TabletKind::Slate);
+        assert_eq!(page_kind(&[0xa1; 6]), TabletKind::Slate);
+        assert_eq!(page_kind(&[0x07; 7]), TabletKind::Slate);
+    }
+
+    #[test]
+    fn a_blackboard_page_of_a_clock_never_set_is_dated_by_the_import() {
+        let mut page = board_page();
+        for seconds in [0, EARLIEST_BOARD_PAGE - 1] {
+            page.timestamp = Some(seconds);
+            let file = note_from_page(
+                &page,
+                A4_LANDSCAPE,
+                Orientation::Landscape,
+                page_note_id(&page),
+                "Calque 1",
+                1_792_834_200_123,
+            )
+            .unwrap();
+            assert_eq!(file.note.created, 1_792_834_200_123);
+            // The id still comes from the time and the bytes: the page is recognised again.
+            assert_eq!(file.note.id, page_note_id(&page));
+        }
+        page.timestamp = Some(EARLIEST_BOARD_PAGE);
+        let file = note_from_page(
+            &page,
+            A4_LANDSCAPE,
+            Orientation::Landscape,
+            "id".into(),
+            "L",
+            9,
+        )
+        .unwrap();
+        assert_eq!(file.note.created, EARLIEST_BOARD_PAGE * 1000);
+    }
+
+    #[test]
+    fn a_blackboard_page_is_stored_and_recognised_like_a_slate_page() {
+        let dir = tempfile::tempdir().unwrap();
+        ardoise_core::library::init(dir.path()).unwrap();
+        let library = Library::open(dir.path()).unwrap();
+        let page = board_page();
+        let mut sink = LibrarySink::new(&library, "", A4_LANDSCAPE, "Layer 1", || 7);
+        let saved = sink.store(page.clone()).unwrap();
+        let back = library.read(&saved.path).unwrap().file;
+        assert_eq!(back.note.page, BLACKBOARD_PAGE);
+        assert_eq!(back.note.id, page_note_id(&page));
+        let imported = ImportedPages::scan(&library);
+        assert_eq!(imported.find(&library, &page), Some(saved.path));
     }
 
     #[test]

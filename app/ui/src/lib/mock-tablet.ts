@@ -5,6 +5,11 @@
  * moves on `setTimeout`s paced by `mockTablet.stepMs`, so tests drive it with fake timers.
  * Work package C (docs/design/tablet-live-classroom.md).
  *
+ * The second tablet (M18, docs/design/blackboard.md §5): a simulated Xiaomi blackboard that the
+ * search hears after a beat, that is added without registration, connects, syncs its pages (always
+ * deleting each one), reports battery and memory, and is forgotten on its own. The Slate goes
+ * first when both are in range, as in the service.
+ *
  * Whether a tablet is registered follows `tablet_info` / `forget_tablet` of `mock-library.ts`
  * (the demo library knows a registered tablet). A registration made here after forgetting it is
  * kept in this module only: `tablet_info` keeps answering null in that case.
@@ -13,9 +18,17 @@ import type { InkPoint } from './ink';
 import { UNHANDLED, fileName, freshStamp, mockLibrary, notifyLibraryChanged } from './mock-data';
 import { failure, freePath, mockLibraryInvoke } from './mock-library';
 import type { Note, Stroke, TabletInfo } from './note';
-import { setMockLiveOrientation } from './mock-live';
+import { setMockLiveOrientation, setMockLiveTablet } from './mock-live';
 import { isOrientation, pageSizeFor, quarterTurns, turnStrokes, type Orientation } from './orientation';
-import type { Connection, DeviceDetails, TabletEvent, TabletOptions, TabletStatus } from './tablet';
+import type {
+  Connection,
+  DeviceDetails,
+  KnownTablet,
+  TabletEvent,
+  TabletKind,
+  TabletOptions,
+  TabletStatus,
+} from './tablet';
 
 /** Knobs of the simulated tablet; tests change them. */
 export const mockTablet = {
@@ -34,10 +47,28 @@ export const mockTablet = {
   battery: 87,
   /** Drift left after "set the clock", in seconds. */
   drift: 0.4,
+  /** The simulated blackboard is switched on and in range (as with `--simulated-blackboard`). */
+  boardInRange: true,
+  /** Blackboards the search hears: 0 ends it with `blackboardNotFound`, 2 gives a choice. */
+  boardsHeard: 1,
+  /** Battery level the blackboard reports. */
+  boardBattery: 90,
+  /** Beats until a search gives up (60 s in the service). */
+  boardSearchBeats: 60,
 };
 
 const FIRMWARE = 'B160805A-C170704A';
 const A4 = { width: 29700, height: 21600 };
+/** The blackboard's page: about 20 × 27 cm, portrait (docs/design/blackboard.md §1). */
+const BOARD_PAGE = { width: 20500, height: 27200 };
+const BOARD_NAME = 'Mijia LCD blackboard';
+const BOARD_MODEL = 'Xiaomi Mijia LCD blackboard';
+/** Memory of the simulated blackboard, in bytes (what the real tablet reports in total), and what one page takes. */
+const BOARD_MEMORY = 126_909_952;
+const BOARD_PAGE_BYTES = 180_000;
+const DAY_MS = 86_400_000;
+/** Connections in which the status names the tablet it is about (`active`). */
+const LINKED: ReadonlySet<Connection> = new Set<Connection>(['connecting', 'connected', 'syncing', 'live']);
 
 const DEFAULT_OPTIONS: TabletOptions = { autoSync: true, deleteAfterImport: true, orientation: 'landscape', button: 'newPage' };
 
@@ -58,6 +89,13 @@ interface Sim {
   pressWaiter: (() => void) | null;
   /** The registration under way. */
   registering: { cancelled: boolean } | null;
+  /** The blackboard, once added through the search (the Slate is the library's). */
+  board: KnownTablet | null;
+  /** Numbers of the pages in the blackboard's memory (it holds some before it is added). */
+  boardStored: number[];
+  boardNextPage: number;
+  /** The search for a blackboard under way. */
+  search: { cancelled: boolean } | null;
 }
 
 let sim: Sim | null = null;
@@ -67,11 +105,16 @@ export function resetMockTablet(): void {
   if (sim) for (const timer of sim.timers) clearTimeout(timer);
   sim = null;
   setMockLiveOrientation('landscape');
+  setMockLiveTablet(null);
   mockTablet.stepMs = 1000;
   mockTablet.autoPress = true;
   mockTablet.failRegistration = null;
   mockTablet.battery = 87;
   mockTablet.drift = 0.4;
+  mockTablet.boardInRange = true;
+  mockTablet.boardsHeard = 1;
+  mockTablet.boardBattery = 90;
+  mockTablet.boardSearchBeats = 60;
 }
 
 function registeredInfo(): TabletInfo | null {
@@ -86,6 +129,8 @@ function modelOf(width: number, height: number): string {
 
 function details(info: TabletInfo, storedPages: number): DeviceDetails {
   return {
+    kind: 'slate',
+    memory: null,
     name: info.name,
     firmware: FIRMWARE,
     batteryPercent: mockTablet.battery,
@@ -96,6 +141,53 @@ function details(info: TabletInfo, storedPages: number): DeviceDetails {
     model: modelOf(info.width, info.height),
     readAt: Date.now(),
   };
+}
+
+function boardDetails(s: Sim): DeviceDetails {
+  const stored = s.boardStored.length;
+  return {
+    kind: 'blackboard',
+    name: s.board?.name ?? BOARD_NAME,
+    firmware: '',
+    batteryPercent: mockTablet.boardBattery,
+    charging: false,
+    width: BOARD_PAGE.width,
+    height: BOARD_PAGE.height,
+    storedPages: stored,
+    model: BOARD_MODEL,
+    readAt: Date.now(),
+    memory: { total: BOARD_MEMORY, free: BOARD_MEMORY - stored * BOARD_PAGE_BYTES },
+  };
+}
+
+/** What a tablet says about itself, for the status. */
+function deviceOf(s: Sim, kind: TabletKind): DeviceDetails | null {
+  if (kind === 'blackboard') return boardDetails(s);
+  const info = s.status.registered;
+  return info ? details(info, s.stored.length) : null;
+}
+
+/** Every known tablet, the Slate first. */
+function knownOf(s: Sim): KnownTablet[] {
+  const list: KnownTablet[] = [];
+  const slate = s.status.registered;
+  if (slate) {
+    list.push({
+      kind: 'slate',
+      name: slate.name,
+      address: slate.address,
+      added: slate.registered,
+      width: slate.width,
+      height: slate.height,
+      model: modelOf(slate.width, slate.height),
+    });
+  }
+  if (s.board) list.push({ ...s.board });
+  return list;
+}
+
+function anyKnown(s: Sim): boolean {
+  return s.status.registered !== null || s.board !== null;
 }
 
 function getSim(): Sim {
@@ -113,6 +205,9 @@ function getSim(): Sim {
       error: null,
       simulated: true,
       options: { ...DEFAULT_OPTIONS },
+      active: null,
+      known: [],
+      boardSearch: null,
     },
     listeners: new Set(),
     timers: new Set(),
@@ -123,7 +218,12 @@ function getSim(): Sim {
     sync: null,
     pressWaiter: null,
     registering: null,
+    board: null,
+    boardStored: [1, 2, 3],
+    boardNextPage: 4,
+    search: null,
   };
+  created.status.known = knownOf(created);
   sim = created;
   if (registered) comeIntoRange(created);
   return created;
@@ -145,33 +245,64 @@ function clearTimers(s: Sim): void {
 /** Applies a change to the status and tells every subscriber. */
 function update(s: Sim, change: Partial<TabletStatus>): void {
   s.status = { ...s.status, ...change };
+  if (!LINKED.has(s.status.connection)) s.status.active = null;
+  s.status.known = knownOf(s);
+  setMockLiveTablet(s.status.active);
   for (const listener of [...s.listeners]) listener({ type: 'status', status: structuredClone(s.status) });
+}
+
+/** A tablet was forgotten: ends what depended on it and looks for the one that is left, if any. */
+function afterForget(s: Sim, kind: TabletKind): void {
+  const wasActive = s.status.active === kind;
+  const device = s.status.device?.kind === kind ? null : s.status.device;
+  if (!anyKnown(s) && s.status.connection !== 'adding') {
+    clearTimers(s);
+    s.sync = null;
+    update(s, { connection: 'notRegistered', device: null, sync: null, pending: null, lastSync: null });
+  } else if (wasActive) {
+    clearTimers(s);
+    s.sync = null;
+    update(s, { connection: 'searching', device, sync: null, pending: null });
+    comeIntoRange(s);
+  } else {
+    update(s, { device });
+  }
 }
 
 /** Makes the status follow what `mock-library.ts` says about the registered tablet. */
 function reconcile(s: Sim): void {
   const info = registeredInfo();
   if (!info && s.status.registered && s.status.connection !== 'registering') {
-    clearTimers(s);
-    s.sync = null;
-    update(s, { connection: 'notRegistered', registered: null, device: null, sync: null, pending: null, lastSync: null });
+    s.status = { ...s.status, registered: null };
+    afterForget(s, 'slate');
   } else if (info && s.status.registered && info.name !== s.status.registered.name) {
     update(s, { registered: { ...info } });
   } else if (info && !s.status.registered && s.status.connection === 'notRegistered') {
     // The demo library registered a tablet again (a new library).
     update(s, { connection: 'searching', registered: { ...info } });
     comeIntoRange(s);
+  } else if (info && !s.status.registered && s.status.connection !== 'registering') {
+    update(s, { registered: { ...info } });
   }
 }
 
 // --- Connection ----------------------------------------------------------------------------
 
+/** The tablet that is advertising: the Slate first, as in the service. */
+function nextInRange(s: Sim): TabletKind | null {
+  if (s.status.registered && mockTablet.inRange) return 'slate';
+  if (s.board && mockTablet.boardInRange) return 'blackboard';
+  return null;
+}
+
 /** searching → connecting → connected, then the automatic sync. */
 function comeIntoRange(s: Sim): void {
-  if (!mockTablet.inRange) return;
+  if (!nextInRange(s)) return;
   later(s, 1, () => {
     if (s.status.connection !== 'searching') return;
-    update(s, { connection: 'connecting' });
+    const kind = nextInRange(s);
+    if (!kind) return;
+    update(s, { connection: 'connecting', active: kind });
     later(s, 0.5, () => {
       if (s.status.connection === 'connecting') connected(s);
     });
@@ -179,11 +310,17 @@ function comeIntoRange(s: Sim): void {
 }
 
 function connected(s: Sim): void {
-  const info = s.status.registered;
-  if (!info) return;
-  update(s, { connection: 'connected', device: details(info, s.stored.length), error: null });
+  const kind: TabletKind = s.status.active ?? 'slate';
+  const device = deviceOf(s, kind);
+  if (!device) return;
+  update(s, { connection: 'connected', active: kind, device, error: null });
   const wanted = s.status.pending === 'sync';
-  if ((wanted || s.status.options.autoSync) && s.stored.length > 0) {
+  // The blackboard is read without being asked only with deletion on (it always deletes what it reads): with the
+  // option off its pages wait for a sync confirmed by the user, and a sync that waited for it brings nothing.
+  const mayRun = kind === 'slate' || s.status.options.deleteAfterImport;
+  const automatic = s.status.options.autoSync && mayRun;
+  const waiting = (kind === 'blackboard' ? s.boardStored : s.stored).length;
+  if (mayRun && (wanted || automatic) && waiting > 0) {
     later(s, 0.5, () => {
       if (s.status.connection === 'connected') startSync(s);
     });
@@ -238,26 +375,38 @@ function pageStrokes(page: number): Stroke[] {
   }
 }
 
+/** A blackboard page: the same drawings, fitted to its portrait page (never turned). */
+function boardStrokes(page: number): Stroke[] {
+  return pageStrokes(page).map((s) => ({
+    ...s,
+    points: s.points.map((p) => ({ ...p, x: p.x * 0.7, y: p.y * 1.2 })),
+  }));
+}
+
 /** The strokes of a tablet page turned to the way the tablet is held (as `pages::orient`). */
 function orient(strokes: Stroke[], width: number, height: number, orientation: Orientation): Stroke[] {
   return turnStrokes(strokes, width, height, quarterTurns(orientation));
 }
 
-function writeNote(s: Sim, page: number): string {
+/** `age`: how long ago the blackboard stored the page, in days (its notes are dated by the page). */
+function writeNote(s: Sim, page: number, kind: TabletKind, age = 0): string {
   const info = s.status.registered ?? { ...A4 };
-  const strokes = pageStrokes(page);
+  const board = kind === 'blackboard';
   const now = Date.now();
+  const created = now - age * DAY_MS;
   const note: Note = {
     id: globalThis.crypto?.randomUUID?.() ?? `00000000-0000-4000-8000-${String(now).slice(-12).padStart(12, '0')}`,
     title: '',
-    created: now,
-    modified: now,
-    page: pageSizeFor(s.status.options.orientation, info.width, info.height),
+    created,
+    modified: created,
+    page: board ? { ...BOARD_PAGE } : pageSizeFor(s.status.options.orientation, info.width, info.height),
     background: { paper: 'white', template: 'blank', texture: false },
     tags: [],
     layers: [{ name: 'Calque 1', visible: true }],
-    strokes: orient(strokes, info.width, info.height, s.status.options.orientation),
-    timing: 'recorded',
+    strokes: board
+      ? boardStrokes(page)
+      : orient(pageStrokes(page), info.width, info.height, s.status.options.orientation),
+    timing: board ? 'synthesized' : 'recorded',
     origin: { kind: 'tablet' },
   };
   const library = mockLibrary();
@@ -270,9 +419,14 @@ function writeNote(s: Sim, page: number): string {
 function startSync(s: Sim): void {
   const run = { cancelled: false };
   s.sync = run;
+  const kind: TabletKind = s.status.active ?? 'slate';
+  const board = kind === 'blackboard';
   // Like the real tablet: it hands over its oldest page only, the next one is reachable once
-  // that one is deleted. Without deletion a sync therefore reads one page.
-  const pages = s.status.options.deleteAfterImport ? [...s.stored] : s.stored.slice(0, 1);
+  // that one is deleted. Without deletion a sync of the Slate therefore reads one page; the
+  // blackboard's sync always deletes (it is the only way to its next page).
+  const deletes = board || s.status.options.deleteAfterImport;
+  const waiting = board ? s.boardStored : s.stored;
+  const pages = deletes ? [...waiting] : waiting.slice(0, 1);
   const saved: string[] = [];
   let deleted = 0;
   update(s, {
@@ -284,12 +438,11 @@ function startSync(s: Sim): void {
 
   const finish = () => {
     s.sync = null;
-    const info = s.status.registered;
     update(s, {
       connection: 'connected',
       sync: null,
       lastSync: { at: Date.now(), saved, deleted, error: null },
-      device: info ? details(info, s.stored.length) : s.status.device,
+      device: deviceOf(s, kind) ?? s.status.device,
     });
   };
 
@@ -301,17 +454,24 @@ function startSync(s: Sim): void {
     update(s, { sync: { current: index + 1, total: pages.length, saved: saved.length } });
     later(s, 0.6, () => {
       const page = pages[index];
-      // A page kept on the tablet earlier is not written twice.
-      if (!s.imported.has(page)) {
-        saved.push(writeNote(s, page));
-        s.imported.add(page);
+      // A page kept on the Slate earlier is not written twice.
+      if (board || !s.imported.has(page)) {
+        saved.push(writeNote(s, page, kind, board ? pages.length - index : 0));
+        if (!board) s.imported.add(page);
       }
-      if (s.status.options.deleteAfterImport) {
-        s.stored = s.stored.filter((p) => p !== page);
-        s.imported.delete(page);
+      if (deletes) {
+        if (board) s.boardStored = s.boardStored.filter((p) => p !== page);
+        else {
+          s.stored = s.stored.filter((p) => p !== page);
+          s.imported.delete(page);
+        }
         deleted += 1;
       }
-      update(s, { sync: { current: index + 1, total: pages.length, saved: saved.length } });
+      // The blackboard's page count goes down page by page.
+      update(s, {
+        sync: { current: index + 1, total: pages.length, saved: saved.length },
+        ...(board ? { device: boardDetails(s) } : {}),
+      });
       next(index + 1);
     });
   };
@@ -322,7 +482,14 @@ function startSync(s: Sim): void {
 export function mockTabletDraw(count = 1): void {
   const s = getSim();
   for (let i = 0; i < count; i++) s.stored.push(s.nextPage++);
-  if (s.status.device) update(s, { device: { ...s.status.device, storedPages: s.stored.length } });
+  if (s.status.device?.kind === 'slate') update(s, { device: { ...s.status.device, storedPages: s.stored.length } });
+}
+
+/** A page stored on the simulated blackboard with its button (`sim_blackboard_store_page`). */
+export function mockBoardDraw(count = 1): void {
+  const s = getSim();
+  for (let i = 0; i < count; i++) s.boardStored.push(s.boardNextPage++);
+  if (s.status.device?.kind === 'blackboard') update(s, { device: boardDetails(s) });
 }
 
 /** Changes the status as if the service had (tests: low battery, charging, an error…). */
@@ -342,13 +509,12 @@ function startRegistration(s: Sim): void {
 
   const fail = (code: string) => {
     s.registering = null;
-    const registered = registeredInfo();
     update(s, {
-      connection: registered ? 'searching' : 'notRegistered',
+      connection: anyKnown(s) || registeredInfo() ? 'searching' : 'notRegistered',
       registerStep: null,
       error: { code, message: '' },
     });
-    if (registered) comeIntoRange(s);
+    if (anyKnown(s)) comeIntoRange(s);
   };
 
   later(s, 1, () => {
@@ -392,15 +558,73 @@ function startRegistration(s: Sim): void {
   });
 }
 
+// --- Search for a blackboard to add --------------------------------------------------------
+
+/** Ends the search: back to waiting for a known tablet; `code` is why it heard nothing. */
+function endSearch(s: Sim, code: string | null): void {
+  s.search = null;
+  clearTimers(s);
+  update(s, {
+    connection: anyKnown(s) ? 'searching' : 'notRegistered',
+    boardSearch: null,
+    error: code ? { code, message: '' } : null,
+  });
+  if (anyKnown(s)) comeIntoRange(s);
+}
+
+function startSearch(s: Sim): void {
+  const run = { cancelled: false };
+  // The link is closed while one listens: nothing else is under way here (busy is refused before).
+  clearTimers(s);
+  s.search = run;
+  update(s, {
+    connection: 'adding',
+    error: null,
+    boardSearch: { found: [], until: Date.now() + Math.round(mockTablet.stepMs * mockTablet.boardSearchBeats) },
+  });
+  for (let i = 0; i < mockTablet.boardsHeard; i++) {
+    later(s, 1 + i * 0.5, () => {
+      const search = s.status.boardSearch;
+      if (s.search !== run || !search) return;
+      const found = [
+        ...search.found,
+        { address: `00:00:5E:00:53:0${i + 1}`, name: 'xiaomi.dev.ble', rssi: -52 - 14 * i },
+      ];
+      update(s, { boardSearch: { ...search, found } });
+    });
+  }
+  later(s, mockTablet.boardSearchBeats, () => {
+    if (s.search !== run) return;
+    endSearch(s, (s.status.boardSearch?.found.length ?? 0) === 0 ? 'blackboardNotFound' : null);
+  });
+}
+
+function addBlackboard(s: Sim, address: string): void {
+  const heard = s.search ? s.status.boardSearch?.found.find((f) => f.address.toLowerCase() === address.toLowerCase()) : undefined;
+  if (!heard) failure('blackboardNotFound', '');
+  s.board = {
+    kind: 'blackboard',
+    name: BOARD_NAME,
+    address: heard.address,
+    added: new Date().toISOString(),
+    width: BOARD_PAGE.width,
+    height: BOARD_PAGE.height,
+    model: BOARD_MODEL,
+  };
+  endSearch(s, null);
+}
+
 function cancel(s: Sim): void {
-  if (s.registering) {
+  if (s.search) {
+    s.search.cancelled = true;
+    endSearch(s, null);
+  } else if (s.registering) {
     s.registering.cancelled = true;
     s.registering = null;
     s.pressWaiter = null;
     clearTimers(s);
-    const registered = registeredInfo();
-    update(s, { connection: registered ? 'searching' : 'notRegistered', registerStep: null, error: null });
-    if (registered) comeIntoRange(s);
+    update(s, { connection: anyKnown(s) || registeredInfo() ? 'searching' : 'notRegistered', registerStep: null, error: null });
+    if (anyKnown(s)) comeIntoRange(s);
   } else if (s.sync) {
     // Between two pages: the page being written is finished.
     s.sync.cancelled = true;
@@ -409,10 +633,14 @@ function cancel(s: Sim): void {
 
 // --- Commands ------------------------------------------------------------------------------
 
+function isBusyNow(c: Connection): boolean {
+  return c === 'syncing' || c === 'live' || c === 'registering' || c === 'adding';
+}
+
 function requireConnected(s: Sim): void {
   const c: Connection = s.status.connection;
   if (c === 'notRegistered') failure('tabletNotRegistered', '');
-  if (c === 'syncing' || c === 'live' || c === 'registering') failure('tabletBusy', '');
+  if (isBusyNow(c)) failure('tabletBusy', '');
   if (c !== 'connected') failure('tabletNotConnected', '');
 }
 
@@ -431,9 +659,7 @@ export function mockTabletInvoke(command: string, args: Record<string, unknown>)
 
     case 'tablet_register': {
       const s = getSim();
-      if (s.status.connection === 'registering' || s.status.connection === 'syncing' || s.status.connection === 'live') {
-        failure('tabletBusy', '');
-      }
+      if (isBusyNow(s.status.connection)) failure('tabletBusy', '');
       startRegistration(s);
       return undefined;
     }
@@ -447,9 +673,20 @@ export function mockTabletInvoke(command: string, args: Record<string, unknown>)
       reconcile(s);
       const c = s.status.connection;
       if (c === 'notRegistered') failure('tabletNotRegistered', '');
-      if (c === 'syncing' || c === 'live' || c === 'registering') failure('tabletBusy', '');
-      if (c === 'connected') startSync(s);
-      else update(s, { pending: 'sync' });
+      if (isBusyNow(c)) failure('tabletBusy', '');
+      // The blackboard's pages are deleted once imported: with the option off, only after the user said so (as Rust: from
+      // the moment the blackboard is the tablet being connected).
+      const askedFirst =
+        s.status.active === 'blackboard' &&
+        (c === 'connecting' || c === 'connected') &&
+        !s.status.options.deleteAfterImport &&
+        args.confirmBlackboardDelete !== true;
+      if (askedFirst) failure('blackboardConfirmDelete', '');
+      if (c === 'connected') {
+        startSync(s);
+      } else {
+        update(s, { pending: 'sync' });
+      }
       return undefined;
     }
 
@@ -457,6 +694,7 @@ export function mockTabletInvoke(command: string, args: Record<string, unknown>)
       const s = getSim();
       reconcile(s);
       requireConnected(s);
+      if (s.status.active === 'blackboard') failure('notSupported', '');
       const name = String(args.name ?? '');
       if (!validName(name)) failure('invalidName', name);
       const trimmed = name.trim();
@@ -471,7 +709,8 @@ export function mockTabletInvoke(command: string, args: Record<string, unknown>)
       const s = getSim();
       reconcile(s);
       requireConnected(s);
-      return mockTablet.drift;
+      // The blackboard cannot be asked its time: nothing to read back.
+      return s.status.active === 'blackboard' ? 0 : mockTablet.drift;
     }
 
     case 'tablet_set_options': {
@@ -498,6 +737,37 @@ export function mockTabletInvoke(command: string, args: Record<string, unknown>)
       const s = getSim();
       if (!s.status.simulated) failure('simulationOnly', '');
       s.pressWaiter?.();
+      return undefined;
+    }
+
+    case 'tablet_find_blackboards': {
+      const s = getSim();
+      reconcile(s);
+      if (isBusyNow(s.status.connection) && s.status.connection !== 'adding') failure('tabletBusy', '');
+      // A search under way starts again from nothing.
+      startSearch(s);
+      return undefined;
+    }
+
+    case 'tablet_add_blackboard': {
+      const s = getSim();
+      addBlackboard(s, String(args.address ?? ''));
+      return structuredClone(s.status);
+    }
+
+    case 'tablet_forget_blackboard': {
+      const s = getSim();
+      if (s.board) {
+        s.board = null;
+        afterForget(s, 'blackboard');
+      }
+      return undefined;
+    }
+
+    case 'sim_blackboard_store_page': {
+      const s = getSim();
+      if (!s.status.simulated) failure('simulationOnly', '');
+      mockBoardDraw(1);
       return undefined;
     }
 

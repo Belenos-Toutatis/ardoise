@@ -301,7 +301,8 @@ impl<'a> SharedEvent<'a> {
             | LiveEvent::History { .. }
             | LiveEvent::Saved { .. }
             | LiveEvent::SaveFailed { .. }
-            | LiveEvent::SheetForked { .. } => return None,
+            | LiveEvent::SheetForked { .. }
+            | LiveEvent::Refused { .. } => return None,
         })
     }
 }

@@ -7,6 +7,11 @@
 //!
 //! The interface is blocking on purpose: the manager runs on its own thread and waits with
 //! timeouts, which keeps the protocol code linear and the tests deterministic.
+//!
+//! Two kinds of tablet share it ([`TabletKind`]): the Wacom Bamboo Slate and the Xiaomi Mijia
+//! LCD blackboard (docs/design/blackboard.md). Both take their commands on Nordic UART TX and
+//! answer on Nordic UART RX ([`Channel::Command`]); the blackboard sends its pen records and
+//! page bytes on a channel of its own ([`Channel::BoardData`]).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -18,6 +23,30 @@ pub const WACOM_COMPANY_IDS: [u16; 3] = [0x4755, 0x4157, 0x424d];
 /// Length of the manufacturer data while the tablet waits to be registered (blue LED blinking).
 /// It is 7 bytes in normal mode.
 pub const REGISTER_MODE_DATA_LEN: usize = 4;
+
+/// The kinds of tablet Ardoise talks to. Nothing else is ever connected to or written to.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum TabletKind {
+    /// A Wacom smartpad (Bamboo Slate), recognised by its company identifier.
+    #[default]
+    Slate,
+    /// The Xiaomi Mijia LCD blackboard, storage edition, recognised by its MiBeacon (product
+    /// 4056 in the service data of `fe95`).
+    Blackboard,
+}
+
+impl TabletKind {
+    /// How the diagnostic log and the status name it.
+    pub fn name(self) -> &'static str {
+        match self {
+            TabletKind::Slate => "slate",
+            TabletKind::Blackboard => "blackboard",
+        }
+    }
+}
 
 /// Where a notification came from. Host writes always go to the command characteristic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -31,6 +60,8 @@ pub enum Channel {
     Live,
     /// "Sysevent" notifications (`3a340721-…`), meaning unknown, only logged.
     SysEvent,
+    /// The Xiaomi blackboard's live pen records and stored-page bytes (`6e400004-…`).
+    BoardData,
 }
 
 /// Something received on an open link.
@@ -56,6 +87,10 @@ pub struct Advertisement {
     pub company_id: Option<u16>,
     /// Manufacturer-specific data, without the company identifier.
     pub manufacturer_data: Vec<u8>,
+    /// Service data of Xiaomi's 16-bit service `fe95` (a MiBeacon), when present. Absent from
+    /// the logs and identities written before the blackboard was known (serde default).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub xiaomi_service_data: Vec<u8>,
 }
 
 impl Advertisement {
@@ -68,6 +103,24 @@ impl Advertisement {
     /// Whether the tablet is waiting to be registered (button held until the LED blinks blue).
     pub fn in_register_mode(&self) -> bool {
         self.is_wacom() && self.manufacturer_data.len() == REGISTER_MODE_DATA_LEN
+    }
+
+    /// Whether this is the Xiaomi blackboard: its MiBeacon names product 4056
+    /// (`ardoise_proto::blackboard::beacon`).
+    pub fn is_blackboard(&self) -> bool {
+        ardoise_proto::blackboard::beacon::MiBeacon::parse(&self.xiaomi_service_data)
+            .is_some_and(|beacon| beacon.is_blackboard())
+    }
+
+    /// The kind of tablet this is, `None` for any other device (never connected to).
+    pub fn kind(&self) -> Option<TabletKind> {
+        if self.is_wacom() {
+            Some(TabletKind::Slate)
+        } else if self.is_blackboard() {
+            Some(TabletKind::Blackboard)
+        } else {
+            None
+        }
     }
 }
 
@@ -182,6 +235,7 @@ mod tests {
             rssi: Some(-60),
             company_id,
             manufacturer_data: vec![0; data_len],
+            xiaomi_service_data: Vec::new(),
         }
     }
 
@@ -192,6 +246,30 @@ mod tests {
         assert!(advertisement(Some(0x424d), 4).in_register_mode());
         assert!(!advertisement(Some(0x0006), 4).is_wacom());
         assert!(!advertisement(None, 4).in_register_mode());
+        assert_eq!(
+            advertisement(Some(0x4755), 7).kind(),
+            Some(TabletKind::Slate)
+        );
+        assert_eq!(advertisement(Some(0x0006), 4).kind(), None);
+    }
+
+    #[test]
+    fn recognises_the_blackboard_by_its_beacon_only() {
+        let mut board = advertisement(None, 0);
+        board.name = Some("xiaomi.dev.ble".into());
+        assert_eq!(board.kind(), None, "the name alone is not enough");
+        board.xiaomi_service_data =
+            ardoise_proto::blackboard::beacon::blackboard_service_data([0, 0, 0x5e, 0, 0x53, 1], 0);
+        assert!(board.is_blackboard());
+        assert_eq!(board.kind(), Some(TabletKind::Blackboard));
+        // Another Xiaomi product.
+        board.xiaomi_service_data = vec![0x10, 0x59, 0x5b, 0x04, 0x00];
+        assert_eq!(board.kind(), None);
+        // Older JSON without the field still loads.
+        let old = r#"{"address":"E2:43:03:67:0E:01","name":null,"rssi":null,"companyId":18261,"manufacturerData":[0,0,0,0,0,0,0]}"#;
+        let parsed: Advertisement = serde_json::from_str(old).unwrap();
+        assert!(parsed.xiaomi_service_data.is_empty());
+        assert!(!serde_json::to_string(&parsed).unwrap().contains("xiaomi"));
     }
 
     #[test]

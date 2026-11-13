@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ardoise_core::note::{Note, PageSize, Paper};
 use ardoise_core::settings::Orientation;
 use ardoise_device::pages::TABLET_PEN_WIDTH;
+use ardoise_device::transport::TabletKind;
 use ardoise_ink::{Rgba, Stroke, Tool};
 use serde::{Deserialize, Serialize, Serializer};
 
@@ -299,6 +300,10 @@ pub struct LiveSnapshot {
     /// The key and size of the pixels of the page's image; `None` without one. The windows key their
     /// paper on it, the Fond tab places the image with it (M17). Not in the share's allow list.
     pub image_pixels: Option<ImagePixels>,
+    /// The tablet this session writes with (`slate`, `blackboard`; M18): set when its tablet first
+    /// connects, kept while it reconnects (a live session never changes tablets), `None` before.
+    /// The live window shows the position switch for the Slate only. Not in the share's allow list.
+    pub tablet: Option<TabletKind>,
 }
 
 /// The key and size of the pixels of a page's background image (`LiveSnapshot::image_pixels`).
@@ -514,6 +519,15 @@ pub enum LiveEvent {
         original: String,
         /// The new note.
         path: String,
+    },
+    /// The tablet that connected cannot write on the sheet this session resumes (`sheetOtherTablet`:
+    /// a Slate sheet with the blackboard, a blackboard page with the Slate): the session ended at
+    /// once, `idle`, nothing written on the sheet; the tablet leaves live mode. Sent once, to the
+    /// windows subscribed then; never to the viewers of the share.
+    Refused {
+        /// `errorCodes.*`.
+        code: String,
+        message: String,
     },
     /// Finished strokes of page `page_index` were deleted, came back or changed colour (an edit,
     /// its undo or redo). Applied to the list in this order: `removed`, then `inserted`, then

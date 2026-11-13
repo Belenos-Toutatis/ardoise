@@ -447,10 +447,12 @@ describe('tablet panel: tablet settings', () => {
 });
 
 describe('tablet panel: no tablet registered', () => {
-  it('offers the registration, and nothing else of the tablet', async () => {
+  it('offers to register the Slate or to add the Xiaomi tablet, and nothing else of the tablet', async () => {
     const { q, action, target } = await render({ forget: true });
     expect(action('register')).not.toBeNull();
+    expect(action('add-blackboard')).not.toBeNull();
     expect(target.textContent).toContain('Enregistrez votre Bamboo Slate');
+    expect(target.textContent).toContain('ajoutez votre tablette Xiaomi');
     for (const name of ['sync', 'live', 'rename', 'set-time', 'forget']) expect(action(name), name).toBeNull();
     expect(q('[data-slot="tablet-options"]')).toBeNull();
     // The test of the tablet stays reachable.
@@ -481,7 +483,8 @@ describe('tablet panel: no tablet registered', () => {
   it('says so in English', async () => {
     const { target } = await render({ forget: true, locale: 'en' });
     expect(target.textContent).toContain('No tablet is registered.');
-    expect(target.textContent).toContain('Register the tablet');
+    expect(target.textContent).toContain('Register the Bamboo Slate');
+    expect(target.textContent).toContain('Add the Xiaomi tablet');
   });
 
   it('shows a message while the state is not known yet', async () => {

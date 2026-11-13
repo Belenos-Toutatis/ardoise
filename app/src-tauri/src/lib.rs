@@ -10,6 +10,7 @@ mod about;
 mod app_bridge;
 mod autoexport;
 mod background;
+mod blackboard_import;
 mod clipboard;
 mod codec;
 mod commands;
@@ -86,6 +87,14 @@ pub struct Cli {
     /// `--simulated-tablet`: the simulated tablet replaces Bluetooth (real time, 3 stored pages);
     /// its registration is kept in a throwaway folder, never in the library.
     pub simulated_tablet: bool,
+    /// `--simulated-blackboard`: the simulated Xiaomi blackboard replaces Bluetooth (real time,
+    /// 3 stored pages), next to the simulated Slate when `--simulated-tablet` is given too; it is
+    /// added into the same throwaway folder, never into the library.
+    pub simulated_blackboard: bool,
+    /// `--import-blackboard-pages DIR [--library LIB]`: turn the raw pages of the Xiaomi
+    /// blackboard kept in DIR (`page-<unix time>.bin`) into dated notes of the library (LIB, else
+    /// this PC's library) without a window, print what was done and exit.
+    pub import_blackboard_pages: Option<blackboard_import::BlackboardImportArgs>,
     /// `--mcp [--read-only]`: serve the MCP protocol on standard input/output, without a
     /// window, until stdin closes.
     pub mcp: Option<mcp::McpArgs>,
@@ -108,6 +117,13 @@ impl Cli {
                 "--diagnostic" => cli.diagnostic = true,
                 "--simulated" => cli.simulated = true,
                 "--simulated-tablet" => cli.simulated_tablet = true,
+                "--simulated-blackboard" => cli.simulated_blackboard = true,
+                "--import-blackboard-pages" => {
+                    cli.import_blackboard_pages = Some(blackboard_import::BlackboardImportArgs {
+                        pages: args.next().map(PathBuf::from).unwrap_or_default(),
+                        library: None,
+                    });
+                }
                 "--simulated-microphone" => cli.simulated_microphone = true,
                 "--import-inkspace" => import_inkspace = true,
                 "--mcp" => mcp = true,
@@ -130,6 +146,9 @@ impl Cli {
                 }
                 _ => {}
             }
+        }
+        if let Some(pages) = cli.import_blackboard_pages.as_mut() {
+            pages.library.clone_from(&import_args.library);
         }
         if import_inkspace {
             cli.import_inkspace = Some(import_args);
@@ -172,6 +191,7 @@ pub fn run() {
     if cli.self_test
         || headless_diagnostic
         || cli.import_inkspace.is_some()
+        || cli.import_blackboard_pages.is_some()
         || cli.create_demo_library.is_some()
         || cli.create_demo_inkspace.is_some()
     {
@@ -180,6 +200,9 @@ pub fn run() {
 
     if let Some(import_args) = &cli.import_inkspace {
         std::process::exit(import::run_cli(import_args));
+    }
+    if let Some(args) = &cli.import_blackboard_pages {
+        std::process::exit(blackboard_import::run_cli(args));
     }
     if let Some(dir) = &cli.create_demo_library {
         std::process::exit(demo::run_cli(dir, cli.demo_notes));
@@ -312,6 +335,10 @@ pub fn run() {
             tablet::tablet_set_options,
             tablet::tablet_set_orientation,
             tablet::sim_press_button,
+            tablet::tablet_find_blackboards,
+            tablet::tablet_add_blackboard,
+            tablet::tablet_forget_blackboard,
+            tablet::sim_blackboard_store_page,
             live::live_subscribe,
             live::live_start,
             live::live_resume,
@@ -442,7 +469,7 @@ pub fn run() {
             app.state::<watcher::LibraryWatch>()
                 .follow(app.handle(), library.as_deref());
             // The tablet: auto-connect, sync, live mode (a failure shows in its status).
-            tablet::start_service(app.handle(), cli.simulated_tablet);
+            tablet::start_service(app.handle(), cli.simulated_tablet, cli.simulated_blackboard);
             // The assistant's bridge (MCP), for the windowed app only; logged when unavailable.
             if !cli.self_test {
                 app_bridge::start(app.handle());
@@ -509,6 +536,24 @@ mod tests {
         );
         let both = parse(&["--simulated-tablet", "--simulated-microphone"]);
         assert!(both.simulated_tablet && both.simulated_microphone);
+        let board = parse(&["--simulated-blackboard"]);
+        assert!(board.simulated_blackboard && !board.simulated_tablet);
+        let pages = parse(&[
+            "--import-blackboard-pages",
+            "D:\\pages",
+            "--library",
+            "D:\\lib",
+        ]);
+        assert_eq!(
+            pages.import_blackboard_pages,
+            Some(blackboard_import::BlackboardImportArgs {
+                pages: PathBuf::from("D:\\pages"),
+                library: Some(PathBuf::from("D:\\lib")),
+            })
+        );
+        assert_eq!(pages.import_inkspace, None);
+        let alone = parse(&["--import-blackboard-pages", "D:\\pages"]);
+        assert_eq!(alone.import_blackboard_pages.unwrap().library, None);
         assert_eq!(parse(&["C:\\somewhere"]).import_inkspace, None);
     }
 

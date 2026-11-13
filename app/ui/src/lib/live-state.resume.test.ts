@@ -105,3 +105,50 @@ describe('live state: sheets that went on in a new note', () => {
     expect(live.forks).toEqual([fork('b.ardoise', 'b (2).ardoise')]);
   });
 });
+
+describe('live state: a resume refused for the tablet that connected', () => {
+  const refused = (code = 'sheetOtherTablet'): LiveEvent => ({ type: 'refused', code, message: 'the blackboard cannot write on this sheet' });
+
+  it('keeps the refusal, with its code, and the idle snapshot that follows', () => {
+    const live = new LiveState();
+    live.initial(snapshot({ state: 'waiting' }));
+    expect(live.refused).toBeNull();
+    live.receive(batch(refused(), { type: 'snapshot', snapshot: snapshot({ state: 'idle' }) }));
+    expect(live.refused).toEqual({ code: 'sheetOtherTablet', message: 'the blackboard cannot write on this sheet' });
+    expect(live.state).toBe('idle');
+  });
+
+  it('forgets it when the view starts again, and keeps no strokes of the sheet it refused', () => {
+    const live = new LiveState();
+    live.initial(snapshot({ state: 'waiting' }));
+    live.receive(batch(refused()));
+    live.clearRefused();
+    expect(live.refused).toBeNull();
+  });
+
+  it('is told to a window that subscribed before the answer of the subscription', async () => {
+    const live = new LiveState();
+    await subscribeLive(live, async (onBatch) => {
+      onBatch(batch(refused()));
+      return snapshot({ state: 'idle' });
+    });
+    expect(live.refused?.code).toBe('sheetOtherTablet');
+  });
+});
+
+describe('live state: the tablet the session writes with', () => {
+  it('follows the snapshots, and is null before a tablet connected or on a snapshot without it', () => {
+    const live = new LiveState();
+    expect(live.tablet).toBeNull();
+    live.initial(snapshot({ state: 'waiting' }));
+    expect(live.tablet).toBeNull();
+    live.receive(batch({ type: 'snapshot', snapshot: snapshot({ tablet: 'blackboard' }) }));
+    expect(live.tablet).toBe('blackboard');
+    // Kept while it reconnects.
+    live.receive(batch({ type: 'snapshot', snapshot: snapshot({ state: 'reconnecting', tablet: 'blackboard' }) }));
+    expect(live.tablet).toBe('blackboard');
+    // The share's viewers do not get it.
+    live.receive(batch({ type: 'snapshot', snapshot: snapshot() }));
+    expect(live.tablet).toBeNull();
+  });
+});

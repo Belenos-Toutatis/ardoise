@@ -22,7 +22,7 @@ tels qu'ils apparaissent à l'écran. English version: [guide.en.md](guide.en.md
 1. Ce qu'est Ardoise
 2. Installer Ardoise
 3. Premier démarrage
-4. Enregistrer la tablette
+4. Enregistrer la tablette (et ajouter la tablette Xiaomi)
 5. Récupérer ses pages : la synchronisation
 6. Le mode direct et la présentation en classe
 7. La bibliothèque
@@ -220,10 +220,46 @@ Le panneau **Tablette** donne ensuite le nom, la batterie (et si elle est **en c
 nombre de pages en mémoire, le modèle et la zone de dessin. Ces informations sont lues à la première connexion.
 
 La tablette est ensuite reconnue sur *tous* vos PC qui utilisent la même bibliothèque. Pour la défaire : **Réglages**,
-section **Tablette**, **Oublier la tablette** (elle devra être enregistrée de nouveau, sur tous vos ordinateurs).
+section **Tablette**, **Oublier la tablette** (elle devra être enregistrée de nouveau, sur tous vos ordinateurs). Si
+vous avez aussi une tablette Xiaomi (ci-dessous), chacune a son propre bouton.
 
 Dans le panneau **Tablette**, la section **Réglages de la tablette** permet de **Renommer** la tablette (1 à 15
 caractères, sans accent) et de **Mettre à l'heure** (l'horloge de la tablette est réglée sur celle du PC).
+
+### Ajouter la tablette Xiaomi
+
+*Demande la tablette Xiaomi.* Ardoise sait aussi lire la **tablette Xiaomi Mijia « petit tableau noir », version
+mémoire** (13,5 pouces, Bluetooth ; modèle `jiqid.sxb.v1` dans Mi Home). Elle s'ajoute à côté de la Bamboo Slate, sans
+rien enregistrer.
+
+> *À savoir avant de commencer* : la tablette Xiaomi ne parle qu'à **une application à la fois**. Fermez Mi Home, ou
+> coupez le Bluetooth de votre téléphone, tant que vous l'utilisez avec Ardoise. Il n'y a ni bouton à maintenir ni
+> enregistrement : la tablette **reste liée à Mi Home**, et Ardoise n'utilise ni votre compte Xiaomi ni son service en
+> ligne.
+
+1. Allumez la tablette Xiaomi et gardez-la près de l'ordinateur ; le Bluetooth doit être activé sur le PC.
+2. Ouvrez le panneau **Tablette** (le bloc **Tablette** de la barre latérale) et cliquez sur **Ajouter la tablette
+   Xiaomi**.
+3. Lisez ce qu'il faut vérifier et cliquez sur **Chercher la tablette**. La recherche dure une minute au plus ;
+   **Annuler** l'arrête à tout moment. Pendant la recherche, la liaison avec la Bamboo Slate, si elle est connectée,
+   est fermée : appuyez brièvement sur son bouton ensuite pour la reconnecter.
+4. Ardoise liste ce qu'elle entend. Une seule tablette est le cas habituel : cliquez sur **Ajouter cette tablette**.
+   S'il y en a plusieurs (un voisin de classe, par exemple), le **Signal** de chacune est affiché : plus il est fort,
+   plus la tablette est proche.
+5. **Tablette Xiaomi ajoutée** : Ardoise s'y connecte dès qu'elle est allumée et que rien d'autre ne l'occupe.
+
+Si rien n'est entendu, Ardoise le dit (**Aucune tablette Xiaomi trouvée**) : vérifiez que la tablette est allumée et
+proche, que Mi Home est fermé (ou le Bluetooth du téléphone coupé) et que le Bluetooth du PC est activé, puis cliquez
+sur **Chercher de nouveau**.
+
+Ardoise retient les **deux** tablettes et se connecte à celle qui est allumée. Le panneau **Tablette** et **Réglages**
+listent chacune, avec son état, et un **Oublier la tablette** par tablette (la Xiaomi s'oublie sans toucher à la
+Bamboo Slate, et inversement). On peut ne connaître que la Xiaomi : rien, dans Ardoise, ne suppose une Bamboo Slate.
+La tablette Xiaomi est reconnue sur *tous* vos PC qui utilisent la même bibliothèque.
+
+Pour la tablette Xiaomi, le panneau donne : la **batterie**, la **mémoire libre** (par exemple « 126,4 Mo sur 126,9 Mo »), le
+nombre de **pages en mémoire** et le **modèle**. Elle n'a ni nom à changer, ni orientation, ni version de firmware, et
+Ardoise la met à l'heure à chaque connexion : ces réglages n'apparaissent pas pour elle.
 
 ## 5. Récupérer ses pages : la synchronisation
 
@@ -259,11 +295,45 @@ Dans le panneau **Tablette**, section **Options** (et dans **Réglages**, sectio
   **Attention** : la Bamboo Slate ne livre que sa page la plus ancienne. Sans cette option, les autres pages restent
   illisibles tant que la première n'est pas effacée, et le panneau le dit (« N pages attendent sur la tablette… »).
   Gardez donc l'option cochée sauf raison particulière.
+- Pour la tablette Xiaomi, cette option change ce que fait **Synchroniser maintenant** (voir « Les pages de la tablette
+  Xiaomi », plus bas) : désactivée, ses pages ne sont importées qu'à la demande, après confirmation, et sont effacées de
+  la tablette quand même.
 - **Bouton de la tablette en mode direct** : **Nouvelle page** ou **Nouveau calque** (chapitre 6).
 - **Position de la tablette** : comment vous tenez la tablette. Ardoise redresse ce que vous dessinez pour qu'il
   apparaisse à l'endroit. Quatre positions : **Paysage, bouton en bas**, **Paysage à l'envers, bouton en haut** (qui
   convient aux gauchers), **Portrait, bouton à gauche**, **Portrait, bouton à droite**. Les positions en portrait
   donnent des notes en portrait. Le bouton est celui qui est à côté du voyant de la tablette.
+
+### Les pages de la tablette Xiaomi
+
+Écrivez sur la tablette Xiaomi, puis appuyez sur son bouton d'enregistrement : la page est gardée dans sa mémoire.
+Ardoise les reçoit comme celles de la Bamboo Slate : à la connexion, ou avec **Synchroniser maintenant**. Chaque page
+devient une note, **datée du moment où elle a été enregistrée sur la tablette**, en portrait (environ 20 × 27 cm).
+
+Cette tablette ne donne que sa page la plus ancienne : la suivante ne se lit qu'une fois celle-ci effacée. Ardoise
+**efface donc chaque page de la tablette une fois sa note écrite et vérifiée** (c'est aussi ce que fait Mi Home). Si
+la note ne peut pas être écrite, ou si le transfert s'interrompt, la page reste sur la tablette. Une page déjà importée
+est reconnue et n'est pas importée de nouveau ; seule exception, un transfert douteux (des octets arrivés en retard) :
+la page peut alors donner une seconde note, et les deux sont gardées.
+
+- Avec **Effacer de la tablette après import** activé (le réglage de départ), tout se passe comme pour la Bamboo
+  Slate : synchronisation automatique, sans question.
+- Avec cette option désactivée, Ardoise n'importe les pages de la tablette Xiaomi **qu'à votre demande**. Le panneau dit
+  « N pages attendent sur la tablette Xiaomi » ; **Synchroniser maintenant** demande d'abord de confirmer que les pages
+  seront effacées de la tablette une fois importées (**Synchroniser et effacer**).
+- La progression compte les pages une à une, et le nombre de **pages en mémoire** diminue au fur et à mesure.
+- Après un transfert interrompu ou annulé en cours de page, Ardoise ferme la liaison Bluetooth et la rétablit avant de
+  continuer : c'est normal, et cela peut prendre un moment.
+
+#### Les limites de la tablette Xiaomi
+
+- Elle ne parle qu'à **une application à la fois** : fermez Mi Home ou coupez le Bluetooth du téléphone.
+- Les pages vont à **l'application qui les importe la première**, et Mi Home les efface aussi après son import : une page
+  importée par Mi Home n'est plus sur la tablette quand Ardoise s'y connecte.
+- La tablette **ne donne pas l'heure de chaque point** : la relecture et la vidéo d'une page récupérée rejouent les
+  traits à vitesse régulière. (En mode direct, au contraire, Ardoise horodate ce qu'elle reçoit.)
+- La page fait environ **20 × 27 cm, en hauteur**.
+- Ardoise n'utilise ni compte Xiaomi ni service en ligne : la tablette reste liée à Mi Home et à ce compte.
 
 ### Export automatique pour le téléphone
 
@@ -296,6 +366,22 @@ projection et la séance, et ferme la fenêtre.
 Si une note de la séance est renommée ou étiquetée pendant le cours (par l'assistant, par exemple), les pages suivantes
 continuent d'y être écrites au lieu d'être dupliquées.
 
+### Le mode direct avec la tablette Xiaomi
+
+Le mode direct fonctionne de la même façon avec la tablette Xiaomi : outil, couleur, texture, pression, pointeur laser
+au survol (la tablette envoie aussi la position du stylo quand il est près de l'écran), autre écran, partage et
+retouches. La page du direct est **en hauteur** (environ 20 × 27 cm) : le choix **Position de la tablette** n'existe pas
+pour elle, la fenêtre de commande le remplace par un rappel, et le réglage **Bouton de la tablette en mode direct** ne
+s'applique qu'à la Bamboo Slate.
+
+- **Enregistrer la page avec le bouton de la tablette** n'interrompt pas le direct. La page est importée ensuite, comme
+  une synchronisation : sa note est un doublon de celle du direct, sans danger.
+- Le bouton d'effacement de l'écran de la tablette ne change pas encore de page (son effet est encore à mesurer sur la vraie tablette) : pour passer à une
+  nouvelle page, utilisez **Page suivante** sur l'ordinateur.
+- Une séance reste sur **la tablette avec laquelle elle a commencé**. Si la liaison est perdue, Ardoise attend cette
+  même tablette (**Reconnexion…**) et ignore l'autre jusqu'à la fin du direct. Pour continuer avec l'autre tablette,
+  terminez le direct et relancez-le.
+
 ### Reprendre le mode direct sur une feuille
 
 *Demande la tablette.* Le cours a été interrompu, ou vous voulez ajouter de l'écriture à une feuille déjà
@@ -325,6 +411,12 @@ faut aussi ne choisir qu'une seule note.
 - **L'orientation** : la feuille n'est jamais tournée. Si elle est en paysage et que la tablette est réglée en portrait
   (ou l'inverse), un avis dit comment tenir la tablette : « Pour écrire sur cette feuille, tenez la tablette ainsi : … ».
   Les quatre boutons de position sont grisés pour cette feuille.
+- **Quelle tablette** : la tablette Xiaomi n'écrit que sur une page de la tablette Xiaomi (environ 20 × 27 cm : ses pages
+  récupérées et ses notes du direct), et la Bamboo Slate sur toutes les autres feuilles. Une feuille de la Bamboo Slate
+  se continue donc avec la Bamboo Slate, une page de la tablette Xiaomi avec la tablette Xiaomi. Si la tablette
+  connectée ne convient pas, Ardoise refuse, dit pourquoi (**Le mode direct n'a pas pu reprendre cette feuille.**) et
+  n'écrit rien sur la note ; si la tablette ne se connecte qu'ensuite, le message arrive à ce moment-là. **Retour à la
+  bibliothèque**, ou **Réessayer** une fois l'autre tablette allumée.
 - **La page suivante** crée une note neuve, à la racine de la bibliothèque, avec le papier de la feuille (couleur,
   modèle, texture, pas son image), et suit de nouveau la position réglée pour la tablette : les boutons de position
   fonctionnent alors. Les onglets **Page** et **Fond** changent le papier et l'image de la feuille en cours (voir
@@ -1531,7 +1623,14 @@ de tous les composants utilisés avec leur licence.
 | « Aucun adaptateur Bluetooth trouvé » | Branchez la clé Bluetooth (4.0 ou plus), attendez que Windows la reconnaisse, réessayez. |
 | « La tablette ne répond pas » / « n'est pas connectée » | Rapprochez-la de l'ordinateur et appuyez brièvement sur son bouton ; vérifiez la charge. |
 | « La tablette refuse la commande » | L'application du téléphone ou Inkspace l'a peut-être enregistrée depuis : enregistrez-la de nouveau dans Ardoise (chapitre 4). Coupez le Bluetooth du téléphone. |
+| « Cette feuille ne peut pas être continuée avec cette tablette » | Une feuille de la Bamboo Slate se continue avec la Bamboo Slate, une page de la tablette Xiaomi avec la tablette Xiaomi. Allumez l'autre tablette (la Xiaomi se connecte, la Bamboo Slate demande un appui bref), puis **Réessayer** ; la note n'a pas été touchée (chapitre 6). |
+| « La tablette Xiaomi a envoyé une page qu'Ardoise ne sait pas lire » | Cette page n'a pas été importée et reste sur la tablette, avec celles enregistrées après elle (la tablette ne donne que sa page la plus ancienne). Importez-les avec Mi Home, et gardez le journal de diagnostic (`_ardoise\diagnostics\` dans la bibliothèque, chapitre 13). |
 | « La tablette est occupée » | Une synchronisation ou le mode direct est en cours : réessayez à la fin. |
+| « Aucune tablette Xiaomi trouvée » | Allumez-la, rapprochez-la de l'ordinateur, fermez Mi Home (ou coupez le Bluetooth du téléphone : elle ne parle qu'à une application à la fois), puis **Chercher de nouveau** (chapitre 4). |
+| La tablette Xiaomi n'a plus ses pages | Mi Home les a importées (et effacées) avant Ardoise : les pages vont à l'application qui les prend la première (chapitre 5). |
+| « Les pages de la tablette Xiaomi ne sont importées qu'après votre accord » | **Effacer de la tablette après import** est désactivé : confirmez la synchronisation (**Synchroniser et effacer**) ou activez l'option (chapitre 5). |
+| « Une page de la tablette Xiaomi n'a pas été reçue en entier » | La page reste sur la tablette. Rapprochez-la de l'ordinateur et synchronisez de nouveau. |
+| « La tablette Xiaomi garde une page… » | Ardoise lui a demandé d'effacer une page, et elle l'a gardée : la note de cette page est déjà dans la bibliothèque. Synchronisez de nouveau ; si cela se répète, gardez le journal de diagnostic (chapitre 13). |
 | Une seule page est reçue, les suivantes « attendent » | Cochez **Effacer de la tablette après import** (chapitre 5). |
 | La note s'affiche à l'envers ou couchée | Réglez la **Position de la tablette** pour qu'elle corresponde à la façon dont vous la tenez. |
 | « Vos modifications n'ont pas été enregistrées » | La note a changé sur un autre PC. **Enregistrer comme copie**, ou revenez à la bibliothèque et rouvrez la note. |

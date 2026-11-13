@@ -2,7 +2,9 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use ardoise_device::transport::{Advertisement, Channel, TransportError, WACOM_COMPANY_IDS};
+use ardoise_device::transport::{
+    Advertisement, Channel, TabletKind, TransportError, WACOM_COMPANY_IDS,
+};
 use btleplug::api::{CharPropFlags, Characteristic, PeripheralProperties, WriteType};
 
 use crate::AdapterStatus;
@@ -12,7 +14,8 @@ use crate::gatt;
 ///
 /// The name is the GAP local name, else the advertised name. Manufacturer data: a Wacom
 /// company identifier wins if several are present, otherwise the lowest identifier (in
-/// practice a peripheral sends a single entry).
+/// practice a peripheral sends a single entry). The service data of Xiaomi's `fe95` (the
+/// MiBeacon that identifies the blackboard) is kept as it is.
 pub(crate) fn advertisement_from_properties(properties: &PeripheralProperties) -> Advertisement {
     let name = [&properties.local_name, &properties.advertisement_name]
         .into_iter()
@@ -32,6 +35,11 @@ pub(crate) fn advertisement_from_properties(properties: &PeripheralProperties) -
         rssi: properties.rssi,
         company_id,
         manufacturer_data,
+        xiaomi_service_data: properties
+            .service_data
+            .get(&gatt::XIAOMI_SERVICE)
+            .cloned()
+            .unwrap_or_default(),
     }
 }
 
@@ -69,14 +77,40 @@ pub(crate) struct GattLayout {
     pub subscriptions: Vec<(Channel, Characteristic)>,
 }
 
-/// Locates the tablet's characteristics. Anything in the DFU service is ignored.
+/// The layout to look for on a peripheral: the kind its advertisement says; for a peripheral
+/// whose advertisement did not come with the connection (no MiBeacon, no Wacom company), the
+/// kind its characteristics say: the Slate's live characteristic, else the blackboard's
+/// `6e400004`. Only tablets accepted by the device manager's scan filters are ever connected to,
+/// so this only chooses between the two layouts.
+pub(crate) fn layout_kind(
+    peer: &Advertisement,
+    characteristics: &BTreeSet<Characteristic>,
+) -> TabletKind {
+    if let Some(kind) = peer.kind() {
+        return kind;
+    }
+    let has = |uuid| {
+        characteristics
+            .iter()
+            .any(|c| c.uuid == uuid && !gatt::is_forbidden_service(c.service_uuid))
+    };
+    if !has(gatt::LIVE) && has(gatt::BOARD_DATA) {
+        TabletKind::Blackboard
+    } else {
+        TabletKind::Slate
+    }
+}
+
+/// Locates the characteristics of a tablet of `kind`. Anything in the DFU service or in
+/// Xiaomi's service is ignored.
 pub(crate) fn locate_characteristics(
     characteristics: &BTreeSet<Characteristic>,
+    kind: TabletKind,
 ) -> Result<GattLayout, TransportError> {
     let find = |uuid| {
         characteristics
             .iter()
-            .find(|c| c.uuid == uuid && c.service_uuid != gatt::DFU_SERVICE)
+            .find(|c| c.uuid == uuid && !gatt::is_forbidden_service(c.service_uuid))
     };
     let command = find(gatt::COMMAND_TX)
         .ok_or_else(|| TransportError::MissingCharacteristic(gatt::describe(gatt::COMMAND_TX)))?;
@@ -87,7 +121,7 @@ pub(crate) fn locate_characteristics(
         ))
     })?;
     let mut subscriptions = Vec::new();
-    for (channel, required) in gatt::SUBSCRIPTIONS {
+    for &(channel, required) in gatt::subscriptions(kind) {
         let uuid = gatt::uuid_for_channel(channel);
         match find(uuid) {
             Some(c) if can_notify(c.properties) => subscriptions.push((channel, c.clone())),
@@ -271,7 +305,7 @@ mod tests {
 
     #[test]
     fn locates_the_slate_characteristics_in_subscription_order() {
-        let layout = locate_characteristics(&slate(true)).unwrap();
+        let layout = locate_characteristics(&slate(true), TabletKind::Slate).unwrap();
         assert_eq!(layout.command.uuid, gatt::COMMAND_TX);
         assert_eq!(layout.write_type, WriteType::WithResponse);
         let order: Vec<(Channel, Uuid)> = layout
@@ -298,7 +332,7 @@ mod tests {
 
     #[test]
     fn sysevent_is_optional() {
-        let layout = locate_characteristics(&slate(false)).unwrap();
+        let layout = locate_characteristics(&slate(false), TabletKind::Slate).unwrap();
         assert_eq!(layout.subscriptions.len(), 3);
         assert!(
             layout
@@ -320,7 +354,7 @@ mod tests {
                 .into_iter()
                 .filter(|c| c.uuid != missing)
                 .collect();
-            match locate_characteristics(&set) {
+            match locate_characteristics(&set, TabletKind::Slate) {
                 Err(TransportError::MissingCharacteristic(text)) => {
                     assert!(text.contains(&missing.to_string()), "{text}");
                 }
@@ -336,7 +370,7 @@ mod tests {
         set.retain(|c| c.uuid != gatt::COMMAND_TX);
         set.insert(chr(gatt::NORDIC_UART_SERVICE, gatt::COMMAND_TX, F::READ));
         assert!(matches!(
-            locate_characteristics(&set),
+            locate_characteristics(&set, TabletKind::Slate),
             Err(TransportError::MissingCharacteristic(text)) if text.contains("not writable")
         ));
 
@@ -344,7 +378,7 @@ mod tests {
         set.retain(|c| c.uuid != gatt::LIVE);
         set.insert(chr(LIVE_SERVICE, gatt::LIVE, F::READ));
         assert!(matches!(
-            locate_characteristics(&set),
+            locate_characteristics(&set, TabletKind::Slate),
             Err(TransportError::MissingCharacteristic(text)) if text.contains("cannot notify")
         ));
     }
@@ -358,7 +392,7 @@ mod tests {
             .chain([chr(gatt::DFU_SERVICE, gatt::COMMAND_TX, F::WRITE)])
             .collect();
         assert!(matches!(
-            locate_characteristics(&set),
+            locate_characteristics(&set, TabletKind::Slate),
             Err(TransportError::MissingCharacteristic(_))
         ));
     }
@@ -378,9 +412,107 @@ mod tests {
             gatt::COMMAND_RX,
             F::INDICATE,
         ));
-        let layout = locate_characteristics(&set).unwrap();
+        let layout = locate_characteristics(&set, TabletKind::Slate).unwrap();
         assert_eq!(layout.write_type, WriteType::WithoutResponse);
         assert_eq!(layout.subscriptions[0].1.uuid, gatt::COMMAND_RX);
+    }
+
+    /// The blackboard's GATT table (research note §2): generic access, the Xiaomi service with
+    /// its writable characteristics, and the Nordic UART service with a fourth characteristic.
+    fn blackboard() -> BTreeSet<Characteristic> {
+        use CharPropFlags as F;
+        let short = |n: u128| Uuid::from_u128((n << 96) | 0x0000_1000_8000_0080_5f9b_34fb);
+        let xiaomi = gatt::XIAOMI_SERVICE;
+        [
+            chr(short(0x1800), short(0x2a00), F::READ | F::WRITE),
+            chr(xiaomi, short(0x0004), F::READ),
+            chr(xiaomi, short(0x0010), F::WRITE_WITHOUT_RESPONSE | F::NOTIFY),
+            chr(xiaomi, short(0x0017), F::WRITE | F::NOTIFY),
+            chr(xiaomi, short(0x0019), F::WRITE_WITHOUT_RESPONSE | F::NOTIFY),
+            // Even a characteristic with a Nordic UUID inside Xiaomi's service is never used.
+            chr(xiaomi, gatt::COMMAND_TX, F::WRITE),
+            chr(gatt::NORDIC_UART_SERVICE, gatt::COMMAND_TX, F::WRITE),
+            chr(gatt::NORDIC_UART_SERVICE, gatt::COMMAND_RX, F::NOTIFY),
+            chr(gatt::NORDIC_UART_SERVICE, gatt::BOARD_DATA, F::NOTIFY),
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    fn board_advertisement() -> Advertisement {
+        let mut props = properties(&[]);
+        props.local_name = Some("xiaomi.dev.ble".into());
+        props.service_data.insert(
+            gatt::XIAOMI_SERVICE,
+            vec![
+                0x10, 0x59, 0xd8, 0x0f, 0x00, 0x01, 0x0e, 0x67, 0x03, 0x43, 0xe2,
+            ],
+        );
+        advertisement_from_properties(&props)
+    }
+
+    #[test]
+    fn the_blackboard_is_recognised_by_its_beacon() {
+        let ad = board_advertisement();
+        assert_eq!(ad.company_id, None);
+        assert_eq!(ad.xiaomi_service_data.len(), 11);
+        assert!(ad.is_blackboard());
+        assert_eq!(ad.kind(), Some(TabletKind::Blackboard));
+        // A Wacom advertisement keeps no service data.
+        let wacom = advertisement_from_properties(&properties(&[(0x4755, &[1, 2, 3, 4, 5, 6, 7])]));
+        assert!(wacom.xiaomi_service_data.is_empty());
+    }
+
+    #[test]
+    fn the_blackboard_layout_never_touches_the_xiaomi_service() {
+        let layout = locate_characteristics(&blackboard(), TabletKind::Blackboard).unwrap();
+        assert_eq!(layout.command.uuid, gatt::COMMAND_TX);
+        assert_eq!(layout.command.service_uuid, gatt::NORDIC_UART_SERVICE);
+        assert_eq!(layout.write_type, WriteType::WithResponse);
+        let order: Vec<(Channel, Uuid)> = layout
+            .subscriptions
+            .iter()
+            .map(|(channel, c)| (*channel, c.uuid))
+            .collect();
+        assert_eq!(
+            order,
+            [
+                (Channel::Command, gatt::COMMAND_RX),
+                (Channel::BoardData, gatt::BOARD_DATA)
+            ]
+        );
+        assert!(
+            layout
+                .subscriptions
+                .iter()
+                .all(|(_, c)| c.service_uuid == gatt::NORDIC_UART_SERVICE)
+        );
+        // The Slate's layout is not there.
+        assert!(matches!(
+            locate_characteristics(&blackboard(), TabletKind::Slate),
+            Err(TransportError::MissingCharacteristic(_))
+        ));
+        // Without its records characteristic, the blackboard cannot be used.
+        let set: BTreeSet<_> = blackboard()
+            .into_iter()
+            .filter(|c| c.uuid != gatt::BOARD_DATA)
+            .collect();
+        assert!(matches!(
+            locate_characteristics(&set, TabletKind::Blackboard),
+            Err(TransportError::MissingCharacteristic(text)) if text.contains("6e400004")
+        ));
+    }
+
+    #[test]
+    fn the_layout_follows_the_advertisement_then_the_characteristics() {
+        assert_eq!(
+            layout_kind(&board_advertisement(), &slate(true)),
+            TabletKind::Blackboard
+        );
+        let bare = advertisement_from_properties(&properties(&[]));
+        assert_eq!(layout_kind(&bare, &blackboard()), TabletKind::Blackboard);
+        assert_eq!(layout_kind(&bare, &slate(true)), TabletKind::Slate);
+        assert_eq!(layout_kind(&bare, &BTreeSet::new()), TabletKind::Slate);
     }
 
     #[test]

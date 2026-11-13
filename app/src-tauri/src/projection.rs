@@ -351,6 +351,7 @@ impl Projection {
             can_redo: false,
             page_paper: page.background.paper,
             image_pixels: image,
+            tablet: None,
             page,
         }
     }

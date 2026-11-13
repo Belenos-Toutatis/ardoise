@@ -25,6 +25,7 @@ use ardoise_device::service::{
     ServiceConfig, TabletOptions, TabletService, TabletStatus,
 };
 use ardoise_device::session::{DeviceError, DownloadedPage};
+use ardoise_device::transport::TabletKind;
 use ardoise_proto::live::LiveRecord;
 use ardoise_sim::realtime::LIVE_SCRIPT_SECONDS;
 use ardoise_sim::{SimConfig, SimFactory, SimHooks, SimTablet, drawings};
@@ -499,7 +500,7 @@ fn without_deletion_a_page_is_imported_once() {
 
     // Synced again: the page is recognised, nothing is written.
     run.seen.clear();
-    run.service.sync_now();
+    run.service.sync_now(false).unwrap();
     run.wait(|s| s.connection == Connection::Syncing);
     let status = run.connected();
     let last = status.last_sync.unwrap();
@@ -509,7 +510,7 @@ fn without_deletion_a_page_is_imported_once() {
     // Its note deleted by the user: not imported again either.
     let opened = Library::open(library.path()).unwrap();
     opened.trash(&notes(library.path())[0]).unwrap();
-    run.service.sync_now();
+    run.service.sync_now(false).unwrap();
     run.wait(|s| s.connection == Connection::Syncing);
     run.connected();
     assert!(notes(library.path()).is_empty());
@@ -534,7 +535,7 @@ fn a_page_already_saved_is_deleted_without_a_second_note() {
     run.wait(|s| s.last_sync.is_some());
     assert_eq!(notes(library.path()).len(), 1);
     run.service.set_options(TabletOptions::default());
-    run.service.sync_now();
+    run.service.sync_now(false).unwrap();
     let status = run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.deleted == 2));
     assert_eq!(
         status.last_sync.unwrap().saved.len(),
@@ -598,7 +599,7 @@ fn a_sync_asked_while_away_runs_when_the_tablet_comes() {
     let mut run =
         Running::virtual_time(&tablet, library.path(), options, library_store(None, None));
     run.wait(|s| s.connection == Connection::Searching);
-    run.service.sync_now();
+    run.service.sync_now(false).unwrap();
     let status = run.wait(|s| s.pending == Some(ardoise_device::service::Pending::Sync));
     assert_eq!(status.connection, Connection::Searching);
     tablet.power_on();
@@ -629,7 +630,8 @@ fn live_mode_goes_on_after_a_lost_link_and_reports_the_button() {
         LiveInput::Started {
             width: config.width,
             height: config.height,
-            orientation: Orientation::Landscape
+            orientation: Orientation::Landscape,
+            kind: TabletKind::Slate
         }
     );
     assert_eq!(
@@ -775,7 +777,8 @@ fn portrait_positions_make_portrait_notes_and_turn_live_points() {
             LiveInput::Started {
                 width: config.width,
                 height: config.height,
-                orientation
+                orientation,
+                kind: TabletKind::Slate
             }
         );
         let (records, _) = until(&inputs, |i| matches!(i, LiveInput::Records { .. }));

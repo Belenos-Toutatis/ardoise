@@ -36,6 +36,7 @@
  * - Batches that arrive before the subscription's snapshot are kept and applied after it
  *   (Tauri may deliver a channel message before the command's answer).
  */
+import type { TabletKind } from './tablet';
 import type { InkPoint } from './ink';
 import { wallClock, type PendingSample } from './latency';
 import type {
@@ -119,7 +120,14 @@ function sameStrokes(a: readonly Stroke[], b: readonly Stroke[]): boolean {
 export class LiveState {
   /** A snapshot was applied: the fields below describe the session. */
   ready = $state(false);
+  /**
+   * The resume was refused after it was accepted (`refused` event): the tablet that connected cannot write on the sheet.
+   * `code` selects `errorCodes.*`; kept until `clearRefused` (the view asks again, or closes).
+   */
+  refused = $state.raw<{ code: string; message: string } | null>(null);
   state = $state<LiveSessionState>('idle');
+  /** The kind of tablet the session writes with (`LiveSnapshot.tablet`): null until its tablet first connects. */
+  tablet = $state<TabletKind | null>(null);
   pageIndex = $state(0);
   pageCount = $state(1);
   /** How the tablet is held now. */
@@ -344,6 +352,9 @@ export class LiveState {
       case 'sheetForked':
         this.addFork(event);
         break;
+      case 'refused':
+        this.refused = { code: event.code, message: event.message };
+        break;
       case 'saved':
         this.mergeSaved(event.paths);
         // A successful save means that everything is written, the failed pages included.
@@ -390,6 +401,11 @@ export class LiveState {
    */
   adoptForks(forks: readonly SheetFork[]): SheetFork[] {
     return forks.filter((fork) => this.addFork(fork));
+  }
+
+  /** Forgets a refusal (the view starts again). */
+  clearRefused(): void {
+    this.refused = null;
   }
 
   /** Forgets the notice of a fork (the user dismissed it). */
@@ -457,6 +473,7 @@ export class LiveState {
     }
     this.ready = true;
     this.state = s.state;
+    this.tablet = s.tablet ?? null;
     this.pageIndex = s.pageIndex;
     this.pageCount = Math.max(1, s.pageCount);
     this.orientation = s.orientation;

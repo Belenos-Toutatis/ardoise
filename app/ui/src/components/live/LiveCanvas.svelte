@@ -1044,6 +1044,7 @@
     data-tool={mode === 'preview' ? tool : undefined}
     data-strokes={live.strokeCount}
     data-page="{live.pageIndex + 1}/{live.pageCount}"
+    data-page-size="{live.pageSize.width}x{live.pageSize.height}"
     data-drawn={drawn}
     data-paper={paperName}
     data-template={shown.template}

@@ -29,6 +29,7 @@ fn sim_page() -> DownloadedPage {
         bytes: stored.bytes.clone(),
         timestamp: Some(stored.timestamp),
         announced_size: u32::try_from(stored.bytes.len()).unwrap(),
+        kind: ardoise_device::transport::TabletKind::Slate,
     }
 }
 
@@ -541,5 +542,46 @@ fn a_split_keeps_the_original_of_the_note_and_none_for_the_new_one() {
     assert_eq!(
         original_in(&library, &created, &tablet).unwrap(),
         NoteOriginal::None
+    );
+}
+
+/// A page of the Xiaomi blackboard comes back on the blackboard's own page, never turned,
+/// whatever this PC's orientation and registered tablet (its bytes say what they are).
+#[test]
+fn a_blackboard_note_goes_back_to_what_the_blackboard_sent() {
+    use ardoise_device::pages::BLACKBOARD_PAGE;
+    use ardoise_device::transport::TabletKind;
+    let board = ardoise_sim::SimBoard::blackboard();
+    board.draw_page(&ardoise_sim::reference_board_pages()[0]);
+    let stored = &board.stored_pages()[0];
+    let page = DownloadedPage {
+        bytes: stored.bytes.clone(),
+        timestamp: Some(i64::from(stored.time)),
+        announced_size: u32::try_from(stored.bytes.len()).unwrap(),
+        kind: TabletKind::Blackboard,
+    };
+    let settings_dir = tempfile::tempdir().unwrap();
+    let store = SettingsStore::locate(settings_dir.path(), settings_dir.path(), "PC-TEST");
+    let settings = store
+        .update(|s| s.tablet.orientation = Orientation::PortraitLeft)
+        .unwrap();
+    let (dir, library) = library();
+    let context = PageContext {
+        size: BLACKBOARD_PAGE,
+        orientation: Orientation::Landscape,
+    };
+    let path = store_page_in(Some(&store), Some("fr-FR"), dir.path(), page, &context).unwrap();
+    let synced = library.read(&path).unwrap();
+    assert_eq!(synced.file.note.page, BLACKBOARD_PAGE);
+    let tablet = TabletContext::of(dir.path(), &settings, Some("fr-FR"));
+    let original = original_in(&library, &path, &tablet).unwrap();
+    assert!(matches!(original, NoteOriginal::Tablet { .. }));
+    assert_eq!(
+        ink(original),
+        (
+            synced.file.note.page,
+            synced.file.note.layers.clone(),
+            synced.file.note.strokes.clone()
+        )
     );
 }

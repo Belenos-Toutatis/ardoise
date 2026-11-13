@@ -5,7 +5,7 @@ use std::sync::mpsc;
 
 use super::*;
 use crate::testutil::ScriptConnector;
-use crate::transport::TransportError;
+use crate::transport::{TabletKind, TransportError};
 
 /// A connector factory over a scripted tablet that is never found in registration mode.
 struct Scripted;
@@ -102,7 +102,7 @@ fn a_library_without_registration_waits_for_the_wizard() {
         ))
     );
     // Sync without a registered tablet: an error, nothing pending.
-    service.sync_now();
+    service.sync_now(false).unwrap();
     let status = wait_for(&statuses, |s| s.error.is_some());
     assert_eq!(status.error.unwrap().code, "tabletNotRegistered");
     assert_eq!(service.status().pending, None);
@@ -190,6 +190,7 @@ fn the_status_has_the_shape_of_the_interface() {
     });
     status.pending = Some(Pending::Live);
     status.device = Some(DeviceDetails {
+        kind: TabletKind::Slate,
         name: "Bamboo Slate".into(),
         firmware: "B160805A-C170704A".into(),
         battery_percent: 87,
@@ -199,6 +200,7 @@ fn the_status_has_the_shape_of_the_interface() {
         stored_pages: 3,
         model: model_name(29_700, 21_600),
         read_at: 1,
+        memory: None,
     });
     status.error = Some(StatusError::from(&DeviceError::Busy));
     let json = serde_json::to_value(&status).unwrap();
@@ -218,6 +220,71 @@ fn the_status_has_the_shape_of_the_interface() {
     assert_eq!(json["simulated"], true);
     assert_eq!(model_name(21_600, 14_800), "Bamboo Slate A5");
     assert_eq!(model_name(44_800, 29_600), "Wacom (44800 × 29600)");
+    // The fields added with the blackboard (docs/design/blackboard.md, the contract).
+    assert_eq!(json["device"]["kind"], "slate");
+    assert_eq!(json["device"]["memory"], serde_json::Value::Null);
+    assert_eq!(json["active"], serde_json::Value::Null);
+    assert_eq!(json["known"], serde_json::json!([]));
+    assert_eq!(json["boardSearch"], serde_json::Value::Null);
+}
+
+#[test]
+fn the_blackboard_fields_have_the_shape_of_the_contract() {
+    let mut status = TabletStatus::initial(false, TabletOptions::default());
+    status.connection = Connection::Adding;
+    status.active = Some(TabletKind::Blackboard);
+    status.board_search = Some(BoardSearch {
+        found: vec![FoundTablet {
+            address: "00:00:5E:00:53:B1".into(),
+            name: Some("xiaomi.dev.ble".into()),
+            rssi: Some(-60),
+        }],
+        until: 5,
+    });
+    status.known = vec![KnownTablet {
+        kind: TabletKind::Blackboard,
+        name: BLACKBOARD_NAME.into(),
+        address: "00:00:5E:00:53:B1".into(),
+        added: "2026-11-12T20:00:00+01:00".into(),
+        width: 20_500,
+        height: 27_200,
+        model: BLACKBOARD_MODEL_NAME.into(),
+    }];
+    status.device = Some(DeviceDetails {
+        kind: TabletKind::Blackboard,
+        name: BLACKBOARD_NAME.into(),
+        firmware: String::new(),
+        battery_percent: 90,
+        charging: false,
+        width: 20_500,
+        height: 27_200,
+        stored_pages: 2,
+        model: BLACKBOARD_MODEL_NAME.into(),
+        read_at: 1,
+        memory: Some(DeviceMemory {
+            total: 126_909_952,
+            free: 126_794_240,
+        }),
+    });
+    let json = serde_json::to_value(&status).unwrap();
+    assert_eq!(json["connection"], "adding");
+    assert_eq!(json["active"], "blackboard");
+    assert_eq!(
+        json["boardSearch"],
+        serde_json::json!({"found": [{"address": "00:00:5E:00:53:B1", "name": "xiaomi.dev.ble", "rssi": -60}], "until": 5})
+    );
+    assert_eq!(
+        json["known"][0],
+        serde_json::json!({"kind": "blackboard", "name": "Mijia LCD blackboard",
+            "address": "00:00:5E:00:53:B1", "added": "2026-11-12T20:00:00+01:00",
+            "width": 20500, "height": 27200, "model": "Xiaomi Mijia LCD blackboard"})
+    );
+    assert_eq!(
+        json["device"]["memory"],
+        serde_json::json!({"total": 126_909_952, "free": 126_794_240})
+    );
+    assert_eq!(json["device"]["kind"], "blackboard");
+    assert_eq!(json["device"]["firmware"], "");
 }
 
 #[test]
@@ -249,6 +316,37 @@ fn device_errors_map_to_translated_codes() {
         (DeviceError::InvalidName("é".into()), "invalidName"),
         (DeviceError::Storage("disk full".into()), "libraryAccess"),
         (DeviceError::Unexpected("?".into()), "tablet"),
+        (
+            DeviceError::TransferIncomplete {
+                expected: 70,
+                received: 44,
+            },
+            "transferIncomplete",
+        ),
+        (DeviceError::PageNotDeleted(5), "pageNotDeleted"),
+        (DeviceError::NotSupported("renaming"), "notSupported"),
+        (
+            DeviceError::TabletNotFound("x".into()),
+            "blackboardNotFound",
+        ),
+        (
+            DeviceError::PageUnreadable {
+                time: 5,
+                reason: "3 records".into(),
+            },
+            "pageUnreadable",
+        ),
+        (
+            DeviceError::BlackboardConfirmDelete,
+            "blackboardConfirmDelete",
+        ),
+        (DeviceError::StreamDirty, "tablet"),
+        (
+            DeviceError::LiveOnOtherTablet {
+                owner: TabletKind::Blackboard,
+            },
+            "sheetOtherTablet",
+        ),
         (
             DeviceError::Transport(TransportError::Backend("x".into())),
             "tablet",
@@ -507,7 +605,8 @@ fn live_mode_forwards_oriented_pen_data_and_the_button_and_logs_the_rest() {
         LiveInput::Started {
             width: 29_700,
             height: 21_600,
-            orientation: Orientation::LandscapeFlipped
+            orientation: Orientation::LandscapeFlipped,
+            kind: TabletKind::Slate
         }
     );
     assert_eq!(next(), LiveInput::State(LiveState::Live));

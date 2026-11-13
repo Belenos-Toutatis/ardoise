@@ -20,7 +20,7 @@ appear on screen. Version française : [guide.fr.md](guide.fr.md).
 1. What Ardoise is
 2. Installing Ardoise
 3. First start
-4. Registering the tablet
+4. Registering the tablet (and adding the Xiaomi tablet)
 5. Getting your pages: sync
 6. Live mode and presenting in class
 7. The library
@@ -207,10 +207,41 @@ The **Tablet** panel then shows the name, the battery (and whether it is **charg
 of pages in memory, the model and the drawing area. This information is read at the first connection.
 
 The tablet is then recognised on *all* your PCs that use the same library. To undo this: **Settings**, **Tablet**
-section, **Forget the tablet** (it will have to be registered again, on all your computers).
+section, **Forget the tablet** (it will have to be registered again, on all your computers). If you also have a Xiaomi
+tablet (below), each one has its own button.
 
 In the **Tablet** panel, the **Tablet settings** section lets you **Rename** the tablet (1 to 15 characters, no
 accents) and **Set the clock** (the tablet's clock is set to the PC's).
+
+### Adding the Xiaomi tablet
+
+*Needs the Xiaomi tablet.* Ardoise also reads the **Xiaomi Mijia "small blackboard", memory edition** (13.5 inches,
+Bluetooth; model `jiqid.sxb.v1` in Mi Home). It is added next to the Bamboo Slate, without any registration.
+
+> *Before you start*: the Xiaomi tablet talks to **one application at a time**. Close Mi Home, or turn off your phone's
+> Bluetooth, while you use it with Ardoise. There is no button to hold and no registration: the tablet **stays linked to
+> Mi Home**, and Ardoise uses neither your Xiaomi account nor its online service.
+
+1. Switch on the Xiaomi tablet and keep it close to the computer; Bluetooth must be on at the PC.
+2. Open the **Tablet** panel (the **Tablet** block of the sidebar) and click **Add the Xiaomi tablet**.
+3. Read what to check and click **Look for the tablet**. The search lasts one minute at most; **Cancel** stops it at any
+   time. While it runs, the Bamboo Slate's link, if it is connected, is closed: press its button briefly afterwards to
+   reconnect it.
+4. Ardoise lists what it hears. One tablet is the usual case: click **Add this tablet**. If several are heard (a
+   neighbouring classroom, say), each one's **Signal** is shown: the stronger, the closer.
+5. **Xiaomi tablet added**: Ardoise connects to it as soon as it is switched on and nothing else is using it.
+
+If nothing is heard, Ardoise says so (**No Xiaomi tablet found**): check that the tablet is on and close, that Mi Home
+is closed (or the phone's Bluetooth off) and that the PC's Bluetooth is on, then click **Look again**.
+
+Ardoise remembers **both** tablets and connects to the one that is switched on. The **Tablet** panel and **Settings**
+list each one with its state, and one **Forget the tablet** per tablet (forgetting the Xiaomi leaves the Bamboo Slate
+alone, and the other way round). You may know the Xiaomi only: nothing in Ardoise assumes a Bamboo Slate. The Xiaomi
+tablet is recognised on *all* your PCs that use the same library.
+
+For the Xiaomi tablet the panel shows the **battery**, the **free memory** (for example "126.4 MB of 126.9 MB"), the number
+of **pages in memory** and the **model**. It has no name to change, no orientation and no firmware version, and Ardoise
+sets its clock at every connection: those settings do not appear for it.
 
 ## 5. Getting your pages: sync
 
@@ -245,11 +276,44 @@ In the **Tablet** panel, **Options** section (and in **Settings**, **Tablet** se
   hands over only its oldest page. Without this option, the other pages stay unreadable until the first one is
   deleted, and the panel says so ("N pages are waiting on the tablet…"). So leave the option ticked unless you have a
   particular reason.
+- For the Xiaomi tablet this option changes what **Sync now** does (see "The Xiaomi tablet's pages", below): off, its
+  pages are imported only on request, after a confirmation, and are deleted from the tablet all the same.
 - **Tablet button in live mode**: **New page** or **New layer** (chapter 6).
 - **Position of the tablet**: how you hold the tablet. Ardoise turns what you draw so that it appears upright. Four
   positions: **Landscape, button at the bottom**, **Landscape upside down, button at the top** (which suits left-handed
   users), **Portrait, button on the left**, **Portrait, button on the right**. The portrait positions give portrait
   notes. The button is the one next to the tablet's light.
+
+### The Xiaomi tablet's pages
+
+Write on the Xiaomi tablet, then press its store button: the page is kept in its memory. Ardoise receives the pages like
+the Bamboo Slate's: when connecting, or with **Sync now**. Each page becomes a note, **dated when it was stored on the
+tablet**, in portrait (about 20 × 27 cm).
+
+This tablet hands over only its oldest page: the next one can be read only once that one is deleted. Ardoise therefore
+**deletes each page from the tablet once its note is written and checked** (Mi Home does the same). If the note cannot
+be written, or the transfer stops, the page stays on the tablet. A page that was already imported is recognised and not
+imported again; the one exception is a doubtful transfer (bytes that arrived late): the page may then give a second
+note, and both are kept.
+
+- With **Delete from the tablet after import** on (the default), everything happens as for the Bamboo Slate: automatic
+  sync, no question.
+- With that option off, Ardoise imports the Xiaomi tablet's pages **only on request**. The panel says "N pages are
+  waiting on the Xiaomi tablet"; **Sync now** first asks you to confirm that the pages will be deleted from the tablet
+  once imported (**Sync and delete**).
+- The progress counts the pages one by one, and the number of **pages in memory** goes down as it goes.
+- After a transfer that stopped or was cancelled in the middle of a page, Ardoise closes the Bluetooth link and
+  re-opens it before going on: this is normal, and it can take a moment.
+
+#### The Xiaomi tablet's limits
+
+- It talks to **one application at a time**: close Mi Home or turn off the phone's Bluetooth.
+- Pages go to **whichever application imports them first**, and Mi Home deletes them too after its import: a page that
+  Mi Home imported is no longer on the tablet when Ardoise connects.
+- The tablet **does not give the time of each point**: replay and video of a fetched page draw the strokes at a regular
+  pace. (In live mode, on the other hand, Ardoise stamps what it receives.)
+- The page is about **20 × 27 cm, portrait**.
+- Ardoise uses no Xiaomi account or online service: the tablet stays linked to Mi Home and that account.
 
 ### Automatic export for your phone
 
@@ -279,6 +343,21 @@ closes the window.
 If a note of the session is renamed or tagged during the lesson (by the assistant, for instance), the following pages
 keep being written to it instead of being duplicated.
 
+### Live mode with the Xiaomi tablet
+
+Live mode works the same way with the Xiaomi tablet: tool, colour, texture, pressure, laser pointer on hover (the
+tablet also reports the pen's position when it is near the screen), other screen, sharing and touch-ups. The live page is
+**portrait** (about 20 × 27 cm): there is no **Position of the tablet** choice for it, the control window replaces it
+with a reminder, and the **Tablet button in live mode** setting applies to the Bamboo Slate only.
+
+- **Storing the page with the tablet's button** does not interrupt live mode. The page is imported afterwards, like a
+  sync: its note is a harmless duplicate of the live one.
+- The tablet's screen-erase button does not change the page yet (its effect is still to be measured on the real tablet): to move to a new page, use **Next page** on
+  the computer.
+- A session stays on **the tablet it started on**. If the link is lost, Ardoise waits for that same tablet
+  (**Reconnecting…**) and ignores the other one until live mode ends. To carry on with the other tablet, end live mode
+  and start it again.
+
 ### Resuming live mode on a sheet
 
 *Needs the tablet.* Was the lesson interrupted, or do you want to add writing to a sheet you already saved? You can
@@ -305,6 +384,12 @@ The button is greyed out while the tablet is not registered or is busy (sync und
 - **The orientation**: the sheet is never turned. If it is landscape and the tablet is set to portrait (or the other
   way round), a notice tells you how to hold the tablet: "To write on this sheet, hold the tablet like this: …". The
   four position buttons are greyed out for this sheet.
+- **Which tablet**: the Xiaomi tablet writes only on a page of the Xiaomi tablet (about 20 × 27 cm: its fetched pages and
+  its live notes), and the Bamboo Slate on every other sheet. A Bamboo Slate sheet is therefore continued with the
+  Bamboo Slate, a page of the Xiaomi tablet with the Xiaomi tablet. If the connected tablet does not fit, Ardoise
+  refuses, says why (**Live mode could not resume this sheet.**) and writes nothing on the note; if the tablet only
+  connects afterwards, the message comes then. **Back to the library**, or **Try again** once the other tablet is
+  switched on.
 - **The next page** creates a new note, at the root of the library, with the sheet's paper (colour, template, texture, not
   its image), and follows the position set for the tablet again: the position buttons then work. The **Page** and
   **Background** tabs change the paper and the image of the current sheet (see **The paper and the image of the current
@@ -1447,7 +1532,14 @@ of every component used, with its licence.
 | "No Bluetooth adapter found" | Plug in the Bluetooth dongle (4.0 or later), wait for Windows to recognise it, try again. |
 | "The tablet does not answer" / "is not connected" | Bring it closer to the computer and press its button briefly; check the charge. |
 | "The tablet refused the command" | The phone app or Inkspace may have registered it since: register it again in Ardoise (chapter 4). Turn off the phone's Bluetooth. |
+| "This sheet cannot be continued with this tablet" | A Bamboo Slate sheet is continued with the Bamboo Slate, a page of the Xiaomi tablet with the Xiaomi tablet. Switch on the other tablet (the Xiaomi connects by itself, the Bamboo Slate needs a brief button press), then **Try again**; the note was not touched (chapter 6). |
+| "The Xiaomi tablet sent a page that Ardoise cannot read" | That page was not imported and stays on the tablet, with the pages stored after it (the tablet gives only its oldest page). Import them with Mi Home, and keep the diagnostic log (`_ardoise\diagnostics\` in the library, chapter 13). |
 | "The tablet is busy" | A sync or live mode is under way: try again when it is finished. |
+| "No Xiaomi tablet found" | Switch it on, bring it close to the computer, close Mi Home (or turn off the phone's Bluetooth: it talks to one application at a time), then **Look again** (chapter 4). |
+| The Xiaomi tablet no longer has its pages | Mi Home imported (and deleted) them before Ardoise: pages go to whichever application takes them first (chapter 5). |
+| "The Xiaomi tablet's pages are imported only with your agreement" | **Delete from the tablet after import** is off: confirm the sync (**Sync and delete**) or turn the option on (chapter 5). |
+| "A page of the Xiaomi tablet was not received in full" | The page stays on the tablet. Bring it closer to the computer and sync again. |
+| "The Xiaomi tablet still holds a page…" | Ardoise asked it to delete a page and it kept it: that page's note is already in the library. Sync again; if it repeats, keep the diagnostic log (chapter 13). |
 | Only one page is received, the next ones are "waiting" | Tick **Delete from the tablet after import** (chapter 5). |
 | The note shows upside down or on its side | Set the **Position of the tablet** to match how you hold it. |
 | "Your changes were not saved" | The note changed on another PC. **Save as a copy**, or go back to the library and open the note again. |

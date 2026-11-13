@@ -1,9 +1,8 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
   import { api, errorMessage, genericError, type AppState, type ThemePreference } from '../lib/api';
-  import { currentLocale, t } from '../lib/i18n.svelte';
-  import { formatDate } from '../lib/library-logic';
-  import { sizeInMillimetres, tablet } from '../lib/tablet-state.svelte';
+  import { t } from '../lib/i18n.svelte';
+  import { tablet } from '../lib/tablet-state.svelte';
   import LanguagePicker from './LanguagePicker.svelte';
   import MicrophonePicker from './narration/MicrophonePicker.svelte';
   import AboutSection from './AboutSection.svelte';
@@ -13,6 +12,7 @@
   import OpenH264Section from './OpenH264Section.svelte';
   import PenTouchSection from './PenTouchSection.svelte';
   import SharePortSection from './SharePortSection.svelte';
+  import KnownTablets from './tablet/KnownTablets.svelte';
   import TabletOptions from './tablet/TabletOptions.svelte';
 
   let { app, onchange, onclose, ontest }: {
@@ -24,9 +24,8 @@
   } = $props();
 
   let error = $state<string | null>(null);
-  /** The registered tablet (from the window's shared tablet status); undefined while loading. */
-  const registered = $derived(tablet.status ? tablet.status.registered : undefined);
-  let confirmingForget = $state(false);
+  /** A tablet is known (from the window's shared tablet status). */
+  const hasTablet = $derived(tablet.known.length > 0);
 
   /** The automatic export as being edited; saved with its button. */
   let autoDraft = $state(untrack(() => ({ ...app.autoExport })));
@@ -36,12 +35,6 @@
   const autoChanged = $derived(autoDraft.format !== app.autoExport.format || autoDraft.folder !== app.autoExport.folder);
 
   onMount(() => tablet.start());
-
-  async function forgetTablet() {
-    error = null;
-    confirmingForget = false;
-    if (!(await tablet.forget())) error = tablet.actionError;
-  }
 
   async function run(action: () => Promise<AppState>) {
     error = null;
@@ -95,36 +88,13 @@
 
   <section class="settings-section" aria-labelledby="settings-tablet">
     <h3 id="settings-tablet">{t('settings.tablet')}</h3>
-    {#if registered}
-      <dl class="facts">
-        <dt>{t('settings.tabletName')}</dt>
-        <dd>{registered.name}</dd>
-        <dt>{t('settings.tabletAddress')}</dt>
-        <dd><code>{registered.address}</code></dd>
-        <dt>{t('settings.tabletRegistered')}</dt>
-        <dd>{formatDate(Date.parse(registered.registered), currentLocale())}</dd>
-        <dt>{t('settings.tabletSize')}</dt>
-        <dd>{sizeInMillimetres(registered.width, registered.height)}</dd>
-      </dl>
+    <KnownTablets detailed emptyText onerror={(message) => (error = message)} />
+    {#if hasTablet}
       <h4 class="options-title">{t('tablet.options.title')}</h4>
       <TabletOptions />
-      {#if confirmingForget}
-        <div class="confirm" role="alertdialog" aria-label={t('settings.tabletForget')}>
-          <p>{t('settings.tabletForgetConfirm', { name: registered.name })}</p>
-          <div class="actions">
-            <button class="button danger" onclick={forgetTablet}>{t('settings.tabletForgetYes')}</button>
-            <button class="button" onclick={() => (confirmingForget = false)}>{t('settings.cancel')}</button>
-          </div>
-        </div>
-      {:else}
-        <div class="actions">
-          <button class="button danger" onclick={() => (confirmingForget = true)}>{t('settings.tabletForget')}</button>
-        </div>
-      {/if}
-    {:else if registered === null}
-      <p class="muted">{t('settings.tabletNone')}</p>
     {/if}
-    {#if ontest}
+    <!-- The guided test is the Slate's: the blackboard has none. -->
+    {#if ontest && (tablet.slate || !tablet.board)}
       <div class="actions">
         <button class="button" onclick={ontest}>{t('settings.tabletTest')}</button>
       </div>

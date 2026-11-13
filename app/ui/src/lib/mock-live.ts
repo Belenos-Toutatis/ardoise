@@ -175,6 +175,8 @@ class PenScript {
 
 interface Session {
   state: LiveSessionState;
+  /** The kind of tablet the session writes with: set when one first connects, kept after (`LiveSnapshot.tablet`). */
+  tablet: 'slate' | 'blackboard' | null;
   pages: Note[];
   pageIndex: number;
   /** The tablet's layer and the computer's, per page (by note id): a page left keeps them. */
@@ -297,6 +299,25 @@ let pageCounter = 0;
 let lastRevision = 0;
 /** How the (simulated) tablet is held; the real one is `[tablet] orientation`. */
 let heldAs: Orientation = 'landscape';
+/** The tablet connected (`status.active` of the mock tablet); null when none is, or it is not known. */
+let activeTablet: 'slate' | 'blackboard' | null = null;
+
+/** The mock tablet tells which tablet is connected: a resume is refused for a sheet that tablet cannot write on. */
+export function setMockLiveTablet(kind: 'slate' | 'blackboard' | null): void {
+  activeTablet = kind;
+  // As in Rust: a session takes the kind of the tablet that first connects, and keeps it while it reconnects.
+  if (session && session.tablet === null && kind !== null) {
+    session.tablet = kind;
+    broadcastSnapshot();
+  }
+}
+
+/** As `resume::tablet_fits`: the blackboard writes only on a page of its own size, the Slate on every other sheet. */
+function tabletFits(kind: 'slate' | 'blackboard' | null, page: { width: number; height: number }): boolean {
+  if (kind === null) return true;
+  const blackboardPage = page.width === 20500 && page.height === 27200;
+  return (kind === 'blackboard') === blackboardPage;
+}
 /** The orientation each page was written in (by note id): the page on screen follows `heldAs`. */
 const pageOrientation = new Map<string, Orientation>();
 const subscribers = new Set<(batch: LiveBatch) => void>();
@@ -336,6 +357,7 @@ function snapshot(): LiveSnapshot {
   if (!s) {
     return copy({
       state: 'idle',
+      tablet: null,
       page: { ...blankPage(false), id: '' },
       pageIndex: 0,
       pageCount: 1,
@@ -359,6 +381,7 @@ function snapshot(): LiveSnapshot {
   const layers = layersOf(s, s.pages[s.pageIndex]);
   return copy({
     state: s.state,
+    tablet: s.tablet,
     page: s.pages[s.pageIndex],
     pageIndex: s.pageIndex,
     pageCount: s.pages.length,
@@ -1457,6 +1480,7 @@ function setView(s: Session, requested: LiveViewState): void {
 function openSession(first: { page: Note; sheet: ResumedSheet } | null): LiveSnapshot {
   const s: Session = {
     state: 'waiting',
+    tablet: activeTablet,
     pages: [],
     pageIndex: 0,
     layersOf: new Map(),
@@ -1516,6 +1540,8 @@ function resumeSession(path: string): LiveSnapshot {
   if (refusal !== null) throw { code: refusal, message: path };
   const stored = library.notes.get(path);
   if (!stored) throw { code: path.startsWith(library.root) ? 'noteNotFound' : 'notInLibrary', message: path };
+  // Nothing started, the session shown before goes on.
+  if (!tabletFits(activeTablet, stored.note.page)) throw { code: 'sheetOtherTablet', message: path };
   stopSession();
   const page = copy(stored.note);
   pageOrientation.set(page.id, heldAs);
@@ -1684,6 +1710,7 @@ export function resetMockLive(): void {
   lastRevision = 0;
   stoppedOnce = false;
   heldAs = 'landscape';
+  activeTablet = null;
   pageOrientation.clear();
   Object.assign(mockLiveConfig, { waitMs: 1200, tickMs: 15, pen: true, monitors: 2, saveError: null, resumeError: null });
 }
@@ -1691,6 +1718,17 @@ export function resetMockLive(): void {
 /** Sends `events` to every subscriber as one batch. */
 export function mockLiveEmit(events: LiveEvent[]): void {
   broadcast(events);
+}
+
+/**
+ * The tablet that connected cannot write on the resumed sheet: the session ends at once, the window is told (`refused`)
+ * and gets an `idle` snapshot, as Rust does when the tablet connects after `live_resume` was accepted.
+ */
+export function mockLiveRefuse(code = 'sheetOtherTablet'): void {
+  const s = running();
+  stopTimers(s);
+  session = null;
+  broadcast([{ type: 'refused', code, message: '' }, { type: 'snapshot', snapshot: snapshot() }]);
 }
 
 /** The tablet's link drops for `ms`, then comes back. */

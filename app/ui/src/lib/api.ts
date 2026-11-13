@@ -340,8 +340,13 @@ export const api = {
   tabletRegister: () => call<void>('tablet_register'),
   /** Cancels the registration or the sync under way. */
   tabletCancel: () => call<void>('tablet_cancel'),
-  /** Syncs now, or as soon as the tablet connects. */
-  tabletSync: () => call<void>('tablet_sync'),
+  /**
+   * Syncs now, or as soon as the tablet connects. `confirmBlackboardDelete`: the user accepted that the Xiaomi's pages
+   * are deleted from the tablet once imported; with « Delete after import » off, the Xiaomi's pages are imported only
+   * by a call that passes it while the Xiaomi is the connected tablet (`blackboardConfirmDelete` otherwise).
+   */
+  tabletSync: (confirmBlackboardDelete = false) =>
+    call<void>('tablet_sync', confirmBlackboardDelete ? { confirmBlackboardDelete: true } : undefined),
   /** Renames the tablet (1–15 characters; `invalidName` otherwise). */
   tabletRename: (name: string) => call<TabletStatus>('tablet_rename', { name }),
   /** Sets the tablet clock; returns the drift left in seconds. */
@@ -351,6 +356,17 @@ export const api = {
   tabletSetOrientation: (orientation: Orientation) => call<void>('tablet_set_orientation', { orientation }),
   /** Presses the simulated tablet's button (`--simulated-tablet` only). */
   simPressButton: () => call<void>('sim_press_button'),
+
+  // --- The Xiaomi blackboard, the second tablet (M18; docs/design/blackboard.md §5) ----------
+
+  /** Starts the search for a blackboard to add (`connection: 'adding'`, `boardSearch` fills up, about 60 s). */
+  tabletFindBlackboards: () => call<void>('tablet_find_blackboards'),
+  /** Adds the blackboard heard at `address` by the search under way (`blackboardNotFound` otherwise). */
+  tabletAddBlackboard: (address: string) => call<TabletStatus>('tablet_add_blackboard', { address }),
+  /** Forgets the blackboard; a connected Slate stays connected. */
+  tabletForgetBlackboard: () => call<void>('tablet_forget_blackboard'),
+  /** Presses the simulated blackboard's store button (`--simulated-blackboard` only). */
+  simBlackboardStorePage: () => call<void>('sim_blackboard_store_page'),
 
   // --- Live mode and classroom (milestone M4; Rust side: live.rs, presentation.rs) ------------
 

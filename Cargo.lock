@@ -371,6 +371,7 @@ dependencies = [
  "ardoise-device",
  "ardoise-proto",
  "chrono",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
 ]

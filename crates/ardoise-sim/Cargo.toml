@@ -16,6 +16,8 @@ thiserror = "2"
 [dev-dependencies]
 # The tablet service tests check the notes written in a library.
 ardoise-core = { path = "../ardoise-core" }
+# The tests of the private captures read their JSON lines.
+serde_json = "1"
 tempfile = "3"
 
 [lints]

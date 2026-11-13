@@ -4,7 +4,8 @@
 //! - A tablet note keeps the tablet's bytes (`original.bin`, never modified): its original is
 //!   decoded again with [`note_from_page`], exactly as the synchronisation decoded it, with this
 //!   PC's tablet size and orientation (the registered tablet's drawing area, else the Bamboo Slate's;
-//!   the orientation of the settings).
+//!   the orientation of the settings). A page of the Xiaomi blackboard is recognised from its bytes
+//!   ([`page_kind`]) and comes back on the blackboard's own page, never turned.
 //! - Any other note (live mode, Inkspace import, made in Ardoise) gets `original.ardoise` when
 //!   the editor first saves a change of its ink over it ([`keep_original`], called by
 //!   `notes::save_in`), or when live mode first writes new ink on it ([`keep_resumed_original`],
@@ -30,7 +31,7 @@ use ardoise_core::library::Library;
 use ardoise_core::note::{BackgroundImage, Layer, Note, PageSize, Paper};
 use ardoise_core::settings::{Orientation, Settings};
 use ardoise_device::identity;
-use ardoise_device::pages::note_from_page;
+use ardoise_device::pages::{note_from_page, page_kind};
 use ardoise_device::session::DownloadedPage;
 use ardoise_ink::Stroke;
 use serde::Serialize;
@@ -137,6 +138,7 @@ pub fn original_of(file: &NoteFile, tablet: &TabletContext) -> CommandResult<Not
             bytes: bytes.clone(),
             timestamp: None,
             announced_size: u32::try_from(bytes.len()).unwrap_or(u32::MAX),
+            kind: page_kind(bytes),
         };
         let decoded = note_from_page(
             &page,

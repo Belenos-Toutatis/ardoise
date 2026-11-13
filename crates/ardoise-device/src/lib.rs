@@ -2,12 +2,14 @@
 //!
 //! - [`transport`]: the link abstraction shared with `ardoise-ble` and `ardoise-sim`.
 //! - [`session`]: one authenticated conversation (register, connect, info, sync, live mode).
+//! - [`blackboard`]: one conversation with the Xiaomi blackboard (info, clock, sync, live mode).
 //! - [`manager`]: finds tablets, keeps the shared registration (`device.json`), reconnects.
 //! - [`log`] and [`logging`]: the `.jsonl` diagnostic log and the transport that feeds it.
 //! - [`diagnostic`]: the guided tablet test and its report.
 //! - [`pages`]: synced pages become notes of the library (then the automatic export).
 //! - [`service`]: the tablet as the application sees it (auto-connect, sync, registration, live).
 
+pub mod blackboard;
 pub mod diagnostic;
 pub mod identity;
 pub mod log;

@@ -1,6 +1,10 @@
 //! Ties a connector, the library's shared registration (`device.json`) and the diagnostic log
 //! together: find a tablet, register it once for every PC, connect with the saved identity,
 //! keep live mode running across disconnections.
+//!
+//! The Xiaomi blackboard needs no identity: [`Manager::find_blackboards`] lists the ones nearby,
+//! [`Manager::find_known`] waits for whichever known tablet comes in range, and
+//! [`Manager::connect_blackboard`] opens a [`BoardSession`] and sets the tablet's clock.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -9,11 +13,12 @@ use std::time::Duration;
 
 use ardoise_proto::live::{self, LivePacket};
 
-use crate::identity::{self, DEVICE_FORMAT, DeviceRecord, HostId};
+use crate::blackboard::BoardSession;
+use crate::identity::{self, BlackboardRecord, DEVICE_FORMAT, DeviceRecord, HostId};
 use crate::log::{SharedLog, lock};
 use crate::logging::LoggingTransport;
 use crate::session::{DeviceError, DeviceInfo, Session, unix_seconds};
-use crate::transport::{Advertisement, Clock, Connector, Transport};
+use crate::transport::{Advertisement, Clock, Connector, TabletKind, Transport};
 
 /// How long opening a link may take.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
@@ -146,6 +151,133 @@ impl Manager {
         found
     }
 
+    /// Waits up to `timeout` for one of the known tablets, each at its saved address only (and
+    /// advertising as its kind): the Slate of `slate`, the blackboard of `board`. Returns the
+    /// first one heard. Another Wacom tablet or blackboard in range is noted once per call. With
+    /// `quiet`, nothing is noted unless a tablet is found (a short look repeated while the
+    /// blackboard holds the link).
+    pub fn find_known(
+        &mut self,
+        slate: Option<&DeviceRecord>,
+        board: Option<&BlackboardRecord>,
+        timeout: Duration,
+        quiet: bool,
+    ) -> Result<Option<(TabletKind, Advertisement)>, DeviceError> {
+        if !quiet {
+            let mut wanted = Vec::new();
+            if let Some(record) = slate {
+                wanted.push(format!("the registered tablet {}", record.address));
+            }
+            if let Some(record) = board {
+                wanted.push(format!("the blackboard {}", record.address));
+            }
+            self.note(format!("looking for {}", wanted.join(" or ")));
+        }
+        let slate_address = slate.map(|r| r.address.clone());
+        let board_address = board.map(|r| r.address.clone());
+        let is = |ad: &Advertisement, wanted: &Option<String>| {
+            wanted
+                .as_deref()
+                .is_some_and(|address| ad.address.eq_ignore_ascii_case(address))
+        };
+        let mut others = Vec::<String>::new();
+        let found = self.scan_quietly(timeout, &mut |ad: &Advertisement| {
+            if is(ad, &slate_address) && ad.is_wacom() {
+                return true;
+            }
+            if is(ad, &board_address) && ad.is_blackboard() {
+                return true;
+            }
+            if ad.kind().is_some() && !others.contains(&ad.address) {
+                others.push(ad.address.clone());
+            }
+            false
+        })?;
+        if !quiet {
+            for other in others {
+                self.note(format!(
+                    "another tablet ({other}) is in range: ignored, it is not a known one"
+                ));
+            }
+        }
+        Ok(found.map(|ad| {
+            let kind = if is(&ad, &board_address) && ad.is_blackboard() {
+                TabletKind::Blackboard
+            } else {
+                TabletKind::Slate
+            };
+            self.note(format!(
+                "found the {} at {} (rssi {:?})",
+                kind.name(),
+                ad.address,
+                ad.rssi
+            ));
+            (kind, ad)
+        }))
+    }
+
+    /// Listens for `timeout` and returns every Xiaomi blackboard heard (once each, the last
+    /// advertisement), whether known or not. Nothing is connected to.
+    pub fn find_blackboards(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Vec<Advertisement>, DeviceError> {
+        let mut heard = Vec::<Advertisement>::new();
+        self.scan_quietly(timeout, &mut |ad: &Advertisement| {
+            if ad.is_blackboard() {
+                match heard
+                    .iter_mut()
+                    .find(|known| known.address.eq_ignore_ascii_case(&ad.address))
+                {
+                    Some(known) => *known = ad.clone(),
+                    None => heard.push(ad.clone()),
+                }
+            }
+            false
+        })?;
+        Ok(heard)
+    }
+
+    /// Opens a link to the blackboard at `address` and sets its clock (`11 05 07`: the tablet
+    /// cannot be asked its time, so no drift is measured). No login, nothing written to the
+    /// Xiaomi service.
+    pub fn connect_blackboard(&mut self, address: &str) -> Result<BoardSession, DeviceError> {
+        let transport = self.open_as(address, TabletKind::Blackboard)?;
+        let mut session = BoardSession::open(transport, self.clock.clone());
+        session.set_cancel_flag(self.cancel.clone());
+        session.set_time()?;
+        Ok(session)
+    }
+
+    /// [`Manager::scan`] without the notes of what was found or not found.
+    fn scan_quietly(
+        &mut self,
+        timeout: Duration,
+        filter: &mut dyn FnMut(&Advertisement) -> bool,
+    ) -> Result<Option<Advertisement>, DeviceError> {
+        let cancel = self.cancel.clone();
+        let deadline = self.clock.monotonic() + timeout;
+        loop {
+            if cancel.load(Ordering::SeqCst) {
+                return Err(DeviceError::Cancelled);
+            }
+            let now = self.clock.monotonic();
+            if now >= deadline {
+                return Ok(None);
+            }
+            let slice = (deadline - now).min(SCAN_SLICE);
+            let found = self.connector.find(slice, &mut |ad: &Advertisement| {
+                cancel.load(Ordering::SeqCst) || filter(ad)
+            })?;
+            if cancel.load(Ordering::SeqCst) {
+                return Err(DeviceError::Cancelled);
+            }
+            if found.is_some() {
+                return Ok(found);
+            }
+        }
+    }
+
     /// Scans in slices (so that cancellation is noticed) until `filter` accepts a tablet.
     /// Within a slice, cancellation ends the scan at the next advertisement received.
     fn scan(
@@ -185,10 +317,23 @@ impl Manager {
     }
 
     fn open(&mut self, address: &str) -> Result<Box<dyn Transport>, DeviceError> {
+        self.open_as(address, TabletKind::Slate)
+    }
+
+    /// Opens a link to a tablet of `kind`; the log describes its frames in its protocol.
+    fn open_as(
+        &mut self,
+        address: &str,
+        kind: TabletKind,
+    ) -> Result<Box<dyn Transport>, DeviceError> {
         self.note(format!("connecting to {address}"));
         let transport = self.connector.connect(address, CONNECT_TIMEOUT)?;
         lock(&self.log).event("connected");
-        Ok(Box::new(LoggingTransport::new(transport, self.log.clone())))
+        Ok(Box::new(LoggingTransport::for_tablet(
+            transport,
+            self.log.clone(),
+            kind,
+        )))
     }
 
     /// Registers a tablet found in registration mode with a new identity, reads its

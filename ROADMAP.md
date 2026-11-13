@@ -392,6 +392,37 @@ H2, H3, H6 et H7 faits par l'utilisateur (signalé le 2026-11-12). Retour reçu 
 
 ---
 
+## M18 — Une seconde tablette : la Xiaomi Mijia « petit tableau noir », version mémoire
+
+Ajouté le 2026-11-12 à la demande de l'utilisateur, après une étude de faisabilité (SPEC §1, §2, §4.1, §4.2, `docs/questions.md` Q14). Protocole : `docs/research/xiaomi-blackboard.md`. La tablette est sur le poste de développement.
+
+- [x] Protocole de la Xiaomi dans `ardoise-proto` (trames, points du direct, pages) et ses échanges dans `ardoise-device` (connexion sans enregistrement, informations, mise à l'heure, téléchargement puis effacement des pages, mode direct, reconnexion), d'après la note de recherche et nos captures seulement ; jamais une commande non observée.
+- [x] Transport Bluetooth : la Xiaomi reconnue à son annonce, ses canaux, sans rien écrire sur le service Xiaomi (`fe95`).
+- [x] Tablette Xiaomi simulée dans `ardoise-sim`.
+- [x] Application : ajouter la Xiaomi sans enregistrement ; deux tablettes retenues, connexion à celle qui est allumée ; synchronisation en notes datées ; mode direct ; informations (batterie, mémoire, pages) ; oublier la tablette ; textes FR et EN.
+- [ ] Import, fait une fois, des neuf pages récupérées pendant l'étude (données privées, hors de git).
+- [x] Guides FR et EN (ajouter la tablette, limites), `CHANGELOG.md`, procédure H8 dans `docs/hardware-tests.md`.
+- [x] Relecture indépendante, remarques corrigées.
+
+**Critères de fin** :
+- `CHECK OK` et `E2E OK` ;
+- des tests du protocole : chaque trame observée se décode et se réencode à l'identique ; une page se décode en traits ; ce qui est inconnu est ignoré sans erreur ;
+- des tests contre la tablette simulée : une synchronisation n'efface une page qu'après l'écriture vérifiée de la note ; une session de direct rend les traits « écrits » ; une coupure pendant le direct se rattrape ;
+- les pages privées récupérées pendant l'étude, quand elles sont là, se décodent en entier ;
+- un parcours de bout en bout avec la Xiaomi simulée : l'ajouter, récupérer ses pages, faire du direct.
+
+Vérifié sous Windows le 2026-11-13 : `CHECK OK`, `SELFTEST OK` (25,2 Mo), `E2E OK` (106 parcours, FR et EN, dont celui de la Xiaomi simulée : l'ajouter sans bouton à maintenir, ses trois pages devenues des notes et effacées de la tablette, ses informations, le direct en page verticale, une page enregistrée pendant le direct puis importée, l'oubli de la tablette). L'import des neuf pages récupérées pendant l'étude a été essayé sur une bibliothèque jetable (neuf notes, aucune au second passage) ; il reste à faire dans la bibliothèque de l'utilisateur, avec la nouvelle version. **Rien n'a encore été essayé sur la vraie tablette depuis Ardoise** : le téléchargement et l'effacement d'une page n'ont été vus que dans une capture de Mi Home (point de contrôle H8).
+
+Trouvé par les deux relectures indépendantes et corrigé. Une page arrive sans marque de fin ni somme de contrôle, seulement comptée : les octets d'un transfert bloqué ou en retard pouvaient se mêler au suivant, et une page fausse être gardée puis la vraie effacée. Trois protections : après un transfert qui ne finit pas proprement, la liaison est fermée et rouverte avant de continuer ; un silence est exigé après le dernier octet, et avant de demander une page ; une page n'est gardée que si elle est faite de points entiers d'un type connu. Aussi : l'état affiché après une synchronisation, une synchronisation demandée qui effaçait les pages de la Xiaomi sans la confirmation (voir Q15), le direct repris par l'autre tablette, l'oubli d'une tablette qui laissait un direct ou une synchronisation en attente, une recherche Bluetooth qui vidait la liste de Windows avec une liaison ouverte, et des tests de panne qui ne passaient pas par le code de l'application.
+
+Choix faits pendant la construction, à confirmer par l'utilisateur (`docs/questions.md` Q15) : une feuille se reprend en direct avec la tablette qui l'a écrite ; un direct reste sur la tablette avec laquelle il a commencé ; avec « effacer après import » désactivé, les pages de la Xiaomi ne sont importées qu'après une confirmation donnée pendant qu'elle est connectée.
+
+### Point de contrôle H8 [matériel]
+
+- [ ] [matériel] Avec la vraie Xiaomi : l'ajouter, lire ses informations, récupérer puis effacer une page d'essai, trente secondes de direct ; dire ce que fait le bouton d'effacement de l'écran pendant le direct.
+
+---
+
 ## Lancer une étape avec `/goal`
 
 Exemple pour M1 (remplacer `M1` par l'étape voulue) :

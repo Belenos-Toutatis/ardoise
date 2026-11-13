@@ -710,3 +710,95 @@ Ce qui ne revient pas tout seul :
 | Si la question **Remplacer** / **Garder l'ancienne** apparaît et si chaque réponse fait ce qu'elle dit | E4 |
 | Si le trait collé, le trait annulé puis rétabli et le trait au doigt suivent le son | E5, E6 |
 | Toute phrase incompréhensible, et ce que **Windows Ink** affiche par-dessus la page | tout le test |
+
+---
+
+## H8 — La tablette Xiaomi
+
+**Durée** : 45 à 60 minutes. **Matériel** : le PC d'Ardoise, la **tablette Xiaomi Mijia « petit tableau noir »** (chargée, avec son stylet), le **dongle Bluetooth** branché, **le téléphone avec Mi Home** (Bluetooth du téléphone **coupé** pendant le test), **la Bamboo Slate** (parties G et H seulement), une **règle**. Ce test suppose que H0 à H2 ont réussi.
+
+Ce test vérifie SPEC §4.1 « Tablette Xiaomi » et §4.2 « Avec la tablette Xiaomi » (`docs/questions.md` Q14, `docs/design/blackboard.md`) avec la vraie tablette : rien n'a été essayé dessus par Ardoise avant (seules des captures de Mi Home ont été étudiées). Les libellés ci-dessous sont ceux de la fenêtre.
+
+### À la maison, avant
+
+1. Fermer Ardoise sur tous les PC, puis remplacer `ardoise.exe` dans le dossier Nextcloud par la nouvelle version.
+2. Ne **pas** utiliser `--simulated-tablet` ni `--simulated-blackboard`.
+3. Noter la version d'Ardoise et celle de Windows.
+
+### Au travail
+
+#### A. Préparer et ajouter la tablette
+
+1. **Allumer la tablette Xiaomi.** **Fermer Mi Home** sur le téléphone (le fermer vraiment, pas seulement le mettre en arrière-plan) et **couper le Bluetooth du téléphone**.
+2. Lancer Ardoise, ouvrir le panneau **Tablette**, cliquer sur **Ajouter la tablette Xiaomi**, lire la fenêtre, cliquer sur **Chercher la tablette**. Noter le temps avant que la tablette soit trouvée, son **nom** annoncé (attendu : `xiaomi.dev.ble`) et son **Signal**.
+3. Cliquer sur **Ajouter cette tablette**. Noter si Ardoise se connecte seule (**Connexion…**, puis **Connectée**) et en combien de temps.
+4. *Variante, si le temps le permet* : refaire la recherche avec Mi Home **ouvert** : la tablette doit rester introuvable, avec le message « Aucune tablette Xiaomi trouvée ». Noter le texte exact et si la recherche s'arrête bien au bout d'une minute.
+
+#### B. Ses informations
+
+1. Dans le panneau **Tablette**, noter la **batterie** (comparer avec Mi Home si possible), la **mémoire libre** et son total, le nombre de **pages en mémoire**, le **modèle**, la **zone de dessin** affichée.
+2. Vérifier qu'il n'y a **ni nom à changer, ni version de firmware, ni « en charge », ni bouton Mettre à l'heure**. Noter si la tablette est bien à l'heure (la date d'une page écrite à l'étape C le dira).
+
+#### C. Écrire une page, la récupérer
+
+1. Sur la tablette, **écrire une page d'essai** : quelques mots, un cercle, un trait appuyé et un trait léger, et **une ligne droite de 10 cm** repérée à la règle. Appuyer sur le **bouton d'enregistrement** de la tablette (celui qui range la page).
+2. Dans Ardoise, **Synchroniser maintenant** (avec **Effacer de la tablette après import** coché, la synchronisation part toute seule). Noter le temps du transfert et si la progression (**Page 1 sur …**) est juste.
+3. Ouvrir la note : l'écriture est-elle fidèle (forme, épaisseur, pression) ? La **date** est-elle celle de l'enregistrement sur la tablette ? **Mesurer la ligne de 10 cm** dans la note (l'unité : exporter en PDF et mesurer sur papier ou à l'écran, ou comparer avec une règle posée sur l'écran) : noter la longueur obtenue.
+4. Le nombre de **pages en mémoire** est-il retombé à 0 ? **Ouvrir Mi Home** (après avoir remis le Bluetooth du téléphone) : la page a-t-elle bien **disparu de la tablette** ?
+5. *Option désactivée* : décocher **Effacer de la tablette après import**, écrire et enregistrer deux autres pages, reconnecter la tablette (l'éteindre et la rallumer). Le panneau dit-il « 2 pages attendent sur la tablette Xiaomi » et **rien** n'est-il importé tout seul ? **Synchroniser maintenant** demande-t-il de confirmer (**Synchroniser et effacer**) ? Les deux pages sont-elles importées puis effacées ? Recocher l'option.
+
+#### D. Le mode direct
+
+1. **Mode direct** depuis le panneau. Écrire pendant **trente secondes**. Noter le retard du trait, la fidélité, et si le **pointeur laser** suit le stylet quand il survole sans toucher.
+2. Vérifier que la page du direct est **en hauteur**, sans choix de position, et que le rappel « Tablette Xiaomi : page en hauteur » est là.
+3. **Enregistrer une page avec le bouton** de la tablette pendant le direct : le direct continue-t-il sans coupure ni trait parasite ? Terminer le direct : la page enregistrée est-elle importée ensuite (doublon de la note du direct)?
+4. Relancer le direct, puis **appuyer sur le bouton d'effacement de l'écran** de la tablette : noter **ce qui se passe** dans Ardoise (rien ? nouvelle page ? trait parasite ? coupure ?), à chaque appui. (SPEC §4.2 : le direct passe à une nouvelle page si la tablette le signale ; sinon on change de page avec **Page suivante**.)
+5. **Couper puis rétablir le Bluetooth du PC** (ou s'éloigner de la tablette) pendant le direct : l'état dit-il **Reconnexion…**, et le direct reprend-il tout seul, sur la même tablette ? Noter le temps.
+6. **Annuler une synchronisation au milieu d'une grande page** (écrire une page très chargée, enregistrer, lancer **Synchroniser maintenant**, puis **Annuler** pendant le transfert), puis lancer le mode direct : **aucun trait parasite** ne doit apparaître. Noter le temps que prend la liaison à se rétablir (Ardoise ferme la liaison et la rouvre : c'est voulu).
+
+#### C bis. Les cas limites du transfert
+
+1. **Enregistrer une page avec l'écran vide** (appuyer sur le bouton d'enregistrement sans avoir rien écrit) : le **nombre de pages en mémoire** change-t-il ? Ardoise importe-t-elle quelque chose (une note vide, rien, un message) ? Noter ce que dit le panneau.
+2. Lors d'une synchronisation, noter **combien de temps après l'import d'une page le nombre de pages en mémoire baisse** : « tout de suite » ou « plus d'une seconde » (c'est la durée d'un effacement).
+3. Avec **les deux tablettes connues**, laisser la Xiaomi **connectée et sans rien faire pendant cinq minutes** : le panneau dit-il toujours **Connectée** à la fin ? Puis appuyer brièvement sur le bouton de la **Bamboo Slate** : prend-elle la liaison, et la Xiaomi se déconnecte-t-elle ?
+
+#### D bis. Continuer une feuille
+
+1. Dans la bibliothèque, **Reprendre en mode direct** sur la note récupérée de la Xiaomi à l'étape C, **avec la Xiaomi connectée**. Écrire un mot et la même ligne de 10 cm : le **nouveau trait tombe-t-il là où est le stylet**, et **à la même taille** que l'ancien ? (Comparer la longueur des deux lignes dans la note après **Terminer**.) Noter tout décalage ou réduction.
+2. Avec la Xiaomi connectée, essayer de **reprendre une note de la Bamboo Slate** : Ardoise doit refuser tout de suite avec « Cette feuille ne peut pas être continuée avec cette tablette… » (**Le mode direct n'a pas pu reprendre cette feuille.**), sans rien écrire sur la note (la date de modification de la note ne change pas). Noter le texte exact. Puis, la Xiaomi éteinte, reprendre cette même note et allumer la Xiaomi : le message doit arriver à la connexion, le direct passer à **Arrêté**, et **Retour à la bibliothèque** fonctionner.
+
+#### E. Deux tablettes (avec la Bamboo Slate)
+
+1. Enregistrer la Bamboo Slate (chapitre 4 du guide) si elle ne l'est pas : les **deux** tablettes doivent être listées, chacune avec son **Oublier la tablette**.
+2. Laisser la Xiaomi **connectée** (état **Connectée**), puis **allumer la Bamboo Slate** (appui bref sur son bouton). **Ardoise passe-t-elle à la Bamboo Slate**, et en combien de temps ? Sinon, que montre le panneau ? Noter si la Xiaomi reste connectée.
+3. Lancer le **mode direct** sur la Xiaomi, puis allumer la Bamboo Slate : le direct doit **rester sur la Xiaomi**. Terminer.
+4. **Oublier la Xiaomi** (confirmer) : la Bamboo Slate reste connue et se connecte. Ajouter de nouveau la Xiaomi.
+
+### Ce qui revient par Nextcloud
+
+- Les notes importées (C, D), dans la bibliothèque.
+- Dans `<bibliothèque>\_ardoise\diagnostics\` : les journaux du service (`AAAA-MM-JJ_HHMMSS.jsonl` et `.txt`), écrits quand quelque chose s'est mal passé ou qu'une trame inconnue est arrivée (la Xiaomi y a ses trames décrites, `BOARD …`). Si rien n'y apparaît alors qu'un essai a échoué, le noter.
+
+### À me signaler
+
+Ce qui ne revient pas tout seul :
+
+| Quoi | Où |
+|---|---|
+| Le temps de la recherche, le **nom** annoncé et le **Signal** ; le texte exact quand rien n'est trouvé (Mi Home ouvert) | A2, A4 |
+| La **batterie** (comparée à Mi Home), la **mémoire**, le nombre de pages, la zone de dessin | B1 |
+| Si la **date** d'une page est juste (l'heure de la tablette) | B2, C3 |
+| La fidélité de la page importée, et la **longueur obtenue pour la ligne de 10 cm** (c'est l'unité à corriger : `BOARD_WIDTH` et `BOARD_HEIGHT`) | C3 |
+| Si la page a bien **disparu de la tablette** après l'import, et si Mi Home la voit encore | C4 |
+| Le comportement avec l'option **Effacer de la tablette après import** désactivée, et le texte de la confirmation | C5 |
+| Le retard et la fidélité du direct, le pointeur laser | D1 |
+| Ce qui se passe pendant le direct quand on **enregistre une page** avec le bouton, et quand on **appuie sur le bouton d'effacement** de l'écran | D3, D4 |
+| La reprise du direct après une coupure du Bluetooth, et son délai | D5 |
+| Un **trait parasite** après l'annulation d'un transfert, et le délai de reconnexion | D6 |
+| Le comportement d'une **page enregistrée avec l'écran vide** (nombre de pages, import) | C bis 1 |
+| Le **délai** entre l'import d'une page et la baisse du nombre de pages (« tout de suite » ou « plus d'une seconde ») | C bis 2 |
+| Si la liaison de la Xiaomi **tient cinq minutes** au repos, et si un appui sur la Bamboo Slate lui prend la liaison | C bis 3 |
+| Où tombe le **trait ajouté** à une note de la Xiaomi, et sa taille comparée à l'ancien | D bis 1 |
+| Le texte exact du refus quand la tablette ne convient pas à la feuille, et s'il arrive tout de suite ou à la connexion | D bis 2 |
+| Ce que fait Ardoise quand la **Bamboo Slate** s'allume alors que la Xiaomi est connectée (hors direct, puis pendant un direct) | E2, E3 |
+| Toute phrase incompréhensible, tout message d'erreur nouveau | tout le test |

@@ -138,6 +138,8 @@ fn classify(entry: &LogEntry) -> Result<Class, String> {
                 sysevent::SysEvent::Unexplained { .. } => Ok(Class::Named),
                 sysevent::SysEvent::Unknown(_) => Err("unknown sysevent".into()),
             },
+            // The Slate has no such channel: these journals never hold it.
+            Channel::BoardData => Err("blackboard data in a Slate journal".into()),
         },
         Direction::Event | Direction::Note => Ok(Class::Understood),
     }

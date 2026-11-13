@@ -1,12 +1,13 @@
 <script lang="ts">
   /**
-   * Tablet block at the bottom of the sidebar: name, connection state (dot and words), battery,
+   * Tablet block at the bottom of the sidebar: name (of the tablet that is connected, else of the
+   * known ones: the Slate, the Xiaomi tablet or both), connection state (dot and words), battery,
    * and a progress bar while syncing. A click opens or closes the tablet panel. It follows the
    * window's shared status (`tablet-state.svelte.ts`).
    */
   import { onMount } from 'svelte';
   import { t } from '../../lib/i18n.svelte';
-  import { tablet } from '../../lib/tablet-state.svelte';
+  import { tablet, tabletName } from '../../lib/tablet-state.svelte';
   import Battery from '../tablet/Battery.svelte';
 
   let { open = false, onopen = () => {} }: { open?: boolean; onopen?: () => void } = $props();
@@ -15,11 +16,16 @@
 
   const status = $derived(tablet.status);
   const connection = $derived(status?.connection ?? 'unavailable');
-  const name = $derived(status?.registered?.name ?? null);
+  const known = $derived(tablet.known);
+  const name = $derived.by(() => {
+    if (known.length === 0) return null;
+    const linked = known.find((entry) => entry.kind === status?.active);
+    return linked ? tabletName(linked) : known.map(tabletName).join(' · ');
+  });
   const sync = $derived(status?.sync ?? null);
   const device = $derived(status?.device ?? null);
   /** The battery is known only while the tablet has been read, and a forgotten tablet has none. */
-  const showBattery = $derived(device !== null && status?.registered != null);
+  const showBattery = $derived(device !== null && known.some((entry) => entry.kind === device.kind));
   const stateText = $derived(
     status === null && !tablet.unavailable ? t('common.loading') : t(`tablet.state.${connection}`),
   );
@@ -36,7 +42,7 @@
 >
   <span class="tablet-label">{t('library.tabletStatus')}</span>
   <span class="tablet-name" class:muted={!name}>{name ?? t('library.tabletNone')}</span>
-  {#if name || status?.connection === 'registering'}
+  {#if name || status?.connection === 'registering' || status?.connection === 'adding'}
     <span class="line">
       <span class="dot" aria-hidden="true"></span>
       <span class="state">{stateText}</span>

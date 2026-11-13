@@ -26,7 +26,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio::time::{MissedTickBehavior, timeout};
 
-use crate::convert::{GattLayout, locate_characteristics, map_error};
+use crate::convert::{GattLayout, layout_kind, locate_characteristics, map_error};
 use crate::executor::Executor;
 use crate::gatt;
 
@@ -157,10 +157,10 @@ impl BleTransport {
         peer: Advertisement,
         limit: Duration,
     ) -> Result<Self, TransportError> {
-        let address = peer.address.clone();
+        let target = peer.clone();
         let p = peripheral.clone();
         let established = executor.run(async move {
-            let outcome = match timeout(limit, establish(&p, &adapter, &address)).await {
+            let outcome = match timeout(limit, establish(&p, &adapter, &target)).await {
                 Ok(outcome) => outcome,
                 Err(_) => Err(TransportError::Timeout),
             };
@@ -239,22 +239,25 @@ impl BleTransport {
 async fn establish(
     peripheral: &Peripheral,
     adapter: &Adapter,
-    address: &str,
+    peer: &Advertisement,
 ) -> Result<Established, TransportError> {
     // Subscribe to the central's events before connecting so no disconnection is missed.
     let central_events = adapter.events().await.map_err(map_error)?;
     peripheral.connect().await.map_err(|error| match error {
-        btleplug::Error::DeviceNotFound => TransportError::NotFound(address.to_owned()),
+        btleplug::Error::DeviceNotFound => TransportError::NotFound(peer.address.clone()),
         other => map_error(other),
     })?;
     peripheral.discover_services().await.map_err(map_error)?;
-    let mut layout = locate_characteristics(&peripheral.characteristics())?;
+    // The Slate's layout, or the blackboard's (never anything of its Xiaomi service).
+    let characteristics = peripheral.characteristics();
+    let kind = layout_kind(peer, &characteristics);
+    let mut layout = locate_characteristics(&characteristics, kind)?;
     // Take the notification stream before enabling notifications, so the first ones (the
     // sysevent sent on connect) are not lost.
     let notifications = peripheral.notifications().await.map_err(map_error)?;
     let mut subscribed = Vec::with_capacity(layout.subscriptions.len());
     for (channel, characteristic) in layout.subscriptions {
-        let required = gatt::SUBSCRIPTIONS
+        let required = gatt::subscriptions(kind)
             .iter()
             .any(|(c, required)| *c == channel && *required);
         match peripheral.subscribe(&characteristic).await {
@@ -347,8 +350,11 @@ impl Transport for BleTransport {
         if !self.link.is_open() {
             return Err(TransportError::NotConnected);
         }
-        // Defensive: the layout only ever selects Nordic UART TX.
-        if self.command.uuid != gatt::COMMAND_TX {
+        // Defensive: the layout only ever selects Nordic UART TX, never in a service that must
+        // not be touched (firmware update, Xiaomi's login).
+        if self.command.uuid != gatt::COMMAND_TX
+            || gatt::is_forbidden_service(self.command.service_uuid)
+        {
             return Err(TransportError::Backend(format!(
                 "refusing to write to {}",
                 gatt::describe(self.command.uuid)

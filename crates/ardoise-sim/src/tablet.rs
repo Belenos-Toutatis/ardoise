@@ -762,6 +762,7 @@ impl State {
             } else {
                 self.config.manufacturer_data.clone()
             },
+            xiaomi_service_data: Vec::new(),
         }
     }
 

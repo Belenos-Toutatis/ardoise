@@ -489,6 +489,7 @@ fn a_link_lost_before_writing_is_a_disconnection() {
         rssi: None,
         company_id: Some(0x4755),
         manufacturer_data: vec![0; 7],
+        xiaomi_service_data: Vec::new(),
     };
     let mut session = Session::new(Box::new(Gone(peer)), harness.clock);
     assert_eq!(session.start_live().err(), Some(DeviceError::Disconnected));

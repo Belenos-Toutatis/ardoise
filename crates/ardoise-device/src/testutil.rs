@@ -97,6 +97,7 @@ pub(crate) fn script_on(
             rssi: None,
             company_id: Some(0x4755),
             manufacturer_data: vec![0; 7],
+            xiaomi_service_data: Vec::new(),
         },
         clock: clock.clone(),
         steps: steps.into_iter().map(|(w, a)| (hex(w), a)).collect(),
@@ -130,6 +131,7 @@ impl ScriptConnector {
             rssi: Some(-50),
             company_id: Some(0x4755),
             manufacturer_data: vec![0; if register_mode { 4 } else { 7 }],
+            xiaomi_service_data: Vec::new(),
         };
         Self {
             clock,
