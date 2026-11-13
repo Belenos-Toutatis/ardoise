@@ -674,8 +674,9 @@ For the interface (the dialog is still to build):
 
 1. `live_start()` (or `live_resume({ path })`) rejects with `{ code: 'blackboardPagesFirst', message }`, or the live
    channel brings `{ type: 'refused', code: 'blackboardPagesFirst', message }` (then the `idle` snapshot): show
-   `errorCodes.blackboardPagesFirst` with the number of pages (`tabletStatus.device.storedPages`, the `{count}` of the
-   text) and two buttons, **Import and delete them** and **Cancel**.
+   `t('errorCodes.blackboardPagesFirst', { count: tabletStatus.device.storedPages })` and two buttons, **Import and
+   delete them** and **Cancel**. Until that dialog exists, `errorMessage()` (which passes only `{detail}`) shows the
+   text with `{count}` left as it is: the start banner of the live view does so today.
 2. **Import**: `tablet_sync({ confirmBlackboardDelete: true })`, then follow the tablet status: `connection:
    'syncing'`, then a new `lastSync` (another `at`). If `lastSync.error` is set, show it and stop there. If
    `device.storedPages` is 0, call `live_start()` (or `live_resume` with the same path) again. If pages are left,
