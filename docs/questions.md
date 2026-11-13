@@ -248,3 +248,13 @@ Premiers essais de l'utilisateur avec la vraie tablette, puis mesures faites ave
 - e. **Tranché le 2026-11-13 : mettre à jour la première note.** Quand un écran est enregistré une seconde fois sans avoir été effacé, la nouvelle page contient l'ancienne, et la tablette donne l'heure de la version précédente. Ardoise met à jour la note de cette version si elle n'a pas été modifiée depuis son import (titre, mots-clés et classeur mis à part) et si la nouvelle page la contient en entier ; sinon elle ajoute une note. SPEC §4.1 mis à jour avec l'accord de l'utilisateur.
 
 **Pas encore mesuré** : une page dont le téléchargement est coupé en route est-elle retirée quand même ; un transfert s'arrête-t-il quand la liaison se ferme ; un appui sur le bouton d'enregistrement avec un écran vide ; ce que devient la page d'un écran non effacé quand on éteint la tablette ; l'unité (une règle).
+
+## Q17 — Panneau « Tablette » à onglets et positions de la Xiaomi (2026-11-13) — **tranchée le 2026-11-13**
+
+Retour de l'utilisateur après ses premiers essais : le panneau de la tablette est trop long, il faut le faire défiler pour trouver une fonction ou une information ; et, la Xiaomi connectée, les dessins de « Position de la tablette » sont ceux de la Bamboo.
+
+**Décision** (maquette `target/maquettes/maquette-panneau-tablette.html`, validée par « Oui, construis-la ») :
+
+1. Le panneau devient étroit, avec trois onglets en icônes sur un rail, comme le panneau de côté de l'éditeur : **Utiliser** (la tablette connectée, son état, « Mode direct », « Synchroniser », les messages importants), **Réglages** (ceux de la tablette choisie dans une liste, la tablette connectée par défaut), **Tablettes** (les tablettes connues, leurs informations, « Oublier », « Ajouter une tablette »). Une pastille sur l'icône « Utiliser » dit combien de pages attendent.
+2. Les réglages sont ceux de la tablette choisie : pour la Bamboo, ses quatre positions avec ses dessins, le rôle de son bouton en direct, son nom, sa mise à l'heure ; pour la Xiaomi, ses quatre positions avec ses propres dessins (corbeille et disquette).
+3. **La Xiaomi se tient dans quatre positions** (boutons en bas, en haut, à droite, à gauche), l'utilisateur pouvant la tenir dans n'importe quel sens. Ardoise redresse l'écriture, pour les pages importées comme pour le direct. SPEC §4.1 mis à jour (il disait que cette tablette n'avait pas d'orientation).
