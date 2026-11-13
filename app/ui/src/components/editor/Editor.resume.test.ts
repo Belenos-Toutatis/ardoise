@@ -215,7 +215,7 @@ describe('« Reprendre en mode direct » in the editor', () => {
 
   it('is disabled, with the reason, when no tablet is registered or it is busy', async () => {
     const view = await render();
-    tablet.status = { ...tablet.status!, registered: null, connection: 'notRegistered' };
+    tablet.status = { ...tablet.status!, registered: null, known: [], connection: 'notRegistered' };
     await tick();
     expect(view.resume()?.disabled).toBe(true);
     expect(view.resume()?.title).toBe('Reprendre en mode direct demande une tablette enregistrée : enregistrez-la depuis le panneau de la tablette.');

@@ -329,7 +329,9 @@
       "hint": "Ardoise will show the notes of this folder at once, on this PC only ({machine}). The notes of the current library stay in their folder.",
       "confirm": "Use this folder",
       "current": "This is already the library of this PC: nothing changes."
-    }
+    },
+    "tabletAdded": "Added on",
+    "boardForgetConfirm": "Forget the Xiaomi tablet? Ardoise will no longer look for it and it will have to be added again, on every computer. It stays linked to Mi Home."
   },
   "assistant": {
     "title": "Assistant (MCP)",
@@ -417,12 +419,16 @@
       "connecting": "Connecting…",
       "connected": "Connected",
       "syncing": "Syncing…",
-      "live": "Live mode"
+      "live": "Live mode",
+      "adding": "Looking for a Xiaomi tablet…"
     },
     "hint": {
       "searching": "Press the tablet's button briefly to connect it, and keep it close to the computer.",
       "pendingSync": "Syncing will start as soon as the tablet is connected.",
-      "pendingLive": "Live mode will start as soon as the tablet is connected."
+      "pendingLive": "Live mode will start as soon as the tablet is connected.",
+      "searchingBoard": "Switch on the Xiaomi tablet and keep it close to the computer. Close Mi Home (or turn off the phone's Bluetooth): it talks to one application at a time.",
+      "searchingBoth": "Switch on the Xiaomi tablet, or press the Bamboo Slate's button briefly. Close Mi Home (or turn off the phone's Bluetooth): the Xiaomi tablet talks to one application at a time.",
+      "adding": "Ardoise is looking for a Xiaomi tablet to add."
     },
     "battery": "Battery {percent}%",
     "batteryCharging": "Battery {percent}%, charging",
@@ -436,7 +442,10 @@
       "model": "Model",
       "size": "Drawing area",
       "readAt": "Read on",
-      "notRead": "The tablet has not been read yet: its information will appear at the first connection."
+      "notRead": "The tablet has not been read yet: its information will appear at the first connection.",
+      "memory": "Free memory",
+      "memoryValue": "{free} of {total}",
+      "clockAuto": "The Xiaomi tablet's clock is set at every connection; it has no name to change and no version to read."
     },
     "sync": {
       "title": "Sync",
@@ -453,7 +462,12 @@
       "deletedOne": "1 page deleted from the tablet.",
       "deletedMany": "{count} pages deleted from the tablet.",
       "never": "No sync since Ardoise started.",
-      "pagesWaiting": "{count} pages are waiting on the tablet: only the oldest one can be read until it is deleted. Turn on \"{option}\" to get them."
+      "pagesWaiting": "{count} pages are waiting on the tablet: only the oldest one can be read until it is deleted. Turn on \"{option}\" to get them.",
+      "boardTitle": "The pages will be deleted from the tablet",
+      "boardConfirm": "The Xiaomi tablet hands over only its oldest page: to reach the next one, Ardoise has to delete each page from the tablet once its note is written and checked. Sync now and delete the pages?",
+      "boardConfirmYes": "Sync and delete",
+      "boardWaitingOne": "1 page is waiting on the Xiaomi tablet: it is imported only on request, with \"Sync now\", and will be deleted from the tablet once its note is written.",
+      "boardWaitingMany": "{count} pages are waiting on the Xiaomi tablet: they are imported only on request, with \"Sync now\", and will be deleted from the tablet once their notes are written."
     },
     "live": {
       "open": "Live mode",
@@ -469,7 +483,8 @@
       "buttonNewPage": "New page",
       "buttonNewLayer": "New layer",
       "orientation": "Position of the tablet",
-      "orientationHint": "Choose how you hold the tablet: Ardoise turns what you draw so that it appears upright. Upside down suits left-handed users; in portrait, the notes are portrait pages. The button is the one next to the tablet's light."
+      "orientationHint": "Choose how you hold the tablet: Ardoise turns what you draw so that it appears upright. Upside down suits left-handed users; in portrait, the notes are portrait pages. The button is the one next to the tablet's light.",
+      "deleteAfterImportBoard": "Xiaomi tablet: without this option, its pages are imported only on request (\"Sync now\"), after a confirmation, and they are deleted from the tablet all the same: it is the only way to reach the next page."
     },
     "orientation": {
       "landscape": "Landscape, button at the bottom",
@@ -489,9 +504,9 @@
       "timeHint": "Sets the tablet's clock to the computer's."
     },
     "register": {
-      "open": "Register the tablet",
+      "open": "Register the Bamboo Slate",
       "none": "No tablet is registered.",
-      "intro": "Register your Bamboo Slate to receive its pages automatically and draw live.",
+      "intro": "Register your Bamboo Slate, or add your Xiaomi tablet, to receive its pages automatically and draw live.",
       "title": "Register the tablet",
       "warningTitle": "Before you start",
       "warning": "Once registered in Ardoise, the tablet will no longer work with the Wacom phone app or with Inkspace, until you register it there again.",
@@ -526,7 +541,48 @@
         "title": "The registration did not succeed",
         "hint": "Check that Bluetooth is on and that the tablet is charged and close to the computer, then start again: hold the button until it blinks blue."
       }
-    }
+    },
+    "kind": {
+      "slate": "Bamboo Slate",
+      "blackboard": "Xiaomi tablet"
+    },
+    "known": {
+      "title": "Tablets",
+      "notConnected": "Not connected",
+      "forgetLabel": "Forget the tablet “{name}”"
+    },
+    "board": {
+      "title": "Add the Xiaomi tablet",
+      "introTitle": "Before you start",
+      "intro": "Switch on the Xiaomi tablet and keep it close to the computer.",
+      "introMiHome": "Close Mi Home, or turn off your phone's Bluetooth: the tablet talks to one application at a time.",
+      "introLinked": "There is no button to hold and no registration: the tablet stays linked to Mi Home, and Ardoise uses neither your Xiaomi account nor its online service.",
+      "search": "Look for the tablet",
+      "cancel": "Cancel",
+      "searching": {
+        "title": "Looking for the Xiaomi tablet",
+        "text": "This takes a few seconds; the search stops after a minute."
+      },
+      "found": {
+        "one": "A Xiaomi tablet was found.",
+        "many": "{count} Xiaomi tablets were found: choose yours. The stronger the signal, the closer the tablet.",
+        "unnamed": "Xiaomi tablet",
+        "signal": "Signal: {rssi} dBm",
+        "add": "Add this tablet",
+        "addLabel": "Add the tablet {address}"
+      },
+      "added": {
+        "title": "Xiaomi tablet added",
+        "text": "Ardoise connects to the tablet as soon as it is switched on and nothing else is using it. Its pages become notes; each one is deleted from the tablet once its note is written."
+      },
+      "error": {
+        "title": "The Xiaomi tablet was not added"
+      },
+      "retry": "Look again",
+      "finish": "Finish",
+      "open": "Add the Xiaomi tablet"
+    },
+    "simulatedBoardButton": "Press the simulated Xiaomi tablet's button (stores the page)"
   },
   "diagnostic": {
     "open": "Test the tablet",
@@ -732,7 +788,13 @@
     "shareFailed": "the share could not start ({detail})",
     "noStagedNarration": "the recorded sound is no longer in memory; a copy is in the narrations' backup folder",
     "projectionStale": "the projection fell behind; it catches up",
-    "projectionInvalid": "the projection got a wrong update; it catches up"
+    "projectionInvalid": "the projection got a wrong update; it catches up",
+    "blackboardNotFound": "No Xiaomi tablet found: switch it on, bring it close to the computer and close Mi Home (or turn off the phone's Bluetooth), because it talks to one application at a time.",
+    "transferIncomplete": "A page of the Xiaomi tablet was not received in full; it stays on the tablet. Bring the tablet closer to the computer and sync again.",
+    "pageNotDeleted": "The Xiaomi tablet still holds a page that Ardoise has just asked it to delete: the sync stopped. The note of that page is already in the library.",
+    "notSupported": "This tablet cannot do that (the Xiaomi tablet has no name to change).",
+    "blackboardConfirmDelete": "The Xiaomi tablet's pages are imported only with your agreement: they are deleted from the tablet once imported, because it gives only its oldest page. Confirm the sync to go on.",
+    "pageUnreadable": "The Xiaomi tablet sent a page that Ardoise cannot read: nothing was imported and the page stays on the tablet."
   },
   "editor": {
     "back": "Library",
@@ -1625,7 +1687,10 @@
     "starting": "Starting live mode…",
     "waiting": {
       "title": "Press the tablet's button briefly to connect it.",
-      "hint": "Live mode starts as soon as the tablet is connected: what you write shows here and on the projected screen."
+      "hint": "Live mode starts as soon as the tablet is connected: what you write shows here and on the projected screen.",
+      "titleBoard": "Switch on the Xiaomi tablet to connect it.",
+      "titleBoth": "Switch on the Xiaomi tablet, or press the Bamboo Slate's button briefly.",
+      "hintBoard": "Close Mi Home (or turn off the phone's Bluetooth). Live mode starts as soon as the tablet is connected: what you write shows here and on the projected screen."
     },
     "reconnecting": "The link with the tablet was lost: reconnecting…",
     "startFailed": "Live mode could not start.",
@@ -1831,6 +1896,10 @@
     },
     "background": {
       "help": "Under the writing of the current page: a worksheet or a document to fill in front of the class. The next page has no image."
+    },
+    "xiaomi": {
+      "label": "Xiaomi tablet: upright page",
+      "note": "Xiaomi tablet: the page is upright, there is no position to choose. Its button stores the page on the tablet without stopping live mode; \"Next page\" is done from the computer."
     }
   },
   "presentation": {

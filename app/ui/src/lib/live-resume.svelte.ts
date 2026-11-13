@@ -10,10 +10,12 @@ import type { TabletStatus } from './tablet';
 export type ResumeBlock = 'noTablet' | 'busy';
 
 /**
- * Live mode needs the registered tablet, and not while it syncs or registers (the tablet panel
- * disables its button in the same cases). Until the status is known, nothing can be resumed.
+ * Live mode needs a known tablet (the Slate or the blackboard), and not while it syncs, registers or adds one
+ * (the tablet panel disables its button in the same cases). Until the status is known, nothing can be resumed.
  */
 export function resumeBlock(status: TabletStatus | null): ResumeBlock | null {
-  if (!status || !status.registered) return 'noTablet';
-  return status.connection === 'syncing' || status.connection === 'registering' ? 'busy' : null;
+  if (!status || (!status.registered && status.known.length === 0)) return 'noTablet';
+  return status.connection === 'syncing' || status.connection === 'registering' || status.connection === 'adding'
+    ? 'busy'
+    : null;
 }
