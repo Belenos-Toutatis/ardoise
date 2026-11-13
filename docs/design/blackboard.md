@@ -456,8 +456,10 @@ the last connected tablet said (check `device.kind`); `lastSync` is the last syn
 - `sheetOtherTablet` (M18, already translated): `live_resume` refused, the `refused` live event (§5.5), and, in
   `status.error`, a live session that met the other tablet (§5.5, not expected).
 - `blackboardPagesFirst` (H8, §9.5): `live_start` and `live_resume` refused at once, or the `refused` live event, while
-  the blackboard holds stored pages and the automatic sync or "delete after import" is off. Its text has `{count}`:
-  give it `device.storedPages`.
+  the blackboard holds stored pages and the automatic sync or "delete after import" is off. The window answers it with
+  the "pages first" dialog, never with this text in a banner. The text has `{count}` (and a singular,
+  `blackboardPagesFirstOne`): `pagesFirstText(count)` builds it, and `errorMessage` takes the count from the service's
+  message (`the Xiaomi tablet holds N stored pages…`) or shows that message as it is.
 - `pageRescued` (H8, §9.2): the note of a page the tablet no longer holds could not be written; its rescue copy waits
   for the next sync (`lastSync.error`, `status.error`).
 - `pageDoubtful` (H8, §9.2): a page the tablet may no longer hold was not received cleanly; what came is kept apart,
@@ -671,19 +673,36 @@ When live mode is asked (a new run, not one reconnecting) and the blackboard hol
   asked again. With no stored page, or with the Slate, nothing changes. A run that reconnects after a lost link is not
   "asked": it starts again at once (pages stored during it are a copy of its own ink).
 
-For the interface (the dialog is still to build):
+For the interface (the "pages first" dialog, H8; `lib/live-pages-first.svelte.ts` and `components/live/PagesFirstDialog.svelte`).
+The live view is the one place that starts live mode (the tablet panel's « Live mode », a card's « Resume in live
+mode » and the editor's all open it, `live_start` or `live_resume` is called there), so it is the one place that
+meets the refusal:
 
 1. `live_start()` (or `live_resume({ path })`) rejects with `{ code: 'blackboardPagesFirst', message }`, or the live
-   channel brings `{ type: 'refused', code: 'blackboardPagesFirst', message }` (then the `idle` snapshot): show
-   `t('errorCodes.blackboardPagesFirst', { count: tabletStatus.device.storedPages })` and two buttons, **Import and
-   delete them** and **Cancel**. Until that dialog exists, `errorMessage()` (which passes only `{detail}`) shows the
-   text with `{count}` left as it is: the start banner of the live view does so today.
-2. **Import**: `tablet_sync({ confirmBlackboardDelete: true })`, then follow the tablet status: `connection:
-   'syncing'`, then a new `lastSync` (another `at`). If `lastSync.error` is set, show it and stop there. If
-   `device.storedPages` is 0, call `live_start()` (or `live_resume` with the same path) again. If pages are left,
-   show the dialog again (the count changed).
-3. **Cancel**: nothing more; a `refused` event already left the live session `idle` (close the live view as after
-   `live_stop`).
+   channel brings `{ type: 'refused', code: 'blackboardPagesFirst', message }` (then the `idle` snapshot): the view
+   shows a modal dialog (no start banner) with the sentence for the count, one form for 1 page and one for several
+   (`pagesFirstText`: `errorCodes.blackboardPagesFirstOne`, or `errorCodes.blackboardPagesFirst` with `{count}`), and two
+   buttons, **Import and delete** (first, focused) and **Cancel**. The count is the one in the service's message
+   (`the Xiaomi tablet holds N stored pages…`, counted when it refused), else `tabletStatus.device.storedPages`.
+   `errorMessage()` gives the same sentence for this code (and the service's message when it holds no count), so
+   `{count}` is never shown anywhere. Escape closes the dialog as Cancel; the focus goes back to where it was.
+2. **Import**: `tablet_sync({ confirmBlackboardDelete: true })`, once (the button is disabled meanwhile), then the
+   dialog follows the tablet status: `connection: 'syncing'` with its progress, then a new `lastSync` (another `at`).
+   If `lastSync.error` is set, it shows it in the dialog and stops there (import again, or cancel). If the link is lost
+   (the status is no longer `connected` or `connecting` before a new `lastSync`) or the service fails meanwhile
+   (`status.error`, a different one from before), it says so the same way. If `device.storedPages` is 0, it closes
+   and the view calls `live_start()` (or `live_resume` with the same path) again; should the service refuse again,
+   the dialog shows with the new count. If pages are left, it shows again with the new count.
+3. **Cancel**: before the import, the dialog closes and the view closes as after `live_stop` (a `refused` event already
+   left the session `idle`; `live_start` rejected started nothing). The library gives the tablet panel back, the focus
+   on its « Live mode » button, when live mode was asked from there. During the import, Cancel stops the sync between
+   two pages (`tablet_cancel`), then does the same.
+
+The mock tablet (`mock-tablet.ts`) refuses live mode in the same conditions (the blackboard is the connected tablet,
+it holds stored pages, and the automatic sync or "delete after import" is off): `live_start` and `live_resume` reject
+(`live_resume` after the sheet check, as in Rust), a run that waits when the blackboard connects ends with the
+`refused` event, and with both options on the pages are synced first. `mockTablet.boardPages` sets how many pages it
+holds when first looked at (3 by default).
 
 ### 9.6 A screen stored again updates its note (SPEC §4.1)
 

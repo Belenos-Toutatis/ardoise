@@ -440,9 +440,11 @@ s'applique qu'à la Bamboo Slate.
   faire perdre la page de l'écran en cours si elle n'a pas été récupérée. Avec **Synchroniser automatiquement à la
   connexion** et **Effacer de la tablette après import** activés, le panneau montre la synchronisation, puis le direct
   commence. Sinon,
-  si la tablette contient des pages, le direct ne démarre pas : Ardoise dit que la tablette contient encore des pages
-  enregistrées (« La tablette Xiaomi contient encore des pages enregistrées… »). Importez-les avec **Synchroniser
-  maintenant**, puis **Synchroniser et effacer** (elles sont effacées de la tablette), et relancez le direct. Une
+  si la tablette contient des pages, le direct ne démarre pas : une fenêtre dit que la tablette contient encore des
+  pages enregistrées (« La tablette Xiaomi contient encore 2 pages enregistrées… ») et propose **Importer et effacer**
+  ou **Annuler** (Échap aussi). **Importer et effacer** importe les pages, qui sont effacées de la tablette une fois
+  importées, en montrant la progression, puis le direct démarre tout seul ; si des pages restent ou si l'import échoue,
+  la fenêtre le dit et vous laisse décider. **Annuler** ramène à la bibliothèque, sans rien importer ni démarrer. Une
   tablette sans page enregistrée démarre comme avant, et un direct qui se reconnecte après une coupure repart aussitôt.
 - Une séance reste sur **la tablette avec laquelle elle a commencé**. Si la liaison est perdue, Ardoise attend cette
   même tablette (**Reconnexion…**) et ignore l'autre jusqu'à la fin du direct. Pour continuer avec l'autre tablette,
@@ -1699,7 +1701,7 @@ de tous les composants utilisés avec leur licence.
 | « Une page de la tablette Xiaomi n'a pas pu être écrite dans la bibliothèque… » | La tablette ne garde plus cette page, mais Ardoise en a gardé une copie de secours (`_ardoise\rescued-pages\` dans la bibliothèque, ou `%LOCALAPPDATA%\Ardoise\blackboard-rescue\` sur ce PC) et l'importera à la prochaine synchronisation de la tablette Xiaomi. Vérifiez que la bibliothèque est accessible et qu'il reste de la place, puis **Synchroniser** (chapitre 5). |
 | « Une page de la tablette Xiaomi n'a pu être écrite ni dans la bibliothèque ni sur ce PC… » | Ardoise garde la page en mémoire et réessaiera à la prochaine synchronisation. **Ne fermez pas Ardoise** d'ici là ; rendez la bibliothèque accessible ou libérez de la place, puis synchronisez de nouveau (chapitre 5). |
 | « Une page de la tablette Xiaomi n'a pas été reçue proprement… » | Ce qui est arrivé est gardé à part, sans note, dans `_ardoise\rescued-pages\doubtful\` de la bibliothèque. Si une note de cette page a été faite, vérifiez-la, et gardez le journal de diagnostic (chapitre 13). |
-| « La tablette Xiaomi contient encore des pages enregistrées… » | Le mode direct ne démarre pas tant que ces pages ne sont pas importées : **Synchroniser**, puis **Synchroniser et effacer**, et relancez le direct (chapitre 6). |
+| « La tablette Xiaomi contient encore 2 pages enregistrées… » (fenêtre) | Le mode direct ne démarre pas tant que ces pages ne sont pas importées : **Importer et effacer** les importe puis démarre le direct (chapitre 6). |
 | « La tablette Xiaomi garde une page… » | Ardoise lui a demandé d'effacer une page, et elle l'a gardée : la note de cette page est déjà dans la bibliothèque. Synchronisez de nouveau ; si cela se répète, gardez le journal de diagnostic (chapitre 13). |
 | Une seule page est reçue, les suivantes « attendent » | Cochez **Effacer de la tablette après import** (chapitre 5). |
 | La note s'affiche à l'envers ou couchée | Réglez la **Position de la tablette** pour qu'elle corresponde à la façon dont vous la tenez. |

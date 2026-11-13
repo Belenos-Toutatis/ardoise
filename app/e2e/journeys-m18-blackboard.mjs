@@ -193,6 +193,59 @@ export const blackboardJourneys = [
         await app.waitFor(cards('>= 13'), 'the stored page imported afterwards', 60_000);
       });
 
+      // H8 (docs/design/blackboard.md §9.5): with « delete after import » off the blackboard may not be synced first, so live
+      // mode is refused while it holds a page and the window asks to import it. The refusal comes as the `refused` event
+      // (the page count is read again when live mode is asked) or as the rejected `live_start`: the dialog is the same.
+      await check('mode direct avec une page sur la tablette et l’effacement après import désactivé : la question d’import, annuler, puis importer et démarrer', async () => {
+        const deleteOption = `${PANEL} input[data-option="deleteAfterImport"]`;
+        const dialog = '[data-slot="pages-first"]';
+        await openPanel(app);
+        await app.waitFor(connection('connected'), 'the blackboard idle again', 60_000);
+        await showTab(app, 'settings');
+        await app.click(deleteOption);
+        await app.waitFor(`document.querySelector(${j(deleteOption)})?.checked === false`, 'the option switched off');
+        const before = Number(await app.evaluate(`document.querySelectorAll('.note-card').length`));
+        await invoke(app, 'sim_blackboard_store_page');
+        await showTab(app, 'use');
+        await app.click(`${PANEL} button[data-action="live"]`);
+        await app.waitFor(`document.querySelector(${j(dialog)}) !== null`, 'the question about the stored page', 30_000);
+        const pages = Number(await app.evaluate(`document.querySelector(${j(dialog)}).dataset.pages`));
+        if (!(pages >= 1)) throw new Error(`${pages} pages announced`);
+        const sentence = pages === 1 ? l('errorCodes.blackboardPagesFirstOne') : l('errorCodes.blackboardPagesFirst').replace('{count}', String(pages));
+        const shown = await app.evaluate(`document.querySelector(${j(`${dialog} [data-slot="pages-first-text"]`)}).textContent.trim()`);
+        if (shown !== sentence) throw new Error(`unexpected sentence "${shown}"`);
+        if (await app.evaluate(`document.body.textContent.includes('{count}')`)) throw new Error('a {count} reached the screen');
+        for (const action of ['pages-first-import', 'pages-first-cancel']) {
+          if (!(await app.evaluate(`document.querySelector(${j(`button[data-action="${action}"]`)}) !== null`))) throw new Error(`no ${action} button`);
+        }
+        if (await app.evaluate(`document.querySelector('[data-slot="start-failed"]') !== null`)) throw new Error('the start banner is shown');
+
+        // Escape cancels: the library and the tablet panel come back, the focus on « Live mode », nothing was imported.
+        await app.key('Escape');
+        await app.waitFor(`document.querySelector(${j(dialog)}) === null && document.querySelector('.shell:not(.shell-hidden)') !== null`, 'the library after cancelling', 30_000);
+        await app.waitFor(`document.querySelector(${j(PANEL)}) !== null`, 'the tablet panel again');
+        await app.waitFor(`document.activeElement?.dataset?.action === 'live'`, 'the focus on « Live mode »');
+        if (await app.evaluate(cards(`> ${before}`))) throw new Error('a page was imported by cancelling');
+
+        // Again, then import and delete: the page becomes a note and live mode starts.
+        await app.waitFor(`document.querySelector(${j(`${PANEL} button[data-action="live"]:not([disabled])`)}) !== null`, 'the live button');
+        await app.click(`${PANEL} button[data-action="live"]`);
+        await app.waitFor(`document.querySelector(${j(dialog)}) !== null`, 'the question again', 30_000);
+        await app.click('button[data-action="pages-first-import"]');
+        await app.waitFor(`document.querySelector('.live-view[data-state="live"]') !== null`, 'live mode after the import', 90_000);
+        await app.waitFor(`document.querySelector(${j(dialog)}) === null`, 'the dialog to close');
+        await app.waitFor(cards(`>= ${before + 1}`), 'the imported page as a note', 30_000);
+        await app.click('button[data-action="stop-live"]');
+        await app.waitFor(`document.querySelector('.shell:not(.shell-hidden) input.search') !== null`, 'the library', 30_000);
+
+        // The option back on, as it was.
+        await openPanel(app);
+        await showTab(app, 'settings');
+        await app.click(deleteOption);
+        await app.waitFor(`document.querySelector(${j(deleteOption)})?.checked === true`, 'the option switched on again');
+        await showTab(app, 'use');
+      });
+
       await check('oublier la tablette Xiaomi : confirmation, puis plus aucune tablette connue', async () => {
         await openPanel(app);
         await showTab(app, 'tablets');
