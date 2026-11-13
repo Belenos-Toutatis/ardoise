@@ -220,7 +220,8 @@ Taken while building:
     - *Dirty stream, fresh link.* A download that does not end cleanly (idle timeout, more bytes than announced,
       cancelled, a page failing the record check, any error but a lost link), or stream bytes arriving after a
       download ended, mark the session dirty. A dirty session refuses downloads and live mode (`StreamDirty`), and the
-      worker closes the link and opens a fresh one (`Worker::board_reopen`) before anything else; the sync or live mode
+      worker closes the link and opens a fresh one (`Worker::board_reopen`) before the stream is next needed (a sync
+      step, live mode, a sync waiting: at once during a sync; not while nothing waits, §9.4); the sync or live mode
       under way carries on there, with its permission. Live mode that finds late page bytes as it starts
       (`StreamDirty` from `start_live`'s drain, after a sync thought clean) waits the same way: the next step reopens
       the link and live mode starts there; `StreamDirty` never reaches the screen (R3). The reopening is not cut short by
@@ -330,8 +331,25 @@ Taken while building:
   strokes and points as the study's renderings, and becomes a note; the page stored during the study holds the records
   received live, byte for byte. Failure messages name captures and pages by rank and print counts only.
 - `app/src-tauri`: `tablet.rs` (the commands with the simulated blackboard of `--simulated-blackboard`), 
-  `blackboard_import.rs` (dated notes once whatever the number of runs, files failing the record check refused),
-  `lib.rs` (options).
+  `blackboard_import.rs` (dated notes once whatever the number of runs, files failing the record check refused,
+  a later store with its `page-<time>.json` updating the earlier note), `lib.rs` (options), `live/tests.rs` (the
+  `PagesFirst` refusal becomes the `refused` event `blackboardPagesFirst`, the session idle, nothing written).
+- After H8's first measurements (§9): `ardoise-sim/src/board.rs` (the open page described in full and removed once
+  downloaded, the count before the description, the observed cases of the erase button, a download cut short leaving
+  the open page); `ardoise-device/src/blackboard.rs` (the open page copied before its note and released after, a
+  keeper failing: `pageRescued`, nowhere to copy: `pageNotSaved`, a short-form page not copied, more bytes: a
+  doubtful copy and the sync going on, a page no longer described on the fresh link: what came copied apart, pushes
+  set aside in live mode); `ardoise-device/src/rescue.rs` (copies written, listed, doubted, released, the fallback
+  folder); `ardoise-device/src/pages.rs` (`update_tests`: the earlier note updated in place, both pages imported,
+  a third store; edited ink, a renamed layer, the trash, a page not holding the earlier one: a new note);
+  `ardoise-sim/tests/blackboard.rs` through the service (an open page's copy gone once its note is read back; a
+  note that cannot be written: rescued, imported at the next sync, nothing twice; the local fallback and memory; more
+  bytes: doubtful, never a note; a stall: whole on the fresh link, its doubtful copy gone; bytes while the note is
+  written: the note kept, its copy apart; the count before the description on a link opened by `Manager`; pushes of
+  518 and 1 743 bytes during live mode, no phantom; a push after a sync, no reconnection while idle; live mode asked
+  with pages, both orders, the pages imported before anything is asked of the stream; without the permission, refused
+  at once or at the connection, then started after a confirmed sync; a screen stored again updating its note, and
+  the three cases adding one).
 
 Not done: a replay of a blackboard journal (`ardoise-sim::replay` knows the Slate's journals only; no journal of the
 real blackboard exists yet), e2e journeys (the interface work).
@@ -437,6 +455,14 @@ the last connected tablet said (check `device.kind`); `lastSync` is the last syn
   connected and "delete after import" is off; nothing was done. Not a failure to show as such: the cue to ask.
 - `sheetOtherTablet` (M18, already translated): `live_resume` refused, the `refused` live event (§5.5), and, in
   `status.error`, a live session that met the other tablet (§5.5, not expected).
+- `blackboardPagesFirst` (H8, §9.5): `live_start` and `live_resume` refused at once, or the `refused` live event, while
+  the blackboard holds stored pages and the automatic sync or "delete after import" is off. Its text has `{count}`:
+  give it `device.storedPages`.
+- `pageRescued` (H8, §9.2): the note of a page the tablet no longer holds could not be written; its rescue copy waits
+  for the next sync (`lastSync.error`, `status.error`).
+- `pageDoubtful` (H8, §9.2): a page the tablet may no longer hold was not received cleanly; what came is kept apart,
+  never made into a note. Can end a sync that read every page.
+- `pageNotSaved` (H8, §9.2): such a page could be written nowhere; Ardoise holds it in memory until the next sync.
 - Already translated, also used: `tabletTimeout`, `tabletNotConnected`, `tabletBusy`, `tabletNotRegistered` (no tablet
   known at all), `noLibrary`, `libraryAccess`, `bluetoothOff`, `bluetoothMissing`, `tablet` (an unexpected failure;
   the internal "dirty stream" state never reaches it), `simulationOnly`.
@@ -518,11 +544,10 @@ when nothing failed.
   PC; the erase button sends `11 01 0c` in live mode; a page stored while the application is connected outside live
   mode is described in a longer form (`12 0d 05`, `PageInfo::extra`), which the sync took for a malformed frame.
   The long form is now read. Measured since with the user at the tablet (research note §6): that form is the page
-  of a screen not erased yet; **the tablet removes such a page as soon as it is downloaded**, so the sync must never
-  drop its bytes (to do: a rescue copy when the note cannot be written or the transfer is doubtful; today those
-  paths assume the page stayed on the tablet); the erase button can push the page on the stream during live mode
-  (to do: such bytes are not pen records) and can lose a page not fetched before live mode (to do: sync before
-  live mode when allowed). `docs/questions.md` Q16 lists what is to do and to decide. Since the store button can
+  of a screen not erased yet; **the tablet removes such a page as soon as it is downloaded**, so the sync never
+  drops its bytes (rescue copies, §9.2); the erase button can push the page on the stream during live mode (set
+  aside, §9.4) and can lose a page not fetched before live mode (fetched first or live mode refused, §9.5); a screen
+  stored again updates its note (§9.6). `docs/questions.md` Q16. Since the store button can
   replace a page without changing the count, the "page stored" event alone starts the automatic sync when a page
   is there. Still to measure at H8: the unit (ruler), whether Windows delivers 244-byte notifications whole (the
   count does not depend on it), whether the blackboard drops a silent link (the link was lost twice during live
@@ -546,3 +571,151 @@ when nothing failed.
 - btleplug's WinRT backend may drop notifications when our task falls behind (device-stack.md): a page download then
   ends short and fails as `transferIncomplete` (nothing deleted), never silently.
 - A firmware update may change the protocol: unknown frames are logged and ignored, never answered.
+
+## 9. Open pages, rescue copies, live mode (after H8's first measurements, 2026-11-13)
+
+Source: research note §6 (measured), `docs/questions.md` Q16, SPEC §4.1 and §4.2 as amended on 2026-11-13. What
+is not measured is written **supposed**, with the side chosen so that no page can be lost.
+
+### 9.1 The measured model, and the simulator
+
+An *open page* is the page of a screen not erased since it was stored. The tablet describes it in the long form,
+`12 0d 05 <time> <size> <previous>` (`PageInfo::extra`, `PageInfo::is_open`), `previous` being the time of the store
+before it of the same screen (0 for the first; `PageInfo::previous` gives `None` then). **The tablet removes an open
+page by itself once all its bytes have been sent for a download**; a page in the short form stays until deleted.
+Storing again replaces the open page (or, when the host already took it, adds one) by one holding the whole screen.
+`12 01 05` asked before any `12 01 04` on a link answers the bare frame. The erase button closes the open page
+(short form, kept); outside live mode it sends no frame, in live mode `11 01 0c`.
+
+`SimBoard` (`ardoise-sim/src/board.rs`) does exactly that, and reproduces the observed cases of the erase button as
+cases, not as a rule:
+
+| Screen erased | The open page was | Observed | The simulator |
+|---|---|---|---|
+| outside live mode | described since it was stored | pushed, 917 bytes | pushes it (chunks of 244 bytes at most), keeps it closed |
+| outside live mode | not described | closed, kept | the same |
+| in live mode | described during this live run | `11 01 0c`, then pushed (1 694 bytes) | the same |
+| in live mode | stored during this run, not described | `11 01 0c`, nothing pushed | keeps it closed |
+| in live mode | stored and described before this run | lost, twice | removes it |
+| in live mode | stored before this run, not described | **not measured** | **removes it** (supposed: the losing side, the one the host must guard against) |
+
+Also **supposed** in the simulator: a download cut short (`stall_next_download`, a link lost before the last chunk)
+leaves an open page on the tablet (whether the real one removes it is not measured; the host does not rely on it,
+§9.2); a page pushed stays, closed; switching the tablet off changes nothing to an open page.
+
+### 9.2 A page the tablet no longer holds is never dropped
+
+The host cannot rely on a page staying on the tablet when it was described in the long form. `BoardSession::sync_page`
+(still the one place where a page is described, downloaded, kept and deleted) talks to a `PageKeeper` (`keep`,
+`rescue`, `doubt`, `release`), which the worker implements over a `RescueStore` (`ardoise-device/src/rescue.rs`).
+
+- **Where.** `<library>/_ardoise/rescued-pages/page-<time>.bin` (the raw bytes as the tablet sent them, the files
+  `--import-blackboard-pages` reads), with `page-<time>.json` beside it when the page had a `previous`
+  (`{"previous": T}`). When that folder cannot be written: `%LOCALAPPDATA%\Ardoise\blackboard-rescue\`
+  (`ServiceConfig::rescue_fallback`). Every write is atomic. Doubtful copies go to a `doubtful\` subfolder of either.
+- **Clean copy, written before anything can fail.** A clean transfer of an open page (count reached, quiet window,
+  record check) is copied before its note is written. Once the note is written and read back (and no stream byte
+  came meanwhile) the copy is removed. If the note cannot be written, the copy stays and the sync stops with
+  `pageRescued` (the page is safe and comes at the next sync).
+- **Doubtful copy, kept apart.** The bytes of an open page whose transfer did not end cleanly (stopped short, more
+  bytes than announced, not whole records, cut by a cancel or a lost link) are copied to `doubtful\` at once. The same
+  for any page (short form too) when the fresh link of its retry no longer describes it: what was received is all
+  there is. An open page whose note was written but after which more stream bytes came keeps its note, and its clean
+  copy moves to `doubtful\`. Doubtful copies are **never** made into notes on their own; the sync tells it with
+  `pageDoubtful` (at its end, when nothing else stopped it). A doubtful copy of page T is removed as soon as a clean
+  note of the same page T is written (its retry came whole). Of two doubtful copies of one page, the one with more
+  bytes is kept.
+- **Nowhere to write.** If neither folder can be written, the bytes stay in the worker's memory, are written out at
+  the next sync, and the sync stops with `pageNotSaved` (Ardoise must stay open until then).
+- **Imported at the next sync, first.** A blackboard sync (with its usual permission) first writes out what is held,
+  then imports every clean copy, oldest first, through the same path as a page from the tablet (`keep_page`, the
+  app's page store: atomic note, read back, `ImportedPages` against duplicates), removing each copy once its note is
+  read back; then the tablet's pages. A clean copy that is not whole records moves to `doubtful\`. The automatic sync
+  at connection also starts when copies wait.
+- **Short-form pages** are not copied before their note: they stay until deleted (measured). The explicit delete
+  `12 05 06` after a page is kept stays for every page (harmless when the tablet already removed it).
+
+### 9.3 `12 01 05` after `12 01 04`
+
+`BoardSession::oldest_page` asks the count first when it was not asked yet on this link (research note §6).
+
+### 9.4 A page pushed during live mode is not ink; outside live mode it costs nothing
+
+- In live mode, a stream notification of more than 6 records (42 bytes, `MAX_LIVE_RECORDS`) is a page the erase button
+  made the tablet send: it starts a *push*, never given to the live sink. The push goes on while notifications are
+  full chunks (244 bytes), while the bytes pushed so far are not whole records (a page always is), or while they come
+  within `PUSH_GAP` (25 ms, **supposed**: page chunks came about 10 ms apart, live notifications 40 to 45 ms apart,
+  §2.2) of the push's previous one; its first notification shorter than a full chunk is its last. The log says how
+  many bytes were set aside. Limit: a page of 6 records or fewer pushed alone passes for pen records.
+- Outside live mode, the quiet window already keeps a push out of a later download, and a push before any download on
+  the link is only counted. What was wrong: after a sync, the session takes any stream byte for "more of the last
+  page" (dirty: rightly, the next page or live mode must not take them), and the worker reopened the link at once,
+  even with nothing waiting: a reconnection for nothing. Now a dirty stream is opened again only before it is needed
+  (a sync step, live mode, a sync waiting: `Worker::board_step`); meanwhile the link idles, counts its stray bytes
+  and still answers the count and the Slate's checks. A sync, a retry or live mode never runs on a dirty stream, as
+  before. (Clearing the "after a download" state at the end of a sync was tried and dropped: late bytes of the last
+  page arriving between the sync and live mode would then not reopen the link, and live mode would take them.)
+
+### 9.5 Pages fetched before live mode (SPEC §4.2)
+
+When live mode is asked (a new run, not one reconnecting) and the blackboard holds stored pages (counted again then):
+
+- automatic sync **and** delete after import on: the sync runs first (the status shows `syncing`, the sink
+  `waiting`), then live mode starts, whatever the sync's outcome (its error stays in `lastSync`);
+- otherwise live mode does not start. `TabletService::live_pages_first()` answers `BlackboardPagesFirst { pages }`
+  (`blackboardPagesFirst`) at once while the blackboard is connected, so `live_start` and `live_resume` fail before
+  any session starts; a run that was waiting when the blackboard connects ends with `LiveInput::PagesFirst { pages }`,
+  which the hub turns into the live event `{ type: 'refused', code: 'blackboardPagesFirst', message }` and the `idle`
+  snapshot. Nothing is asked of the tablet's stream. A confirmed sync then imports the pages, and live mode can be
+  asked again. With no stored page, or with the Slate, nothing changes. A run that reconnects after a lost link is not
+  "asked": it starts again at once (pages stored during it are a copy of its own ink).
+
+For the interface (the dialog is still to build):
+
+1. `live_start()` (or `live_resume({ path })`) rejects with `{ code: 'blackboardPagesFirst', message }`, or the live
+   channel brings `{ type: 'refused', code: 'blackboardPagesFirst', message }` (then the `idle` snapshot): show
+   `errorCodes.blackboardPagesFirst` with the number of pages (`tabletStatus.device.storedPages`, the `{count}` of the
+   text) and two buttons, **Import and delete them** and **Cancel**.
+2. **Import**: `tablet_sync({ confirmBlackboardDelete: true })`, then follow the tablet status: `connection:
+   'syncing'`, then a new `lastSync` (another `at`). If `lastSync.error` is set, show it and stop there. If
+   `device.storedPages` is 0, call `live_start()` (or `live_resume` with the same path) again. If pages are left,
+   show the dialog again (the count changed).
+3. **Cancel**: nothing more; a `refused` event already left the live session `idle` (close the live view as after
+   `live_stop`).
+
+### 9.6 A screen stored again updates its note (SPEC §4.1)
+
+A page arriving with `previous` (long form, `previous != 0`) replaces the page of time `previous`. The page store
+(`LibrarySink::store_page`: the sync, the rescue import and `--import-blackboard-pages` all go through it) updates
+the note made from that page instead of adding one when all of this holds; otherwise it adds a note, and the log line
+of the page says why:
+
+- **Exactly one note of the library is made from the page of time `previous`**: among the notes created at or before
+  `previous` and modified since `previous` minus a day (`CANDIDATE_MARGIN`, the listing only), those whose id is
+  `page_note_id(previous, original.bin)`. None (deleted, in the trash, never imported, a clock never set) or two (a
+  sync client's conflict copy): a new note.
+- **Not edited since its import**: the note is made again from its own `original.bin` (`blackboard_note`, its layer
+  named as the store names it now) and must be identical, after the format's own rounding, in its ink, layers, paper,
+  background and image, timing and origin, with no narration, background file, text member, revision or
+  `original_note`. Title, tags, favourite mark and binder (and the thumbnail, `modified`) do not count. A note
+  imported in the other interface language counts as edited (its layer has the other name): a new note, the safe
+  side. A transcription corrected by the assistant (`set_note_text`) lives in the handwriting cache, not in the note:
+  it is not seen, and stops applying once the ink changes (it was for the old ink).
+- **The new page holds it whole**: the kept bytes of the earlier page are a prefix of the new page's.
+
+The update is one checked atomic write of the same file (`Library::save` with the stamp read: a file changed meanwhile
+is never overwritten; a new note is added instead), read back like a new note (a failed read-back is an error, never a
+deletion: the rescue copy of an open page stays). Kept: path, title, tags, favourite, binder, creation date, unknown
+fields and members. Replaced: ink, layers, page, timing, `original.bin` (the new page), thumbnail; `modified` is now.
+**No copy of the version before**: the new page holds it whole (checked), so the ink and "back to the original" give
+it back.
+
+**The note's id becomes the new page's** (`page_note_id`, as for any synced note): the id of a synced note stays the
+id of the page it holds, which lets `ImportedPages` recognise the new page exactly (a sync or a rescue import run
+again imports nothing) and lets a third store of the same screen find this note. What else refers to a note by id:
+the handwriting cache is keyed by id and ink, and the ink changed anyway; a draft of the editor holds the path and the
+stamp it started from, and a changed file is restored as a copy anyway; the assistant names notes by id or path and
+lists again. The earlier page still counts as imported: `ImportedPages::find` also accepts, for a blackboard page, a
+note created at that page's time whose `original.bin` starts with the page's bytes (a rescue copy of it found later
+does not come back). Not covered: a page of a clock never set (its note is dated by the import), and the middle page
+of three stores found again later (a duplicate note, nothing lost).

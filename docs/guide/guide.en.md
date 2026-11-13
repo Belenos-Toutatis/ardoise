@@ -292,9 +292,9 @@ tablet**, in portrait (about 20 × 27 cm).
 
 This tablet hands over only its oldest page: the next one can be read only once that one is deleted. Ardoise therefore
 **deletes each page from the tablet once its note is written and checked** (Mi Home does the same). If the note cannot
-be written, or the transfer stops, the page stays on the tablet. A page that was already imported is recognised and not
-imported again; the one exception is a doubtful transfer (bytes that arrived late): the page may then give a second
-note, and both are kept.
+be written, or the transfer stops, the page stays on the tablet (except the page of a screen that was not erased, see
+"The page of a screen that was not erased", below). A page that was already imported is recognised and not imported
+again.
 
 - With **Delete from the tablet after import** on (the default), everything happens as for the Bamboo Slate: automatic
   sync, no question.
@@ -302,8 +302,39 @@ note, and both are kept.
   waiting on the Xiaomi tablet"; **Sync now** first asks you to confirm that the pages will be deleted from the tablet
   once imported (**Sync and delete**).
 - The progress counts the pages one by one, and the number of **pages in memory** goes down as it goes.
-- After a transfer that stopped or was cancelled in the middle of a page, Ardoise closes the Bluetooth link and
-  re-opens it before going on: this is normal, and it can take a moment.
+- After a transfer that did not end cleanly (stopped or cancelled in the middle of a page), Ardoise closes the
+  Bluetooth link and opens it again before using it for a page or for live mode again (at once during a sync,
+  otherwise when it is needed): this is normal, and it can take a moment.
+
+#### The page of a screen that was not erased
+
+The tablet treats the page of a screen that **has not been erased since it was stored** differently (this is the usual
+case: you write, you store, you sync without erasing the screen). It **removes that page by itself as soon as Ardoise
+has downloaded it**; the page of an erased screen stays until it is deleted. So that no page is lost, Ardoise does this:
+
+- Before writing the note, it keeps a **rescue copy** of the bytes received, in the `_ardoise\rescued-pages\` folder of
+  the library (file `page-<time>.bin`, with a `page-<time>.json` when the page replaces an earlier store of the same
+  screen); if that folder cannot be written, in `%LOCALAPPDATA%\Ardoise\blackboard-rescue\` on this PC. Once the note is
+  written and read back, the copy is deleted: normally, that folder is empty or absent.
+- If the note cannot be written (library unreachable, disk full), the copy stays, Ardoise says so ("A page of the Xiaomi
+  tablet could not be written in the library…") and **imports the page by itself at the next sync** of the Xiaomi
+  tablet, before the tablet's own pages. Check that the library can be reached and has room left.
+- If neither the library nor the PC can take the copy, Ardoise keeps the page in memory and tries again at the next
+  sync ("A page of the Xiaomi tablet could be written neither in the library nor on this PC…"): **do not close Ardoise**
+  meanwhile.
+- If the transfer of such a page did not end cleanly (cut short, more bytes than announced, not readable as pen
+  records, or bytes arriving while its note was written), what was received is kept **apart**, in
+  `_ardoise\rescued-pages\doubtful\`, and is never made into a note automatically; the end of the sync says so ("A page
+  of the Xiaomi tablet was not received cleanly…"). If a note was made, check it. Such a doubtful copy is deleted
+  automatically when the same page later comes through cleanly. You can inspect the files, or give them to
+  `ardoise.exe --import-blackboard-pages FOLDER` (it reports the files that are not pen records and imports the others);
+  keep the diagnostic log.
+
+**Storing a screen again without erasing it** gives a page holding the whole screen. Ardoise then **updates the note of
+the earlier store** instead of adding a second one, when that note was not modified since its import and the new page
+contains the earlier one whole. Its title, tags, favourite mark and binder do not count as modifications: they are kept,
+and so are its file and its creation date. In the other cases (the note's ink, layers, paper or background was changed,
+it is in the trash or was deleted, or the new page does not contain it), a new note is added, as for any page.
 
 #### The Xiaomi tablet's limits
 
@@ -354,7 +385,15 @@ with a reminder, and the **Tablet button in live mode** setting applies to the B
   sync: its note is a harmless duplicate of the live one.
 - **Erasing the tablet's screen with its button** moves live mode to a **new page**: what you write next is not
   drawn over the previous page. A page that is still blank stays the current page. **Next page**, on the computer,
-  works too.
+  works too. The tablet may also send the whole page when it is erased: Ardoise sets it aside and never draws it (no
+  stray stroke); the diagnostic log says how many bytes were set aside.
+- **Before live mode**, Ardoise fetches the pages stored in the tablet: erasing the screen during live mode can lose the
+  page of the screen in progress if it was not fetched. With **Sync automatically when connecting** and **Delete from the tablet
+  after import** both on, the panel shows the sync, then live mode starts. Otherwise, if the tablet holds pages, live mode
+  does not start: Ardoise says the tablet still holds stored pages ("The Xiaomi tablet still holds stored pages…").
+  Import them with **Sync now**, then **Sync and delete** (they are deleted from the tablet), and start live mode
+  again. A tablet with no stored page starts as before, and a live session that reconnects after a lost link starts
+  again at once.
 - A session stays on **the tablet it started on**. If the link is lost, Ardoise waits for that same tablet
   (**Reconnecting…**) and ignores the other one until live mode ends. To carry on with the other tablet, end live mode
   and start it again.
@@ -1539,7 +1578,11 @@ of every component used, with its licence.
 | "No Xiaomi tablet found" | Switch it on, bring it close to the computer, close Mi Home (or turn off the phone's Bluetooth: it talks to one application at a time), then **Look again** (chapter 4). |
 | The Xiaomi tablet no longer has its pages | Mi Home imported (and deleted) them before Ardoise: pages go to whichever application takes them first (chapter 5). |
 | "The Xiaomi tablet's pages are imported only with your agreement" | **Delete from the tablet after import** is off: confirm the sync (**Sync and delete**) or turn the option on (chapter 5). |
-| "A page of the Xiaomi tablet was not received in full" | The page stays on the tablet. Bring it closer to the computer and sync again. |
+| "A page of the Xiaomi tablet was not received in full" | The page stays on the tablet (except that of a screen that was not erased: see the "was not received cleanly" row below). Bring it closer to the computer and sync again. |
+| "A page of the Xiaomi tablet could not be written in the library…" | The tablet no longer holds that page, but Ardoise kept a rescue copy (`_ardoise\rescued-pages\` in the library, or `%LOCALAPPDATA%\Ardoise\blackboard-rescue\` on this PC) and will import it at the next sync of the Xiaomi tablet. Check that the library can be reached and has room left, then **Sync now** (chapter 5). |
+| "A page of the Xiaomi tablet could be written neither in the library nor on this PC…" | Ardoise keeps the page in memory and will try again at the next sync. **Do not close Ardoise** until then; make the library reachable or free some room, then sync again (chapter 5). |
+| "A page of the Xiaomi tablet was not received cleanly…" | What came is kept apart, without a note, in `_ardoise\rescued-pages\doubtful\` of the library. If a note of that page was made, check it, and keep the diagnostic log (chapter 13). |
+| "The Xiaomi tablet still holds stored pages…" | Live mode does not start until those pages are imported: **Sync now**, then **Sync and delete**, and start live mode again (chapter 6). |
 | "The Xiaomi tablet still holds a page…" | Ardoise asked it to delete a page and it kept it: that page's note is already in the library. Sync again; if it repeats, keep the diagnostic log (chapter 13). |
 | Only one page is received, the next ones are "waiting" | Tick **Delete from the tablet after import** (chapter 5). |
 | The note shows upside down or on its side | Set the **Position of the tablet** to match how you hold it. |

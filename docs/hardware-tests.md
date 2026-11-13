@@ -749,11 +749,26 @@ Ce test vérifie SPEC §4.1 « Tablette Xiaomi » et §4.2 « Avec la tablette X
 
 #### C ter. Une page enregistrée pendant qu'Ardoise est connecté
 
-Mesuré le 2026-11-13 : la tablette décrit autrement (12 octets au lieu de 8) une page enregistrée avec son bouton pendant qu'Ardoise est connecté **hors mode direct**, et une telle page non récupérée n'était plus dans la tablette à la connexion suivante. Ardoise lit maintenant cette description ; il reste à voir si la page se télécharge et s'efface comme les autres. **Uniquement avec des pages d'essai.**
+Mesuré le 2026-11-13 : la tablette décrit autrement (12 octets au lieu de 8) une page enregistrée avec son bouton pendant qu'Ardoise est connecté **hors mode direct**, et une telle page non récupérée n'était plus dans la tablette à la connexion suivante. Ardoise lit maintenant cette description. Mesuré ensuite : la tablette retire d'elle-même une telle page dès qu'elle est téléchargée (voir C quater). **Uniquement avec des pages d'essai.**
 
 1. Ardoise ouvert, la tablette **Connectée**, hors mode direct : écrire quelques mots, appuyer sur le **bouton d'enregistrement**. Attendu : la synchronisation part toute seule, la note apparaît, **Pages en mémoire** retombe à 0. Noter le message exact en cas d'échec.
-2. **Sans effacer l'écran**, écrire encore quelques mots et appuyer de nouveau sur le bouton d'enregistrement : une seconde note arrive-t-elle ? Contient-elle **tout l'écran** (les premiers mots et les nouveaux) ou seulement les nouveaux ?
+2. **Sans effacer l'écran**, écrire encore quelques mots et appuyer de nouveau sur le bouton d'enregistrement. Attendu (mesuré : la nouvelle page contient **tout l'écran** ; SPEC §4.1, décision du 2026-11-13) : la **même** note est mise à jour et contient les premiers mots et les nouveaux ; il n'y a toujours **qu'une note**, pas deux. Noter si une seconde note apparaît quand même.
 3. Effacer l'écran, écrire, enregistrer : la note est-elle juste ?
+
+#### C quater. La page d'un écran non effacé, les copies de secours, le direct après les pages
+
+Mesuré le 2026-11-13 : la tablette retire d'elle-même la page d'un écran **non effacé** dès qu'elle est téléchargée (la page d'un écran effacé reste jusqu'à l'effacement). Ardoise garde donc une **copie de secours** des octets reçus avant d'écrire la note (`_ardoise\rescued-pages\` dans la bibliothèque, à défaut `%LOCALAPPDATA%\Ardoise\blackboard-rescue\` sur ce PC), la supprime quand la note est écrite et relue, met à jour la note d'un écran enregistré de nouveau (SPEC §4.1) et récupère les pages de la tablette avant le direct (SPEC §4.2) ; voir `docs/design/blackboard.md` §9. **Uniquement avec des pages d'essai.**
+
+1. Ardoise connectée, hors direct : écrire quelques mots, appuyer sur le bouton d'enregistrement **sans effacer l'écran**, laisser la synchronisation se faire. Attendu : la note arrive, et le dossier `_ardoise\rescued-pages\` de la bibliothèque est **vide ou absent**. Noter ce qu'on y trouve sinon.
+2. **Sans effacer l'écran**, écrire encore quelques mots et enregistrer de nouveau. Attendu : la **même** note est mise à jour (elle contient les premiers mots et les nouveaux) et il n'y a **toujours qu'une note**, pas deux. Noter le nombre de notes.
+3. **Renommer** cette note dans Ardoise, puis, sans effacer l'écran, ajouter des mots et enregistrer de nouveau. Attendu : toujours **une seule note**, avec le titre choisi (le titre, les mots-clés, le favori et le classeur sont gardés).
+4. **Modifier l'encre** de cette note dans l'éditeur (effacer un trait, enregistrer la note), puis, sans effacer l'écran, ajouter des mots et enregistrer de nouveau. Attendu : une **seconde note** est ajoutée, la note modifiée reste telle quelle. Noter le nombre de notes et ce que contient la nouvelle.
+5. *Essai optionnel de la copie de secours.* Avec une **bibliothèque d'essai sur une clé USB**, Ardoise connectée à la tablette (synchronisation automatique), **retirer la clé**, puis écrire et enregistrer une page d'essai sans effacer l'écran. Noter le message (attendu : « Une page de la tablette Xiaomi n'a pas pu être écrite dans la bibliothèque… ») et vérifier que `%LOCALAPPDATA%\Ardoise\blackboard-rescue\` contient un `page-….bin`. **Remettre la clé**, puis **Synchroniser maintenant**. Attendu : la note arrive et le fichier disparaît du dossier. Noter tout écart (message différent, note en double, fichier qui reste).
+6. *Le direct après les pages, options activées* (**Synchroniser automatiquement à la connexion** et **Effacer de la tablette après import** cochés). **Couper le Bluetooth du PC**, écrire et enregistrer deux pages d'essai sur la tablette (sans effacer l'écran), puis lancer le **mode direct** : il attend la tablette. **Rétablir le Bluetooth du PC.** Attendu : à la connexion, le panneau montre d'abord la synchronisation, les deux pages deviennent des notes, **Pages en mémoire** retombe à 0, puis le direct commence ; rien n'est tracé avant. Noter le temps avant que le direct soit prêt, et tout trait parasite.
+7. *Le direct après les pages, option désactivée.* Décocher **Effacer de la tablette après import**, écrire et enregistrer deux pages d'essai, puis lancer le **mode direct**. Attendu : le direct **ne démarre pas** et Ardoise dit que la tablette contient encore des pages enregistrées (« La tablette Xiaomi contient encore des pages enregistrées (2)… ») ; les pages sont toujours sur la tablette. Noter le texte exact et s'il arrive tout de suite. Puis **Synchroniser maintenant** et **Synchroniser et effacer** : les pages deviennent des notes, **Pages en mémoire** retombe à 0 ; relancer le direct : il démarre. Recocher l'option. (D5 : la reprise du direct après une coupure doit repartir aussitôt, sans demander d'importer des pages.)
+8. *La page poussée à l'effacement.* Pendant le direct, écrire un mot, **enregistrer avec le bouton**, puis **effacer l'écran** trois à cinq fois en écrivant un mot entre deux effacements. Attendu : **aucun trait parasite** (aucune page ancienne redessinée), le direct passe à une nouvelle page à chaque effacement. Terminer le direct, puis chercher dans `_ardoise\diagnostics\` une ligne disant que des octets ont été mis de côté : noter si elle apparaît, le nombre d'octets, et à quel effacement un éventuel trait parasite est apparu.
+9. *Pas encore mesuré : un transfert coupé.* Écrire une page très chargée, enregistrer **sans effacer l'écran**, lancer **Synchroniser maintenant**, puis **Annuler** pendant le transfert. Noter : la page est-elle encore sur la tablette ensuite (**Pages en mémoire**) ? Un fichier apparaît-il dans `_ardoise\rescued-pages\doubtful\` de la bibliothèque ? Quel message Ardoise affiche-t-elle (attendu : « n'a pas été reçue proprement ») ? Si la page est encore là, **Synchroniser maintenant** de nouveau : la copie douteuse disparaît-elle et la note est-elle juste ?
+10. *Pas encore mesuré : éteindre la tablette.* Tablette **non connectée à Ardoise**, écrire et enregistrer une page **sans effacer l'écran**, éteindre la tablette, la rallumer, laisser Ardoise s'y connecter. La page est-elle encore là, et sous quelle forme (**Pages en mémoire**, note importée, ligne `BOARD …` du journal) ? Noter aussi ce que fait le bouton d'enregistrement avec un **écran vide** (C bis 1 : à garder).
 
 #### D. Le mode direct
 
@@ -762,7 +777,7 @@ Mesuré le 2026-11-13 : la tablette décrit autrement (12 octets au lieu de 8) u
 3. **Enregistrer une page avec le bouton** de la tablette pendant le direct : le direct continue-t-il sans coupure ni trait parasite ? Terminer le direct : la page enregistrée est-elle importée ensuite (doublon de la note du direct)?
 4. Relancer le direct, écrire quelques mots, puis **appuyer sur le bouton d'effacement de l'écran** de la tablette. Attendu (SPEC §4.2 ; la tablette signale l'effacement pendant le direct, mesuré le 2026-11-13) : le direct passe à une **nouvelle page**, et ce qu'on écrit ensuite s'y trace ; un second appui sans avoir écrit ne crée pas de page vide. Noter tout écart (rien ? trait parasite ? coupure ?), à chaque appui.
 5. **Couper puis rétablir le Bluetooth du PC** (ou s'éloigner de la tablette) pendant le direct : l'état dit-il **Reconnexion…**, et le direct reprend-il tout seul, sur la même tablette ? Noter le temps.
-6. **Annuler une synchronisation au milieu d'une grande page** (écrire une page très chargée, enregistrer, lancer **Synchroniser maintenant**, puis **Annuler** pendant le transfert), puis lancer le mode direct : **aucun trait parasite** ne doit apparaître. Noter le temps que prend la liaison à se rétablir (Ardoise ferme la liaison et la rouvre : c'est voulu).
+6. **Annuler une synchronisation au milieu d'une grande page** (écrire une page très chargée, enregistrer, lancer **Synchroniser maintenant**, puis **Annuler** pendant le transfert), puis lancer le mode direct : **aucun trait parasite** ne doit apparaître. Noter le temps que prend la liaison à se rétablir (Ardoise ferme la liaison et la rétablit avant de s'en servir de nouveau, ici au lancement du direct : c'est voulu). Si la page annulée est restée sur la tablette, Ardoise la synchronise d'abord ou refuse le direct, selon les options (voir C quater).
 
 #### C bis. Les cas limites du transfert
 
@@ -796,6 +811,13 @@ Ce qui ne revient pas tout seul :
 | Le temps de la recherche, le **nom** annoncé et le **Signal** ; le texte exact quand rien n'est trouvé (Mi Home ouvert) | A2, A4 |
 | La **batterie** (comparée à Mi Home), la **mémoire**, le nombre de pages, la zone de dessin | B1 |
 | Si la **date** d'une page est juste (l'heure de la tablette) | B2, C3 |
+| Si le dossier `_ardoise\rescued-pages` de la bibliothèque est **vide ou absent** après la synchronisation d'une page non effacée ; sinon ce qu'il contient | C quater 1 |
+| Si un écran enregistré de nouveau **met à jour la même note** (titre gardé), et si une note dont l'encre a été modifiée donne bien une **seconde** note | C ter 2, C quater 2 à 4 |
+| Le **message** et le fichier de `%LOCALAPPDATA%\Ardoise\blackboard-rescue\` quand la bibliothèque est inaccessible, et ce qui arrive à la remise de la clé | C quater 5 |
+| Le direct avec des **pages sur la tablette** : synchronisation puis direct (options activées), refus avec le texte exact (option désactivée), délais | C quater 6, C quater 7 |
+| Un **trait parasite** quand on efface l'écran pendant le direct, et la ligne du journal qui compte les octets mis de côté (apparaît-elle, combien) | C quater 8 |
+| Page d'un écran non effacé dont le transfert est **annulé** : encore sur la tablette ? fichier dans `doubtful\` ? message ? | C quater 9 |
+| Page d'un écran non effacé après **extinction** de la tablette : encore là, sous quelle forme | C quater 10 |
 | La fidélité de la page importée, et la **longueur obtenue pour la ligne de 10 cm** (c'est l'unité à corriger : `BOARD_WIDTH` et `BOARD_HEIGHT`) | C3 |
 | Si la page a bien **disparu de la tablette** après l'import, et si Mi Home la voit encore | C4 |
 | Le comportement avec l'option **Effacer de la tablette après import** désactivée, et le texte de la confirmation | C5 |
@@ -803,7 +825,7 @@ Ce qui ne revient pas tout seul :
 | Ce qui se passe pendant le direct quand on **enregistre une page** avec le bouton, et quand on **appuie sur le bouton d'effacement** de l'écran | D3, D4 |
 | La reprise du direct après une coupure du Bluetooth, et son délai | D5 |
 | Un **trait parasite** après l'annulation d'un transfert, et le délai de reconnexion | D6 |
-| Le comportement d'une **page enregistrée avec l'écran vide** (nombre de pages, import) | C bis 1 |
+| Le comportement d'une **page enregistrée avec l'écran vide** (nombre de pages, import) | C bis 1, C quater 10 |
 | Le **délai** entre l'import d'une page et la baisse du nombre de pages (« tout de suite » ou « plus d'une seconde ») | C bis 2 |
 | Si la liaison de la Xiaomi **tient cinq minutes** au repos, et si un appui sur la Bamboo Slate lui prend la liaison | C bis 3 |
 | Où tombe le **trait ajouté** à une note de la Xiaomi, et sa taille comparée à l'ancien | D bis 1 |
