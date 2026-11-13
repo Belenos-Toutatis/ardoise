@@ -282,7 +282,9 @@ impl WriteServices for FakeWrite {
         let mut file = loaded.file;
         file.note = note;
         if let Some(account) = account {
-            file.add_revision_entry(DAY0 + 20 * DAY_MS, account);
+            // The real clock, as the app does and as the copy itself was stamped: a fixed date
+            // would fall before the copy once that date is past.
+            file.add_revision_entry(chrono::Utc::now().timestamp_millis(), account);
         }
         Ok(library.save(path, &file, stamp)?)
     }
