@@ -1115,6 +1115,40 @@ fn watch_follows_renamed_binders_and_external_copies() {
 }
 
 #[test]
+fn watch_reports_the_order_of_a_binder_changing_here_or_on_another_computer() {
+    let (dir, library) = new_library();
+    library
+        .create(Path::new("Classe"), &note_file("a", "A"))
+        .unwrap();
+    let mut watched = Watched::start(&library);
+    let folder = dir.path().join("Classe");
+
+    // Written here.
+    library
+        .set_binder_order(Path::new("Classe"), &["a".to_owned()])
+        .unwrap();
+    watched.wait_for(&LibraryChange::OrderChanged {
+        folder: folder.clone(),
+    });
+    // Brought by the sync client: a conflict copy of it, then a newer main file.
+    fs::write(
+        folder.join("_ardoise-order (conflicted copy 2026-11-13 101530).json"),
+        br#"{"version": 1, "changed": 9999999999999, "notes": ["a"]}"#,
+    )
+    .unwrap();
+    watched.wait_for(&LibraryChange::OrderChanged {
+        folder: folder.clone(),
+    });
+    // Nothing else is a note change.
+    assert!(
+        watched
+            .seen
+            .iter()
+            .all(|c| matches!(c, LibraryChange::OrderChanged { .. }))
+    );
+}
+
+#[test]
 fn watching_stops_when_dropped() {
     let (dir, library) = new_library();
     let (sender, changes) = mpsc::channel();

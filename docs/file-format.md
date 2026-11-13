@@ -327,6 +327,16 @@ page continues in a new note beside it that is written from the file that was re
 `revision.json` (`live/hub.rs`, `page_file` and `write_beside`); the other notes of the session (new pages) are ordinary
 notes. The member has a read limit of about 16 MiB, decompressed, like `note.json`.
 
+### 4.3 Operations of the library that write a file again
+
+The library's duplicate (`Library::duplicate`, SPEC §4.3) and change of date (`Library::set_created`) are ordinary rewrites of a
+`NoteFile`: they add no member and no key, so they do not change the format version. A duplicate keeps every member and every unknown
+key or member verbatim (it is a new `id`, a title followed by the copy word, no `favorite`, and `modified` now; `created`, the tablet's
+`original.bin`, the narration, `revision.json` and `boardPosition` are the original's); a change of date writes only `created` (and
+`modified`), the points' times and the narration's offset being offsets from it. Their effect on the recognition of synced pages is in
+`docs/design/library-order.md` §5. The free order of a binder is **not** in the note: it is `_ardoise-order.json` in the binder's folder
+(same document, §2).
+
 ## 5. Versioning rules
 
 The version is `format.version` (major) and `format.minor` in `note.json`.

@@ -24,6 +24,13 @@ pub(crate) enum Found {
         binder: PathBuf,
         stamp: Option<FileStamp>,
     },
+    /// An order file of a binder, or a conflict copy of one ([`super::order`]): its folder (the
+    /// binder, relative to the root), its absolute path and its stamp as the listing gave it.
+    Order {
+        binder: PathBuf,
+        path: PathBuf,
+        stamp: Option<FileStamp>,
+    },
 }
 
 /// Whether a file or folder name is skipped: the library's own folder `_ardoise/`, hidden
@@ -118,6 +125,15 @@ pub(crate) fn walk_bounded(
                     visit(Found::Binder(child.clone()));
                     pending.push((child, depth + 1));
                 }
+            } else if file_type.is_file() && super::order::is_order_file_name(&name) {
+                visit(Found::Order {
+                    binder: relative.clone(),
+                    path: entry.path(),
+                    stamp: entry
+                        .metadata()
+                        .ok()
+                        .and_then(|metadata| FileStamp::from_metadata(&metadata).ok()),
+                });
             } else if file_type.is_file() && is_note_file_name(&name) {
                 visit(Found::Note {
                     path: entry.path(),
@@ -201,6 +217,8 @@ mod tests {
             Found::Note { path, binder, .. } => {
                 notes.push((path.strip_prefix(root).unwrap().to_path_buf(), binder))
             }
+            // The order files are not notes (they have their own test, in `order.rs`).
+            Found::Order { .. } => {}
         });
         assert!(problems.is_empty());
         notes.sort();

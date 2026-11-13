@@ -48,6 +48,12 @@ pub enum LibraryChange {
         to: PathBuf,
         stamp: FileStamp,
     },
+    /// The free order of a binder changed (its order file, or a conflict copy of it, appeared,
+    /// changed or went: written here, or brought by Nextcloud from another computer); `folder`
+    /// is the binder's folder. Not a note: the listing carries the new order.
+    OrderChanged {
+        folder: PathBuf,
+    },
 }
 
 impl LibraryChange {
@@ -58,6 +64,7 @@ impl LibraryChange {
             | LibraryChange::Changed { path, .. }
             | LibraryChange::Removed { path } => path,
             LibraryChange::Renamed { to, .. } => to,
+            LibraryChange::OrderChanged { folder } => folder,
         }
     }
 
@@ -67,7 +74,7 @@ impl LibraryChange {
             LibraryChange::Created { stamp, .. }
             | LibraryChange::Changed { stamp, .. }
             | LibraryChange::Renamed { stamp, .. } => Some(*stamp),
-            LibraryChange::Removed { .. } => None,
+            LibraryChange::Removed { .. } | LibraryChange::OrderChanged { .. } => None,
         }
     }
 }
@@ -116,17 +123,47 @@ impl Drop for LibraryWatcher {
 
 type Snapshot = BTreeMap<PathBuf, FileStamp>;
 
-/// Names, times and sizes of every note file.
-fn scan(root: &Path) -> Snapshot {
-    let mut snapshot = Snapshot::new();
-    walk::walk(root, |found| {
-        if let Found::Note { path, stamp, .. } = found
-            && let Some(stamp) = stamp.or_else(|| FileStamp::of(&path).ok())
-        {
-            snapshot.insert(path, stamp);
+/// What a scan saw: the note files, and the order files of the binders (and their conflict
+/// copies), each with its stamp.
+#[derive(Default)]
+struct Scan {
+    notes: Snapshot,
+    orders: Snapshot,
+}
+
+/// Names, times and sizes of every note file and order file.
+fn scan(root: &Path) -> Scan {
+    let mut scan = Scan::default();
+    walk::walk(root, |found| match found {
+        Found::Note { path, stamp, .. } => {
+            if let Some(stamp) = stamp.or_else(|| FileStamp::of(&path).ok()) {
+                scan.notes.insert(path, stamp);
+            }
         }
+        Found::Order { path, stamp, .. } => {
+            if let Some(stamp) = stamp.or_else(|| FileStamp::of(&path).ok()) {
+                scan.orders.insert(path, stamp);
+            }
+        }
+        Found::Binder(_) => {}
     });
-    snapshot
+    scan
+}
+
+/// The binders whose order files differ between two scans: one change each, in path order.
+fn diff_orders(old: &Snapshot, new: &Snapshot) -> Vec<LibraryChange> {
+    let mut folders = BTreeSet::new();
+    for path in old.keys().chain(new.keys()) {
+        if old.get(path) != new.get(path)
+            && let Some(folder) = path.parent()
+        {
+            folders.insert(folder.to_path_buf());
+        }
+    }
+    folders
+        .into_iter()
+        .map(|folder| LibraryChange::OrderChanged { folder })
+        .collect()
 }
 
 /// Whether an event may concern a note: not only hidden files, `.part` files or `_ardoise/`.
@@ -306,7 +343,8 @@ fn run(
         };
         if last_event.elapsed() >= debounce || first.elapsed() >= max_delay {
             let current = scan(&root);
-            let changes = diff(&snapshot, &current, &hints.pairs);
+            let mut changes = diff(&snapshot.notes, &current.notes, &hints.pairs);
+            changes.extend(diff_orders(&snapshot.orders, &current.orders));
             snapshot = current;
             hints.pairs.clear();
             first_event = None;

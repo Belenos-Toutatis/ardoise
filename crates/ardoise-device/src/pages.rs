@@ -2228,3 +2228,322 @@ mod update_tests {
         assert!(!imported.in_trash(&page(FIRST, screen(9), None)));
     }
 }
+
+#[cfg(test)]
+mod duplicate_tests {
+    //! A duplicate of an imported note (a copy made by the user in the library, Q20) has the
+    //! creation time and the `original.bin` of the note of its page, but not its id. What the
+    //! recognition of pages does with it (docs/design/blackboard.md §9.6): nothing in the code
+    //! of this file was changed for it, and these tests hold the behaviour that makes that safe.
+    use super::*;
+    use ardoise_proto::blackboard::record::encode_records;
+    use ardoise_proto::blackboard::{Record, RecordStatus};
+    use ardoise_proto::stroke::{Point as RawPoint, Stroke as RawStroke};
+
+    const WORD: &str = "copie";
+    const FIRST: i64 = 1_792_834_200;
+    const SECOND: i64 = FIRST + 60;
+    const NOW: i64 = 1_792_843_200_000;
+
+    fn library() -> (tempfile::TempDir, Library) {
+        let dir = tempfile::tempdir().unwrap();
+        ardoise_core::library::init(dir.path()).unwrap();
+        let library = Library::open(dir.path()).unwrap();
+        (dir, library)
+    }
+
+    fn slate_page() -> DownloadedPage {
+        let strokes = [RawStroke {
+            time: StrokeTime::SincePowerUp { millis: 0 },
+            pen: None,
+            points: (0..6)
+                .map(|i| RawPoint {
+                    x: 100 + i * 10,
+                    y: 5000,
+                    pressure: 1024 + i,
+                })
+                .collect(),
+            lost_points: 0,
+        }];
+        let bytes = stroke::encode_slate(&strokes);
+        DownloadedPage {
+            announced_size: bytes.len() as u32,
+            bytes,
+            timestamp: Some(FIRST),
+            kind: TabletKind::Slate,
+            previous: None,
+        }
+    }
+
+    fn screen(n: u16) -> Vec<u8> {
+        let mut records = vec![Record {
+            status: RecordStatus::Hover,
+            x: 100,
+            y: 200,
+            pressure: 0,
+        }];
+        records.extend((0..n).map(|i| Record {
+            status: RecordStatus::Touch,
+            x: 100 + i * 30,
+            y: 200 + i * 7,
+            pressure: 900,
+        }));
+        records.push(Record {
+            status: RecordStatus::Out,
+            x: 100,
+            y: 200,
+            pressure: 0,
+        });
+        encode_records(&records)
+    }
+
+    fn board(time: i64, bytes: Vec<u8>, previous: Option<u32>) -> DownloadedPage {
+        DownloadedPage {
+            announced_size: bytes.len() as u32,
+            bytes,
+            timestamp: Some(time),
+            kind: TabletKind::Blackboard,
+            previous,
+        }
+    }
+
+    fn store_slate(library: &Library, page: DownloadedPage) -> StoredPage {
+        LibrarySink::new(
+            library,
+            "",
+            ardoise_core::note::A4_LANDSCAPE,
+            "Calque 1",
+            || NOW,
+        )
+        .store_page(page)
+        .unwrap()
+    }
+
+    fn store_board(library: &Library, page: DownloadedPage) -> StoredPage {
+        LibrarySink::new(library, "", BLACKBOARD_PAGE, "Calque 1", || NOW)
+            .store_page(page)
+            .unwrap()
+    }
+
+    /// What a sync does with a page it is offered again (`runner.rs`, `known`), with the page
+    /// kept on the tablet (no deletion after the sync).
+    fn already_known(library: &Library, page: &DownloadedPage) -> bool {
+        let imported = ImportedPages::scan(library);
+        imported.find(library, page).is_some() || imported.in_trash(page)
+    }
+
+    fn duplicate(library: &Library, path: &Path, id: &str) -> PathBuf {
+        library.duplicate(path, id, WORD).unwrap().0.path
+    }
+
+    fn bytes_of(paths: &[&Path]) -> Vec<Vec<u8>> {
+        paths.iter().map(|p| std::fs::read(p).unwrap()).collect()
+    }
+
+    /// A Slate note and its duplicate: the page is recognised as the original's, by id; a sync
+    /// that meets it again imports nothing and touches neither note. The duplicate has no page
+    /// of its own: with the original gone for good the page is imported again (a new note with
+    /// the page's id, the copy untouched), and in the trash the original still stands for it.
+    #[test]
+    fn a_duplicate_of_a_slate_note_is_not_the_note_of_its_page() {
+        let (_dir, library) = library();
+        let page = slate_page();
+        let original = store_slate(&library, page.clone()).path;
+        let copy = duplicate(&library, &original, "the-copy");
+        let before = bytes_of(&[&original, &copy]);
+
+        let imported = ImportedPages::scan(&library);
+        assert_eq!(imported.find(&library, &page), Some(original.clone()));
+        assert!(already_known(&library, &page));
+        assert_eq!(library.list().notes.len(), 2);
+        assert_eq!(
+            bytes_of(&[&original, &copy]),
+            before,
+            "neither note touched"
+        );
+
+        // The original in the trash: the page still counts as deleted by the user.
+        library.trash(&original).unwrap();
+        let imported = ImportedPages::scan(&library);
+        assert_eq!(
+            imported.find(&library, &page),
+            None,
+            "a copy is not the page's note"
+        );
+        assert!(imported.in_trash(&page));
+        assert!(already_known(&library, &page));
+        assert_eq!(library.list().notes.len(), 1);
+
+        // The original deleted for good: only now would the page be imported again, as a new
+        // note of its own; the duplicate stays what it was.
+        for item in library.trash_items().unwrap() {
+            library.purge(&item.id).unwrap();
+        }
+        assert!(!already_known(&library, &page));
+        let again = store_slate(&library, page.clone());
+        assert_eq!(again.how, Stored::New);
+        assert_ne!(again.path, copy);
+        assert_eq!(library.list().notes.len(), 2);
+        assert_eq!(bytes_of(&[&copy]), before[1..], "the duplicate untouched");
+        assert_eq!(
+            library.read(&again.path).unwrap().file.note.id,
+            page_note_id(&page)
+        );
+    }
+
+    /// A blackboard note and its duplicate, then the screen stored again: only the note of the
+    /// page (its id) is a candidate, so it is updated, never refused for "two notes"; the
+    /// duplicate is untouched. Both pages count as imported.
+    #[test]
+    fn a_duplicate_of_a_blackboard_note_does_not_stop_its_screen_from_updating_the_note() {
+        let (_dir, library) = library();
+        let first = board(FIRST, screen(5), None);
+        let original = store_board(&library, first.clone()).path;
+        let copy = duplicate(&library, &original, "the-copy");
+        let copy_before = bytes_of(&[&copy]);
+        assert!(already_known(&library, &first));
+
+        let mut whole = screen(5);
+        whole.extend(screen(8));
+        let second = board(SECOND, whole.clone(), Some(FIRST as u32));
+        let updated = store_board(&library, second.clone());
+        assert_eq!(
+            updated.how,
+            Stored::Updated {
+                replaced: FIRST as u32
+            }
+        );
+        assert_eq!(updated.path, original);
+        assert_eq!(library.list().notes.len(), 2);
+        assert_eq!(
+            bytes_of(&[&copy]),
+            copy_before,
+            "the duplicate is not updated"
+        );
+        let file = library.read(&original).unwrap().file;
+        assert_eq!(file.original, Some(whole.clone()));
+        assert_eq!(file.note.id, page_note_id(&second));
+        assert_eq!(library.read(&copy).unwrap().file.original, Some(screen(5)));
+
+        // Both pages are known: the earlier one by the creation time its note kept.
+        assert!(already_known(&library, &first));
+        assert!(already_known(&library, &second));
+
+        // A copy made after the update: the third store still finds exactly one candidate.
+        let late_copy = duplicate(&library, &original, "the-late-copy");
+        let mut most = whole.clone();
+        most.extend(screen(3));
+        let third = store_board(&library, board(SECOND + 60, most, Some(SECOND as u32)));
+        assert_eq!(
+            third.how,
+            Stored::Updated {
+                replaced: SECOND as u32
+            }
+        );
+        assert_eq!(third.path, original);
+        assert_eq!(library.list().notes.len(), 3);
+        assert_eq!(bytes_of(&[&copy]), copy_before);
+        assert_eq!(library.read(&late_copy).unwrap().file.original, Some(whole));
+    }
+
+    /// The duplicate stands in for the page when the original is gone (the fallback by creation
+    /// time and bytes), so a leftover copy of the page does not come back; a copy in the trash
+    /// counts as the page deleted, like the original.
+    #[test]
+    fn a_blackboard_page_stays_known_while_either_the_note_or_its_copy_exists() {
+        let (_dir, library) = library();
+        let first = board(FIRST, screen(5), None);
+        let original = store_board(&library, first.clone()).path;
+        let copy = duplicate(&library, &original, "the-copy");
+        library.trash(&original).unwrap();
+        for item in library.trash_items().unwrap() {
+            library.purge(&item.id).unwrap();
+        }
+        assert!(
+            already_known(&library, &first),
+            "the copy is found by creation time and bytes"
+        );
+        library.trash(&copy).unwrap();
+        assert!(
+            already_known(&library, &first),
+            "a note in the trash counts as deleted"
+        );
+    }
+
+    /// Changing the date of a note imported from the tablet: its page is still its own, by id
+    /// (the file is renamed, the id and `original.bin` stay). The edge that remains: a
+    /// blackboard note updated by a later store carries the later page's id, and is found for
+    /// the earlier page by its creation time; with that changed, only the later page is known.
+    #[test]
+    fn changing_the_date_of_a_tablet_note_does_not_bring_its_page_back() {
+        let (_dir, library) = library();
+        let wanted = 1_741_089_600_000; // 2025-03-04 12:00 UTC
+
+        let page = slate_page();
+        let slate = store_slate(&library, page.clone()).path;
+        let moved = library.set_created(&slate, wanted, None).unwrap().path;
+        assert!(already_known(&library, &page));
+        assert_eq!(
+            ImportedPages::scan(&library).find(&library, &page),
+            Some(moved)
+        );
+
+        let (_other, library) = self::library();
+        let first = board(FIRST, screen(5), None);
+        let note = store_board(&library, first.clone()).path;
+        let moved = library.set_created(&note, wanted, None).unwrap().path;
+        assert!(
+            already_known(&library, &first),
+            "by id: the note is not updated yet"
+        );
+        assert_eq!(
+            ImportedPages::scan(&library).find(&library, &first),
+            Some(moved.clone())
+        );
+
+        // The date set before the page's time: the note is still the candidate, updated.
+        let mut whole = screen(5);
+        whole.extend(screen(8));
+        let second = board(SECOND, whole, Some(FIRST as u32));
+        let updated = store_board(&library, second.clone());
+        assert!(
+            matches!(updated.how, Stored::Updated { .. }),
+            "{:?}",
+            updated.how
+        );
+        assert_eq!(library.list().notes.len(), 1);
+        // The edge: the note now holds the second page's id and is found for the first page only
+        // by its creation time, which was changed: the first page, offered again, is not known.
+        assert!(already_known(&library, &second));
+        assert!(!already_known(&library, &first));
+        // Nothing is lost: it would be imported as a note of its own, the other left alone.
+        let before = bytes_of(&[&updated.path]);
+        let again = store_board(&library, first.clone());
+        assert_eq!(again.how, Stored::New);
+        assert_eq!(bytes_of(&[&updated.path]), before);
+        assert_eq!(library.list().notes.len(), 2);
+    }
+
+    /// A blackboard note whose date was set after the page's time is not the candidate of the
+    /// screen's next store (the candidate must be created no later than that page): a new note
+    /// is added and the note left as it is. Never a lost or overwritten note.
+    #[test]
+    fn a_blackboard_note_dated_after_its_page_is_not_updated_but_never_overwritten() {
+        let (_dir, library) = library();
+        let first = board(FIRST, screen(5), None);
+        let note = store_board(&library, first.clone()).path;
+        let later = (FIRST + 3 * 86_400) * 1000;
+        let moved = library.set_created(&note, later, None).unwrap().path;
+        let before = bytes_of(&[&moved]);
+        let mut whole = screen(5);
+        whole.extend(screen(8));
+        let added = store_board(&library, board(SECOND, whole, Some(FIRST as u32)));
+        match &added.how {
+            Stored::NewNotUpdated(why) => assert!(why.contains("no note"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(bytes_of(&[&moved]), before);
+        assert_eq!(library.list().notes.len(), 2);
+        assert!(already_known(&library, &first));
+    }
+}
