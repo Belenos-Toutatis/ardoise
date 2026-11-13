@@ -452,7 +452,9 @@ bottom left, button at the bottom right); to be confirmed with the real tablet (
   waits for the tablet (not connected, reconnecting): the worker forwards `Reoriented` to any live sink (the
   tablet's area when none is known yet), the session takes the position and its snapshot shows it; the `Started`
   that follows repeats the same position and turns nothing again. In the presentation, the marks written over it
-  are removed when the page index, the page size or the orientation changes (a switch keeps the index).
+  are removed when the page index, the page size or the orientation changes (a switch keeps the index). The Xiaomi
+  blackboard has its own switch on the same path (`tablet_set_board_position`, `Reoriented` after its `Started`;
+  docs/design/blackboard.md §10 and §11, `docs/questions.md` Q19).
 - **Relation to `device.json`'s `orientation`**: `identity.rs` only has a test keeping an `"orientation": "left-handed"`
   field "from a newer version" in the record's `extra`; it is not a field of the record and nothing reads it. The
   setting lives in `ardoise.toml` ([tablet]), shared by the PCs, not with the tablet's registration.

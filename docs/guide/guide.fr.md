@@ -323,9 +323,9 @@ toutes vos tablettes, et l'écran le dit quand vous en connaissez deux.
   corbeille efface l'écran, la disquette enregistre la page) : **En hauteur, boutons en bas** (au départ), **En
   hauteur, boutons en haut**, **En largeur, boutons à droite**, **En largeur, boutons à gauche**. Les positions en
   largeur donnent des notes en largeur (environ 27 × 20 cm). La position en vigueur au début d'une synchronisation vaut
-  pour toutes ses pages ; celle du début d'un direct vaut pour tout ce direct (la changer pendant le direct ne vaut que
-  pour le direct suivant). Une note garde la position avec laquelle elle a été faite : changer le réglage après coup ne
-  la retourne pas.
+  pour toutes ses pages. Pendant le direct, les quatre boutons de position de la fenêtre de commande changent ce même
+  réglage, et le direct en cours le suit aussitôt (voir « Le mode direct avec la tablette Xiaomi »). Une note importée
+  garde la position avec laquelle elle a été faite : changer le réglage après coup ne la retourne pas.
 
 ### Les pages de la tablette Xiaomi
 
@@ -432,10 +432,16 @@ Le mode direct fonctionne de la même façon avec la tablette Xiaomi : outil, co
 au survol (la tablette envoie aussi la position du stylo quand il est près de l'écran), autre écran, partage et
 retouches. La page du direct est **en hauteur** (environ 20 × 27 cm) quand la tablette est tenue boutons en bas ou en
 haut, **en largeur** quand elle est tenue boutons à droite ou à gauche : elle suit la **Position de la tablette** Xiaomi
-choisie dans les réglages (voir « Les options ») **au moment où le direct commence**, et la garde jusqu'à son arrêt.
-Changer la position pendant le direct ne vaut que pour le direct suivant : l'écriture n'est jamais retournée sous votre
-main. La fenêtre de commande n'a pas de boutons de position pour la Xiaomi, elle les remplace par un rappel, et le
-réglage **Bouton de la tablette en mode direct** ne s'applique qu'à la Bamboo Slate.
+choisie dans les réglages (voir « Les options »).
+
+Comme avec la Bamboo Slate, la barre du haut de la fenêtre de commande a **quatre boutons de position**, avec les
+dessins de la Xiaomi (la corbeille et la disquette montrent où sont ses boutons) : si vous avez oublié de régler la
+position avant de commencer, ou si vous vous êtes trompé, cliquez sur la bonne. La page en cours tourne aussitôt avec
+ce qui y est déjà écrit, et ce que vous écrivez ensuite arrive à l'endroit. Passer d'une position en hauteur à une
+position en largeur (ou l'inverse) change la forme de la page. Le choix est gardé dans les réglages de la tablette
+Xiaomi, comme pour la Bamboo : le direct suivant et la synchronisation suivante le prennent. Seule la page en cours
+tourne aussitôt : une page déjà terminée garde son sens tant que vous n'y revenez pas, et tourne quand vous y revenez.
+Le réglage **Bouton de la tablette en mode direct** ne s'applique qu'à la Bamboo Slate.
 
 - **Enregistrer la page avec le bouton de la tablette** n'interrompt pas le direct. La page est importée ensuite, comme
   une synchronisation : sa note est un doublon de celle du direct, sans danger.
@@ -501,10 +507,16 @@ faut aussi ne choisir qu'une seule note.
   que vous la tenez…**) : choisissez dans les réglages une position du même sens que la page, tenez la tablette ainsi
   puis **Réessayer**, ou reprenez le direct sur une autre feuille. La Xiaomi n'a pas d'avis « tenez la tablette ainsi » :
   elle suit toujours sa position réglée, et ce que vous écrivez est redressé pour cette position (et non pour celle
-  avec laquelle la page avait été faite, qui n'est pas retenue pour le direct).
+  avec laquelle la page avait été faite, qui n'est pas retenue pour le direct). Pendant ce direct, la feuille garde sa
+  forme : des quatre boutons de position, seuls les deux du même sens qu'elle restent actifs (feuille en largeur :
+  boutons à droite ou à gauche ; feuille en hauteur : boutons en bas ou en haut), les deux autres sont grisés et une
+  mention à côté dit pourquoi. Changer pour l'autre position du même sens (un demi-tour) ne retourne pas la feuille :
+  ce que vous écrivez ensuite arrive à l'endroit, ce qui était déjà écrit reste tel quel. Il en va de même tant que le
+  direct garde une page écrite sur une image.
 - **La page suivante** crée une note neuve, à la racine de la bibliothèque, avec le papier de la feuille (couleur,
   modèle, texture, pas son image), et suit de nouveau la position réglée pour la tablette : les boutons de position
-  fonctionnent alors. Les onglets **Page** et **Fond** changent le papier et l'image de la feuille en cours (voir
+  fonctionnent alors (avec la tablette Xiaomi, seulement les deux du sens de la feuille reprise, jusqu'à la fin du
+  direct). Les onglets **Page** et **Fond** changent le papier et l'image de la feuille en cours (voir
   **Le papier et l'image de la page en cours**).
 - **La narration** : si vous enregistrez, le son s'ajoute après l'ancien sans le recouvrir, et la relecture reste juste
   malgré le temps passé entre les deux séances. Si le son ne peut pas s'y ajouter (plus de 4 heures en tout, ou ancienne
@@ -546,7 +558,8 @@ Un simple changement de titre, d'étiquette ou de favori fait ailleurs ne crée 
   règlent aussi par des interrupteurs, dans l'onglet **Projection** (bloc **Zone projetée**) ; les boutons de la barre
   d'outils restent, pour les avoir sous la main.
 - **Position de la tablette** : quatre boutons qui changent aussitôt la position ; la page en cours tourne avec ce
-  qui y est déjà dessiné.
+  qui y est déjà dessiné. Avec la tablette Xiaomi, ce sont ses quatre positions, avec ses dessins (voir « Le mode
+  direct avec la tablette Xiaomi »).
 - L'aperçu montre la page entière ; un *rectangle bleu* indique la zone projetée. Faites-le glisser pour déplacer la
   zone, la molette zoome. **Agrandir**, **Réduire**, **Page entière** et **Largeur** (la page sur toute la largeur de la
   zone projetée) sont aussi proposés, dans l'onglet **Projection**, bloc **Zone projetée**.
@@ -1722,7 +1735,8 @@ de tous les composants utilisés avec leur licence.
 | « La tablette Xiaomi contient encore 2 pages enregistrées… » (fenêtre) | Le mode direct ne démarre pas tant que ces pages ne sont pas importées : **Importer et effacer** les importe puis démarre le direct (chapitre 6). |
 | « La tablette Xiaomi garde une page… » | Ardoise lui a demandé d'effacer une page, et elle l'a gardée : la note de cette page est déjà dans la bibliothèque. Synchronisez de nouveau ; si cela se répète, gardez le journal de diagnostic (chapitre 13). |
 | Une seule page est reçue, les suivantes « attendent » | Cochez **Effacer de la tablette après import** (chapitre 5). |
-| La note s'affiche à l'envers ou couchée | Réglez la **Position de la tablette** pour qu'elle corresponde à la façon dont vous la tenez. |
+| La note s'affiche à l'envers ou couchée | Réglez la **Position de la tablette** pour qu'elle corresponde à la façon dont vous la tenez. En mode direct, cliquez sur la bonne position dans la barre du haut : la page en cours se redresse avec ce qui y est écrit (Bamboo Slate et tablette Xiaomi). |
+| « Ce direct écrit sur une page de la tablette Xiaomi qui garde sa forme… » | Le direct a repris une feuille (ou écrit sur une image) : seules les deux positions du même sens que cette page sont possibles jusqu'à la fin du direct. Choisissez l'une d'elles ; pour l'autre sens, terminez le direct (chapitre 6). |
 | « Vos modifications n'ont pas été enregistrées » | La note a changé sur un autre PC. **Enregistrer comme copie**, ou revenez à la bibliothèque et rouvrez la note. |
 | « Cette note a été créée par une version plus récente d'Ardoise » | Remplacez `ardoise.exe` par la version récente (chapitre 2). |
 | La bibliothèque n'affiche pas une note arrivée d'un autre PC | Attendez la fin de la synchronisation Nextcloud ; les fichiers temporaires `.part` sont ignorés. |
