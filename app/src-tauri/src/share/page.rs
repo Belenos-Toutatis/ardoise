@@ -2,7 +2,9 @@
 //! the page as the viewer draws it, sent whole or as the strokes added since the last time, and
 //! its paper rendered only when it changed.
 
-use ardoise_core::note::{Background, BackgroundImage, Layer, Note, PageSize, Template};
+use ardoise_core::note::{
+    Background, BackgroundImage, Layer, Note, PageObject, PageSize, Template,
+};
 use ardoise_ink::Stroke;
 use ardoise_share::NoteUpdate;
 use serde::Serialize;
@@ -11,15 +13,43 @@ use serde::Serialize;
 /// needs about this much).
 pub const PAPER_PX: u32 = 2560;
 
+/// Whether layer `layer` of `layers` is drawn: it is not hidden (a layer that does not exist is
+/// drawn, as `drawingOrder` in `live-render.ts` does).
+fn layer_drawn(layers: &[Layer], layer: u32) -> bool {
+    usize::try_from(layer)
+        .ok()
+        .and_then(|index| layers.get(index))
+        .is_none_or(|layer| layer.visible)
+}
+
 /// Whether the viewer draws `stroke`: its layer is not hidden (a stroke of a layer that does not
 /// exist is drawn, as `drawingOrder` in `live-render.ts` does). Strokes of a hidden layer never
 /// leave the PC: anyone with the code could read them in the stream, and a teacher hides an
 /// "answers" layer precisely to keep it to themselves.
 pub fn is_drawn(layers: &[Layer], stroke: &Stroke) -> bool {
-    usize::try_from(stroke.layer)
-        .ok()
-        .and_then(|index| layers.get(index))
-        .is_none_or(|layer| layer.visible)
+    layer_drawn(layers, stroke.layer)
+}
+
+/// Whether the viewer draws page object `object`: its layer is not hidden (the strokes' rule: the
+/// text of a hidden layer never leaves the PC either), and it is a text frame this version reads
+/// (a kind it does not know, or a frame in a font it does not know, is drawn nowhere: sent, it
+/// would only carry what nobody sees).
+pub fn is_object_drawn(layers: &[Layer], object: &PageObject) -> bool {
+    layer_drawn(layers, object.layer) && object.as_text().is_some()
+}
+
+/// The page objects a viewer gets of a page with `layers`: those it draws ([`is_object_drawn`]),
+/// in their order, as `note.json` writes them (the placement and the text frame's keys, camelCase)
+/// but for the keys this version does not know (an allow list, as for everything else shared).
+pub fn shared_objects(layers: &[Layer], objects: &[PageObject]) -> Vec<PageObject> {
+    objects
+        .iter()
+        .filter(|object| is_object_drawn(layers, object))
+        .map(|object| PageObject {
+            extra: serde_json::Map::new(),
+            ..object.clone()
+        })
+        .collect()
 }
 
 /// Plain paper: the viewer fills the page with the paper colour, nothing to render.
@@ -28,7 +58,7 @@ pub fn is_plain_paper(background: Background, image: bool) -> bool {
 }
 
 /// What the viewer draws of a note (`SharedPage` in `share.ts`): no title, tags, file, dates,
-/// layer names or stroke of a hidden layer.
+/// layer names, stroke or page object of a hidden layer.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SharedPage {
     pub id: String,
@@ -36,13 +66,17 @@ pub struct SharedPage {
     pub background: Background,
     pub layers: Vec<Layer>,
     pub strokes: Vec<Stroke>,
+    /// The text frames drawn ([`shared_objects`]); absent when there is none, as in `note.json`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub objects: Vec<PageObject>,
 }
 
 impl SharedPage {
     pub fn of(note: Note) -> SharedPage {
-        // Strokes refer to their layer by index: the layer list stays whole.
+        // Strokes and objects refer to their layer by index: the layer list stays whole.
         let mut strokes = note.strokes;
         strokes.retain(|stroke| is_drawn(&note.layers, stroke));
+        let objects = shared_objects(&note.layers, &note.objects);
         SharedPage {
             id: note.id,
             page: note.page,
@@ -57,15 +91,18 @@ impl SharedPage {
                 })
                 .collect(),
             strokes,
+            objects,
         }
     }
 
-    /// Same sheet: only strokes may differ.
+    /// Same sheet: only strokes may differ (a text frame added, moved, retyped or gone makes the
+    /// whole page go again).
     fn same_sheet(&self, other: &SharedPage) -> bool {
         self.id == other.id
             && self.page == other.page
             && self.background == other.background
             && self.layers == other.layers
+            && self.objects == other.objects
     }
 }
 
