@@ -6,6 +6,7 @@ import type { BackgroundSource, NotesProgress, StagedBackground } from './backgr
 import type { Decision, DiagnosticEvent, DiagnosticOptions } from './diagnostic';
 import type { LanguagePreference } from './i18n-core';
 import { t } from './i18n.svelte';
+import { PAGES_FIRST_CODE, pagesFirstText, pagesInMessage } from './live-pages-first';
 import type { InkspaceProgress, InkspaceReport, InkspaceSource } from './inkspace';
 import type {
   LiveBatch,
@@ -830,6 +831,11 @@ export function sentence(message: string): string {
 export function errorMessage(error: unknown): string {
   if (typeof error === 'object' && error !== null && 'code' in error && 'message' in error) {
     const { code, message } = error as { code: string; message: string };
+    if (code === PAGES_FIRST_CODE) {
+      // Its sentence holds a count that only the dialog knows (`live-pages-first.svelte.ts`); here the service's own.
+      const count = pagesInMessage(message);
+      return count === null ? message : pagesFirstText(count);
+    }
     const key = `errorCodes.${code}`;
     const text = t(key, { detail: message });
     return text === key ? message : text;

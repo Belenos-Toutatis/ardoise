@@ -12,7 +12,7 @@ import Home from './Home.svelte';
 // app state (the microphone chosen on their side) through the `onchange` they are given.
 interface DoubleProps {
   onchange?: (next: AppState) => void;
-  onclose?: () => void;
+  onclose?: (notice?: string, declined?: boolean) => void;
 }
 
 function double(name: string) {
@@ -27,6 +27,12 @@ function double(name: string) {
     back.textContent = `close ${name}`;
     back.addEventListener('click', () => props.onclose?.());
     anchor.before(back);
+    // The user gave up the question of the pages the Xiaomi tablet still holds (live view only).
+    const decline = document.createElement('button');
+    decline.dataset.doubleDecline = name;
+    decline.textContent = `decline ${name}`;
+    decline.addEventListener('click', () => props.onclose?.(undefined, true));
+    anchor.before(decline);
   };
 }
 
@@ -103,6 +109,35 @@ describe('the main window gives the app state to the editor and the live view', 
     await settle();
     target.querySelector<HTMLButtonElement>('button[data-double="live"]')!.click();
     expect(onchange).toHaveBeenCalledWith(expect.objectContaining({ microphone: 'mock-mic-2' }));
+  });
+});
+
+describe('giving up the « pages first » question of live mode', () => {
+  const openPanelAndAskLive = async (target: HTMLElement) => {
+    target.querySelector<HTMLElement>('.tablet-status')!.click();
+    await settle();
+    target.querySelector<HTMLButtonElement>('.tablet-panel button[data-action="live"]')!.click();
+    await settle();
+  };
+
+  it('gives the tablet panel back, with the focus on its « Live mode » button', async () => {
+    const { target } = await render();
+    await openPanelAndAskLive(target);
+    expect(target.querySelector('.tablet-panel')).toBeNull();
+    target.querySelector<HTMLButtonElement>('button[data-double-decline="live"]')!.click();
+    await settle();
+    expect(target.querySelector('.shell')!.classList.contains('shell-hidden')).toBe(false);
+    const button = target.querySelector<HTMLButtonElement>('.tablet-panel button[data-action="live"]');
+    expect(button).not.toBeNull();
+    expect(document.activeElement).toBe(button);
+  });
+
+  it('leaves the panel closed after an ordinary end of live mode', async () => {
+    const { target } = await render();
+    await openPanelAndAskLive(target);
+    target.querySelector<HTMLButtonElement>('button[data-double-close="live"]')!.click();
+    await settle();
+    expect(target.querySelector('.tablet-panel')).toBeNull();
   });
 });
 

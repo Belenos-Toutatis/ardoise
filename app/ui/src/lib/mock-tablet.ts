@@ -18,7 +18,7 @@ import type { InkPoint } from './ink';
 import { UNHANDLED, fileName, freshStamp, mockLibrary, notifyLibraryChanged } from './mock-data';
 import { failure, freePath, mockLibraryInvoke } from './mock-library';
 import type { Note, Stroke, TabletInfo } from './note';
-import { setMockLiveOrientation, setMockLiveTablet } from './mock-live';
+import { mockLiveBoardConnected, setMockLiveGate, setMockLiveOrientation, setMockLiveTablet } from './mock-live';
 import { DEFAULT_BOARD_POSITION, isBoardPosition } from './board-position';
 import { isOrientation, pageSizeFor, quarterTurns, turnStrokes, type Orientation } from './orientation';
 import type {
@@ -54,6 +54,8 @@ export const mockTablet = {
   boardsHeard: 1,
   /** Battery level the blackboard reports. */
   boardBattery: 90,
+  /** Pages the simulated blackboard holds when it is first looked at (live mode is refused while it holds some, §9.5). */
+  boardPages: 3,
   /** Beats until a search gives up (60 s in the service). */
   boardSearchBeats: 60,
 };
@@ -121,6 +123,7 @@ export function resetMockTablet(): void {
   mockTablet.boardInRange = true;
   mockTablet.boardsHeard = 1;
   mockTablet.boardBattery = 90;
+  mockTablet.boardPages = 3;
   mockTablet.boardSearchBeats = 60;
 }
 
@@ -226,8 +229,8 @@ function getSim(): Sim {
     pressWaiter: null,
     registering: null,
     board: null,
-    boardStored: [1, 2, 3],
-    boardNextPage: 4,
+    boardStored: Array.from({ length: mockTablet.boardPages }, (_, i) => i + 1),
+    boardNextPage: mockTablet.boardPages + 1,
     search: null,
   };
   created.status.known = knownOf(created);
@@ -321,6 +324,8 @@ function connected(s: Sim): void {
   const device = deviceOf(s, kind);
   if (!device) return;
   update(s, { connection: 'connected', active: kind, device, error: null });
+  // A live run that was waiting for the blackboard: refused when its pages may not be synced first, else they are synced.
+  if (kind === 'blackboard') mockLiveBoardConnected();
   const wanted = s.status.pending === 'sync';
   // The blackboard is read without being asked only with deletion on (it always deletes what it reads): with the
   // option off its pages wait for a sync confirmed by the user, and a sync that waited for it brings nothing.
@@ -484,6 +489,27 @@ function startSync(s: Sim): void {
   };
   next(0);
 }
+
+/**
+ * Live mode asked while the blackboard is the tablet connected and holds stored pages (as `TabletService::live_pages_first`):
+ * with the automatic sync and « Delete after import » both on they are synced first (the sync runs, live mode starts);
+ * otherwise live mode is refused until they are imported (`tablet_sync` confirmed).
+ */
+const liveGate = {
+  refusal(): number | null {
+    const status = sim?.status;
+    const device = status?.device;
+    const pages = status?.active === 'blackboard' && device?.kind === 'blackboard' ? device.storedPages : 0;
+    if (!status || pages === 0) return null;
+    return status.options.autoSync && status.options.deleteAfterImport ? null : pages;
+  },
+  asked(): void {
+    const s = sim;
+    if (!s || s.status.active !== 'blackboard' || s.status.connection !== 'connected') return;
+    if (s.boardStored.length > 0) startSync(s);
+  },
+};
+setMockLiveGate(liveGate);
 
 /** A page drawn on the simulated tablet (tests, `npm run dev`). */
 export function mockTabletDraw(count = 1): void {

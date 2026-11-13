@@ -312,6 +312,44 @@ export function setMockLiveTablet(kind: 'slate' | 'blackboard' | null): void {
   }
 }
 
+/**
+ * What the mock tablet says about asking live mode while the Xiaomi blackboard holds stored pages (SPEC §4.2): `refusal`
+ * is the number of pages that stop live mode (automatic sync or « Delete after import » off), null when it may start;
+ * `asked` is told when a new run is accepted (with both options on, the pages are synced first). Registered by
+ * `mock-tablet.ts`; without it, live mode is never refused.
+ */
+export interface MockLiveGate {
+  refusal(): number | null;
+  asked(): void;
+}
+let liveGate: MockLiveGate | null = null;
+
+export function setMockLiveGate(gate: MockLiveGate | null): void {
+  liveGate = gate;
+}
+
+/** The refusal of `live_start` and `live_resume` as Rust gives it (`pages_first_now`): nothing started. */
+function pagesFirstMessage(pages: number): string {
+  return `the Xiaomi tablet holds ${pages} stored pages: import them before live mode`;
+}
+
+function refuseWhenPagesFirst(): void {
+  const pages = liveGate?.refusal() ?? null;
+  if (pages !== null) throw { code: 'blackboardPagesFirst', message: pagesFirstMessage(pages) };
+}
+
+/**
+ * The blackboard connected (`status.device` read): a run that was waiting for it ends at once when it holds pages that
+ * may not be synced first, with the `refused` event and an `idle` snapshot (`LiveInput::PagesFirst`); with both options
+ * on, they are synced first. A run that reconnects after a lost link is not asked again.
+ */
+export function mockLiveBoardConnected(): void {
+  if (session?.state !== 'waiting' || liveGate === null) return;
+  const pages = liveGate.refusal();
+  if (pages === null) liveGate.asked();
+  else mockLiveRefuse('blackboardPagesFirst', pagesFirstMessage(pages));
+}
+
 /** As `resume::tablet_fits`: the blackboard writes only on a page of its own size, the Slate on every other sheet. */
 function tabletFits(kind: 'slate' | 'blackboard' | null, page: { width: number; height: number }): boolean {
   if (kind === null) return true;
@@ -1528,7 +1566,9 @@ function openSession(first: { page: Note; sheet: ResumedSheet } | null): LiveSna
 }
 
 function startSession(): LiveSnapshot {
+  refuseWhenPagesFirst();
   if (session) return snapshot();
+  liveGate?.asked();
   stoppedOnce = false;
   return openSession(null);
 }
@@ -1542,7 +1582,9 @@ function resumeSession(path: string): LiveSnapshot {
   if (!stored) throw { code: path.startsWith(library.root) ? 'noteNotFound' : 'notInLibrary', message: path };
   // Nothing started, the session shown before goes on.
   if (!tabletFits(activeTablet, stored.note.page)) throw { code: 'sheetOtherTablet', message: path };
+  refuseWhenPagesFirst();
   stopSession();
+  liveGate?.asked();
   const page = copy(stored.note);
   pageOrientation.set(page.id, heldAs);
   const last = page.strokes.reduce((end, stroke) => Math.max(end, stroke.points.at(-1)?.t ?? 0), 0);
@@ -1724,11 +1766,11 @@ export function mockLiveEmit(events: LiveEvent[]): void {
  * The tablet that connected cannot write on the resumed sheet: the session ends at once, the window is told (`refused`)
  * and gets an `idle` snapshot, as Rust does when the tablet connects after `live_resume` was accepted.
  */
-export function mockLiveRefuse(code = 'sheetOtherTablet'): void {
+export function mockLiveRefuse(code = 'sheetOtherTablet', message = ''): void {
   const s = running();
   stopTimers(s);
   session = null;
-  broadcast([{ type: 'refused', code, message: '' }, { type: 'snapshot', snapshot: snapshot() }]);
+  broadcast([{ type: 'refused', code, message }, { type: 'snapshot', snapshot: snapshot() }]);
 }
 
 /** The tablet's link drops for `ms`, then comes back. */

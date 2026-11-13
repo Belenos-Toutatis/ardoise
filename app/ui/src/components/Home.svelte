@@ -50,6 +50,8 @@
   let openPath = $state<string | null>(null);
   /** Live mode resumes this note (M12) instead of starting on a blank page; null for a new session. */
   let resumePath = $state<string | null>(null);
+  /** Live mode was asked from the tablet panel's « Live mode » button: where the focus goes back if the user gives up. */
+  let liveFromPanel = false;
   let searchInput = $state<HTMLInputElement | null>(null);
   let shell = $state<HTMLElement | null>(null);
   /** The editor or live mode shows over the library, which stays mounted (hidden) meanwhile. */
@@ -210,6 +212,7 @@
   }
 
   function openLive() {
+    liveFromPanel = panel === 'tablet';
     panel = null;
     leaveLibrary(null);
     resumePath = null;
@@ -221,6 +224,7 @@
    * let go of its changes first): live mode takes the window on that note.
    */
   function resumeLive(path: string) {
+    liveFromPanel = false;
     panel = null;
     if (openPath !== null && returnTo) returnTo.path = path;
     else leaveLibrary(path);
@@ -229,13 +233,23 @@
     liveOpen = true;
   }
 
-  /** `notice`: what live mode has to say on the way out (a recording that could not be kept). */
-  function closeLive(notice?: unknown) {
+  /**
+   * `notice`: what live mode has to say on the way out (a recording that could not be kept). `declined`: the user gave up
+   * the question of the pages the Xiaomi tablet still holds; from the tablet panel's button, the panel and that button
+   * are given back (a card or the editor gets its card's focus, as always).
+   */
+  function closeLive(notice?: unknown, declined?: boolean) {
+    const toPanel = declined === true && liveFromPanel;
     liveOpen = false;
     resumePath = null;
     void lib.refresh();
     if (typeof notice === 'string') lib.notice = notice;
-    void backToLibrary();
+    if (toPanel) panel = 'tablet';
+    void backToLibrary().then(async () => {
+      if (!toPanel) return;
+      await tick();
+      shell?.querySelector<HTMLElement>('[data-action="live"]')?.focus({ preventScroll: true });
+    });
   }
 
   function closeEditor() {

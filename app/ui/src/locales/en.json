@@ -832,7 +832,8 @@
     "blackboardConfirmDelete": "The Xiaomi tablet's pages are imported only with your agreement: they are deleted from the tablet once imported, because it gives only its oldest page. Confirm the sync to go on.",
     "pageUnreadable": "The Xiaomi tablet sent a page that Ardoise cannot read: that page was not imported and stays on the tablet, and so do the pages stored after it (the tablet gives only its oldest page). Import them with Mi Home, and keep the diagnostic log (the _ardoise\\diagnostics folder of the library).",
     "sheetOtherTablet": "This sheet cannot be continued with this tablet: a Bamboo Slate sheet is continued with the Bamboo Slate, a page of the Xiaomi tablet with the Xiaomi tablet. This tablet wrote nothing on the note.",
-    "blackboardPagesFirst": "The Xiaomi tablet still holds stored pages ({count}): erasing its screen during live mode could lose the page of the screen in progress. Import them first; they are deleted from the tablet once imported. Live mode can start afterwards.",
+    "blackboardPagesFirst": "The Xiaomi tablet still holds {count} stored pages. Erasing its screen during live mode could lose the page of the screen in progress, so import them first. They are deleted from the tablet once imported, and live mode starts afterwards.",
+    "blackboardPagesFirstOne": "The Xiaomi tablet still holds 1 stored page. Erasing its screen during live mode could lose the page of the screen in progress, so import it first. It is deleted from the tablet once imported, and live mode starts afterwards.",
     "pageRescued": "A page of the Xiaomi tablet could not be written in the library, and the tablet no longer holds it: Ardoise kept a rescue copy (the _ardoise\\rescued-pages folder of the library, or the Ardoise\\blackboard-rescue folder of this PC's local data) and will import it at the next sync. Check that the library can be reached and has room left.",
     "pageDoubtful": "A page of the Xiaomi tablet was not received cleanly, and the tablet may no longer hold it: what came is kept apart (the _ardoise\\rescued-pages\\doubtful folder of the library) and was not made into a note. If a note of that page was made, check it, and keep the diagnostic log.",
     "pageNotSaved": "A page of the Xiaomi tablet could be written neither in the library nor on this PC, and the tablet no longer holds it: Ardoise keeps it in memory and will try again at the next sync. Do not close Ardoise until then; make the library reachable or free some room, then sync again."
@@ -1928,6 +1929,13 @@
       "title": "Quit Ardoise?",
       "message": "Live mode stops and every page you wrote is saved as a note in the library.",
       "confirm": "Quit Ardoise"
+    },
+    "pagesFirst": {
+      "title": "Import the tablet's pages first",
+      "confirm": "Import and delete",
+      "importing": "Importing the Xiaomi tablet's pages…",
+      "failed": "The pages could not be imported: {reason}",
+      "lost": "The tablet is no longer connected: the import stopped. Pages that were not imported stay on the tablet."
     },
     "page": {
       "help": "For the current page, on the projector and on the share too. A new page keeps this paper.",

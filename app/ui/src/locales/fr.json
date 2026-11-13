@@ -832,7 +832,8 @@
     "blackboardConfirmDelete": "Les pages de la tablette Xiaomi ne sont importées qu'après votre accord : elles sont effacées de la tablette une fois importées, car elle ne donne que sa page la plus ancienne. Confirmez la synchronisation pour continuer.",
     "pageUnreadable": "La tablette Xiaomi a envoyé une page qu'Ardoise ne sait pas lire : cette page n'a pas été importée et reste sur la tablette, comme celles qui ont été enregistrées après elle (la tablette ne donne que sa page la plus ancienne). Importez-les avec Mi Home, et gardez le journal de diagnostic (dossier _ardoise\\diagnostics de la bibliothèque).",
     "sheetOtherTablet": "Cette feuille ne peut pas être continuée avec cette tablette : une feuille de la Bamboo Slate se continue avec la Bamboo Slate, une page de la tablette Xiaomi avec la tablette Xiaomi. Cette tablette n'a rien écrit sur la note.",
-    "blackboardPagesFirst": "La tablette Xiaomi contient encore des pages enregistrées ({count}) : effacer son écran pendant le direct pourrait faire perdre la page de l'écran en cours. Importez-les d'abord ; elles sont effacées de la tablette une fois importées. Le direct pourra commencer ensuite.",
+    "blackboardPagesFirst": "La tablette Xiaomi contient encore {count} pages enregistrées. Effacer son écran pendant le direct pourrait faire perdre la page de l'écran en cours : importez-les d'abord. Elles sont effacées de la tablette une fois importées, et le direct commence ensuite.",
+    "blackboardPagesFirstOne": "La tablette Xiaomi contient encore 1 page enregistrée. Effacer son écran pendant le direct pourrait faire perdre la page de l'écran en cours : importez-la d'abord. Elle est effacée de la tablette une fois importée, et le direct commence ensuite.",
     "pageRescued": "Une page de la tablette Xiaomi n'a pas pu être écrite dans la bibliothèque, et la tablette ne la garde plus : Ardoise en a gardé une copie de secours (dossier _ardoise\\rescued-pages de la bibliothèque, ou dossier Ardoise\\blackboard-rescue des données locales de ce PC) et l'importera à la prochaine synchronisation. Vérifiez que la bibliothèque est accessible et qu'il reste de la place.",
     "pageDoubtful": "Une page de la tablette Xiaomi n'a pas été reçue proprement, et la tablette ne la garde peut-être plus : ce qui est arrivé est gardé à part (dossier _ardoise\\rescued-pages\\doubtful de la bibliothèque), sans en faire une note. Si une note de cette page a été faite, vérifiez-la, et gardez le journal de diagnostic.",
     "pageNotSaved": "Une page de la tablette Xiaomi n'a pu être écrite ni dans la bibliothèque ni sur ce PC, et la tablette ne la garde plus : Ardoise la garde en mémoire et réessaiera à la prochaine synchronisation. Ne fermez pas Ardoise d'ici là, rendez la bibliothèque accessible ou libérez de la place, puis synchronisez de nouveau."
@@ -1928,6 +1929,13 @@
       "title": "Quitter Ardoise ?",
       "message": "Le mode direct s'arrête et chaque page écrite est enregistrée comme une note de la bibliothèque.",
       "confirm": "Quitter Ardoise"
+    },
+    "pagesFirst": {
+      "title": "Importer d'abord les pages de la tablette",
+      "confirm": "Importer et effacer",
+      "importing": "Import des pages de la tablette Xiaomi…",
+      "failed": "L'import des pages n'a pas abouti : {reason}",
+      "lost": "La tablette n'est plus connectée : l'import est interrompu. Les pages qui n'ont pas été importées restent sur la tablette."
     },
     "page": {
       "help": "Pour la page en cours, au vidéoprojecteur et sur le partage aussi. Une nouvelle page garde ce papier.",

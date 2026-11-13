@@ -82,6 +82,7 @@
   import { isSpaceKey, isTypingTarget, liveEditKeyAction, liveKeyAction, type LiveEditKeyAction } from '../../lib/live-keys';
   import { LiveSelection } from '../../lib/live-select.svelte';
   import { LIVE_SHORTCUTS } from '../../lib/live-shortcuts';
+  import { PagesFirst } from '../../lib/live-pages-first.svelte';
   import { LiveState, subscribeLive } from '../../lib/live-state.svelte';
   import { deleteSelected, recolourSelected, stepHistory, transformSelected, type TouchUp } from '../../lib/live-touch-up';
   import { MAX_ZOOM, MIN_ZOOM, aspectOf, defaultMonitor } from '../../lib/live-view';
@@ -106,6 +107,7 @@
   import PaperBlock from '../editor/PaperBlock.svelte';
   import ComputerStyle from './ComputerStyle.svelte';
   import LiveCanvas from './LiveCanvas.svelte';
+  import PagesFirstDialog from './PagesFirstDialog.svelte';
 
   let {
     app,
@@ -116,8 +118,11 @@
     app: AppState;
     /** The note of the library to resume live mode on (M12); null: a new session on a blank page. */
     resume?: string | null;
-    /** The view is done; `notice` is something the library says on coming back (a recording that was lost). */
-    onclose: (notice?: string) => void;
+    /**
+     * The view is done; `notice` is something the library says on coming back (a recording that was lost).
+     * `declined` (passed only when true): the user gave up at the « pages first » question, nothing was started.
+     */
+    onclose: (notice?: string, declined?: boolean) => void;
     /** The app state changed (the microphone chosen here): the screen holding it takes the new one. */
     onchange?: (next: AppState) => void;
   } = $props();
@@ -192,6 +197,15 @@
   let latencyUi = $state<number | null>(null);
   let latencyCount = $state(0);
   let narrationOpen = $state(false);
+  /**
+   * The Xiaomi tablet still holds stored pages and may not sync them first (SPEC §4.2): the question that imports
+   * them, then asks live mode again. Every start of live mode, whoever asked (the tablet panel, a card, the editor),
+   * passes through `start` below, so this is the one place that meets the refusal.
+   */
+  const pagesFirst = new PagesFirst(
+    () => void start(),
+    () => leave(undefined, true),
+  );
   /** Esc asked to end live mode: waiting for the answer. */
   let confirmLeave = $state(false);
   /** Ctrl + Q asked to quit Ardoise: waiting for the answer. */
@@ -419,8 +433,12 @@
 
   // A resume accepted while the tablet was not there yet, then refused when it connected (it cannot write on this sheet):
   // the same banner as a refused `live_resume`, with the same ways out (try again, back to the library).
+  // The refusal for the pages the Xiaomi still holds is a question (`pagesFirst`), not a banner.
   $effect(() => {
-    if (live.refused) startError = errorMessage(live.refused);
+    const refused = live.refused;
+    if (!refused) return;
+    if (pagesFirst.refuse(refused)) untrack(() => live.clearRefused());
+    else startError = errorMessage(refused);
   });
 
   async function start() {
@@ -437,7 +455,7 @@
       if (resume !== null) sheetTitle = snapshot.page.title.trim();
       live.adoptStart(snapshot);
     } catch (error) {
-      if (!destroyed) startError = errorMessage(error);
+      if (!destroyed && !pagesFirst.refuse(error)) startError = errorMessage(error);
     } finally {
       starting = false;
     }
@@ -511,9 +529,10 @@
   }
 
   /** The view goes: the library is shown again, with `message` if there is one to say. */
-  function leave(message?: string) {
+  function leave(message?: string, declined = false) {
     live.close();
-    onclose(message);
+    if (declined) onclose(message, true);
+    else onclose(message);
   }
 
   /**
@@ -833,7 +852,7 @@
 
   function onkeydown(e: KeyboardEvent) {
     // The question about ending live mode has its own keys.
-    if (e.defaultPrevented || confirmLeave || confirmQuit || mergeAsk || share.panelOpen) return;
+    if (e.defaultPrevented || confirmLeave || confirmQuit || mergeAsk || pagesFirst.open || share.panelOpen) return;
     if (e.key === 'Escape') {
       // Esc drops a gesture of the computer's pen or eraser under way before anything else, then closes
       // the computer's ink panel.
@@ -863,7 +882,7 @@
 
   /** Space is "next page" already on key down: a focused button must not also be pressed on key up. */
   function onkeyup(e: KeyboardEvent) {
-    if (isSpaceKey(e.key) && !confirmLeave && !confirmQuit && !mergeAsk && !share.panelOpen && !isTypingTarget(e.target)) e.preventDefault();
+    if (isSpaceKey(e.key) && !confirmLeave && !confirmQuit && !mergeAsk && !pagesFirst.open && !share.panelOpen && !isTypingTarget(e.target)) e.preventDefault();
   }
 
   const mm = (units: number) => (units / 100).toFixed(units < 100 ? 2 : 1);
@@ -1390,6 +1409,8 @@
       </div>
     </Modal>
   {/if}
+
+  <PagesFirstDialog controller={pagesFirst} />
 
   {#if confirmQuit}
     <Modal title={t('live.quit.title')} onclose={() => (confirmQuit = false)}>

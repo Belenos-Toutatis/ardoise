@@ -54,6 +54,8 @@ beforeEach(() => {
   mockLiveConfig.waitMs = 30;
   mockTablet.stepMs = 10;
   mockTablet.inRange = false;
+  // Live mode is not started while the blackboard holds pages that may not be synced first (§9.5): these tests are not about that.
+  mockTablet.boardPages = 0;
 });
 
 afterEach(() => {
