@@ -346,6 +346,33 @@ fn restoring_the_draft_of_a_revision_as_a_copy_makes_an_ordinary_note() {
     );
 }
 
+/// The text frames of the unsaved note survive the draft and the copy made of it, unknown keys
+/// and kinds of a later version included.
+#[test]
+fn a_draft_and_its_copy_keep_the_text_frames() {
+    let (dir, library) = library();
+    let store = DraftStore::new(dir.path().join("drafts"));
+    let root = path_text(dir.path());
+    let mut draft = record(&root, "n1", 1000, "s1");
+    let mut frame = crate::live::tests::text_frame("cadre-1", 0, 2400, 3000.0, 4000.0);
+    frame
+        .extra
+        .insert("fromTheFuture".into(), serde_json::json!({"a": 1}));
+    let later: ardoise_core::note::PageObject = serde_json::from_value(serde_json::json!({
+        "kind": "equation", "id": "eq-1", "x": 100, "y": 200, "width": 50, "height": 20,
+        "latex": "x^2"
+    }))
+    .unwrap();
+    draft.note.objects = vec![frame, later];
+    store.write(&draft, None).unwrap();
+    let read = store.read(&root, "n1").unwrap();
+    assert_eq!(read.note.objects, draft.note.objects);
+
+    let copy = restore_copy_in(&library, &read, None, "Récupérée").unwrap();
+    let loaded = library.read(Path::new(&copy.path)).unwrap();
+    assert_eq!(loaded.file.note.objects, draft.note.objects);
+}
+
 #[test]
 fn a_copy_keeps_the_image_kept_with_the_draft_and_drops_one_without_pixels() {
     let (dir, library) = library();
