@@ -5,7 +5,7 @@ use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 use ardoise_core::library::{FileStamp, Library, LoadedNote, NoteEntry};
-use ardoise_core::note::{Note, PageObject, PageSize, TextBody};
+use ardoise_core::note::{Note, ObjectBody, PageObject, PageSize, TextBody};
 use ardoise_hwr::Bounds;
 use ardoise_ink::Rgba;
 use chrono::{
@@ -255,13 +255,30 @@ pub fn text_frame_json(note: &Note, object: &PageObject, body: &TextBody) -> ser
     })
 }
 
+/// The page's bookmarks as the assistant reads them: label and the centre of their box on the page in
+/// millimetres, in reading order. Marks the user put on the page; not drawn by `render_note`.
+pub fn bookmarks_json(note: &Note) -> serde_json::Value {
+    note.bookmark_objects()
+        .into_iter()
+        .map(|(object, body)| {
+            let [x, y] = object.page_centre();
+            serde_json::json!({
+                "id": object.id,
+                "label": body.label.trim(),
+                "at_mm": { "x": mm(x), "y": mm(y) },
+            })
+        })
+        .collect::<Vec<_>>()
+        .into()
+}
+
 /// The page objects this version cannot read (a kind of a later version): how many, and their
 /// kinds. `None` when there is none.
 pub fn other_objects_json(note: &Note) -> Option<serde_json::Value> {
     let mut kinds: Vec<&str> = note
         .objects
         .iter()
-        .filter(|object| object.as_text().is_none())
+        .filter(|object| matches!(object.body, ObjectBody::Unknown { .. }))
         .map(|object| object.body.kind())
         .collect();
     if kinds.is_empty() {

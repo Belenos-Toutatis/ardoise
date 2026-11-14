@@ -21,8 +21,9 @@ use ardoise_core::library::{Library, LibraryError, note_file_stem};
 use ardoise_core::note::Note;
 use ardoise_render::{
     LayerMode, MAX_DPI, MIN_DPI, NoteView, OutlineEntry, PdfOptions, PdfPage, Picture, RenderError,
-    RenderOptions, SvgOptions, encode_jpeg_at, encode_png_at, encode_webp, note_to_svg,
-    notes_to_pdf, notes_to_pdf_with_outline, render_note, render_note_transparent, scale_for_dpi,
+    RenderOptions, SvgOptions, bookmark_outline, encode_jpeg_at, encode_png_at, encode_webp,
+    note_to_svg, notes_to_pdf, notes_to_pdf_with_outline, render_note, render_note_transparent,
+    scale_for_dpi,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -148,7 +149,16 @@ pub struct OutlineSpec {
 /// bookmark goes to its first note, and holds those of the notes and sub-binders it contains).
 /// A binder that comes up again after another one (the sub-binders follow the sidebar's order, so
 /// the notes of one are together) is not repeated.
+#[cfg(test)]
 pub fn outline_entries(specs: &[OutlineSpec]) -> Vec<OutlineEntry> {
+    outline_with_bookmarks(specs, &[])
+}
+
+/// [`outline_entries`] with, under each note's bookmark, the bookmarks of that note's page
+/// (`notes[i]` is the note of `specs[i]`; a shorter list, or none, leaves those notes without):
+/// one level deeper than the note, in reading order, each going to its spot on the page
+/// (SPEC §4.6 « Exporter un classeur en PDF »).
+pub fn outline_with_bookmarks(specs: &[OutlineSpec], notes: &[&Note]) -> Vec<OutlineEntry> {
     let mut entries = Vec::new();
     let mut open: Vec<&str> = Vec::new();
     for (page, spec) in specs.iter().enumerate() {
@@ -163,6 +173,7 @@ pub fn outline_entries(specs: &[OutlineSpec]) -> Vec<OutlineEntry> {
                 title: name.clone(),
                 level,
                 page,
+                at: None,
             });
             open.push(name);
         }
@@ -170,7 +181,11 @@ pub fn outline_entries(specs: &[OutlineSpec]) -> Vec<OutlineEntry> {
             title: spec.title.clone(),
             level: spec.path.len(),
             page,
+            at: None,
         });
+        if let Some(note) = notes.get(page) {
+            entries.extend(bookmark_outline(note, page, spec.path.len() + 1));
+        }
     }
     entries
 }
@@ -425,8 +440,13 @@ pub fn export_with_outline(
         [] => Err(export_error("nothing to export")),
         _ if format == ExportFormat::Pdf => {
             let notes: Vec<NoteView<'_>> = sources.iter().map(LoadedSource::view).collect();
+            // A binder's PDF: a bookmark per note with its own bookmarks under it. A PDF of one note
+            // gets that note's bookmarks as its outline.
             let entries = if outline.len() == sources.len() {
-                outline_entries(outline)
+                let notes: Vec<&Note> = sources.iter().map(|source| &source.note).collect();
+                outline_with_bookmarks(outline, &notes)
+            } else if let [single] = sources {
+                bookmark_outline(&single.note, 0, 0)
             } else {
                 Vec::new()
             };
@@ -835,6 +855,7 @@ mod tests {
             title: title.to_owned(),
             level,
             page,
+            at: None,
         }
     }
 
@@ -937,6 +958,165 @@ mod tests {
         )
         .unwrap();
         assert_eq!(written.len(), 2);
+    }
+
+    /// A note with bookmarks, given to the export as it is in the editor.
+    fn marked(title: &str, labels: &[(&str, f32)]) -> Note {
+        let mut note = sample_note(title);
+        for (i, (label, y)) in labels.iter().enumerate() {
+            note.objects.push(ardoise_core::note::PageObject::bookmark(
+                format!("b{i}"),
+                0,
+                0,
+                500.0,
+                *y,
+                *label,
+            ));
+        }
+        note
+    }
+
+    /// The outline entries `(level, title, page, has a spot)` of a PDF, in order.
+    fn pdf_outline(bytes: &[u8]) -> Vec<(usize, String, usize, bool)> {
+        use lopdf::{Document, Object};
+        fn text(object: &Object) -> String {
+            let Object::String(bytes, _) = object else {
+                panic!("a title")
+            };
+            match bytes.as_slice() {
+                [0xfe, 0xff, rest @ ..] => String::from_utf16_lossy(
+                    &rest
+                        .chunks(2)
+                        .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                        .collect::<Vec<_>>(),
+                ),
+                plain => String::from_utf8_lossy(plain).into_owned(),
+            }
+        }
+        let document = Document::load_mem(bytes).unwrap();
+        let pages: Vec<_> = document.get_pages().values().copied().collect();
+        let Ok(root) = document.catalog().unwrap().get(b"Outlines") else {
+            return Vec::new();
+        };
+        let root = document
+            .get_dictionary(root.as_reference().unwrap())
+            .unwrap();
+        let mut out = Vec::new();
+        fn walk(
+            document: &Document,
+            first: lopdf::ObjectId,
+            depth: usize,
+            pages: &[lopdf::ObjectId],
+            out: &mut Vec<(usize, String, usize, bool)>,
+        ) {
+            let mut current = Some(first);
+            while let Some(id) = current {
+                let item = document.get_dictionary(id).unwrap();
+                let Object::Array(dest) = item.get(b"Dest").unwrap() else {
+                    panic!("a destination")
+                };
+                let page = pages
+                    .iter()
+                    .position(|p| *p == dest[0].as_reference().unwrap())
+                    .unwrap();
+                out.push((
+                    depth,
+                    text(item.get(b"Title").unwrap()),
+                    page,
+                    dest[1].as_name().unwrap() == b"XYZ",
+                ));
+                if let Ok(child) = item.get(b"First") {
+                    walk(
+                        document,
+                        child.as_reference().unwrap(),
+                        depth + 1,
+                        pages,
+                        out,
+                    );
+                }
+                current = item.get(b"Next").ok().map(|n| n.as_reference().unwrap());
+            }
+        }
+        walk(
+            &document,
+            root.get(b"First").unwrap().as_reference().unwrap(),
+            0,
+            &pages,
+            &mut out,
+        );
+        out
+    }
+
+    /// Bookmarks (SPEC §4.4, §4.6): under each note's bookmark in a binder's PDF, the outline of a PDF of
+    /// one note, and nothing for a PDF of several notes that is not a binder's.
+    #[test]
+    fn the_bookmarks_of_a_note_go_into_the_outline_of_its_pdf() {
+        let specs = [spec(&[], "Cours"), spec(&["3e B"], "TP")];
+        let first = marked("Cours", &[("Seconde", 3000.0), ("Première", 1000.0)]);
+        let second = marked("TP", &[("Bilan", 2000.0)]);
+        let notes = [&first, &second];
+        assert_eq!(
+            outline_with_bookmarks(&specs, &notes)
+                .iter()
+                .map(|e| (e.level, e.title.as_str(), e.page, e.at.is_some()))
+                .collect::<Vec<_>>(),
+            [
+                (0, "Cours", 0, false),
+                (1, "Première", 0, true),
+                (1, "Seconde", 0, true),
+                (0, "3e B", 1, false),
+                (1, "TP", 1, false),
+                (2, "Bilan", 1, true),
+            ]
+        );
+        // Without notes, the outline of before.
+        assert_eq!(outline_with_bookmarks(&specs, &[]), outline_entries(&specs));
+
+        let out = tempfile::tempdir().unwrap();
+        let export = |sources: Vec<ExportSource>, outline: &[OutlineSpec]| {
+            let destination = out.path().join("sortie.pdf");
+            export_sources_with_outline(
+                None,
+                sources,
+                ExportFormat::Pdf,
+                &options(150, true),
+                &destination,
+                &NOT_CANCELLED,
+                outline,
+            )
+            .unwrap();
+            fs::read(&destination).unwrap()
+        };
+        let binder = export(
+            vec![in_memory(first.clone()), in_memory(second.clone())],
+            &specs,
+        );
+        assert_eq!(
+            pdf_outline(&binder),
+            [
+                (0, "Cours".to_owned(), 0, false),
+                (1, "Première".to_owned(), 0, true),
+                (1, "Seconde".to_owned(), 0, true),
+                (0, "3e B".to_owned(), 1, false),
+                (1, "TP".to_owned(), 1, false),
+                (2, "Bilan".to_owned(), 1, true),
+            ]
+        );
+        // One note: its bookmarks are the outline.
+        let single = export(vec![in_memory(first.clone())], &[]);
+        assert_eq!(
+            pdf_outline(&single),
+            [
+                (0, "Première".to_owned(), 0, true),
+                (0, "Seconde".to_owned(), 0, true),
+            ]
+        );
+        // Several notes without a binder's outline: none, as before.
+        let several = export(vec![in_memory(first), in_memory(second)], &[]);
+        assert!(pdf_outline(&several).is_empty());
+        // A note without a bookmark: the PDF of before, with no outline.
+        let plain = export(vec![in_memory(sample_note("Rien"))], &[]);
+        assert!(pdf_outline(&plain).is_empty());
     }
 
     /// The sample note with a second layer holding a stroke of its own, and a hidden one.

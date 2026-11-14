@@ -13,7 +13,9 @@
 //! layer name over the whole document, so that a viewer can show or hide it.
 //!
 //! Outline (bookmarks): [`notes_to_pdf_with_outline`] writes the document outline of the viewer's
-//! bookmarks panel from a flat list of [`OutlineEntry`] (title, depth, page), all entries open.
+//! bookmarks panel from a flat list of [`OutlineEntry`] (title, depth, page, and the spot of the page
+//! when there is one), all entries open. The bookmarks of a note (SPEC §4.4 « Signets ») are entries
+//! with a spot: [`bookmark_outline`].
 //!
 //! Text frames: each layer's frames are painted over its strokes as filled paths, the glyph
 //! outlines with their curves (quadratic curves written as the cubic curves they are), so the
@@ -28,6 +30,7 @@
 
 use std::collections::HashMap;
 
+use ardoise_core::note::Note;
 use ardoise_text::{FontFamily, TextStyle, layout};
 use pdf_writer::types::{BlendMode, PageMode, TextRenderingMode};
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str, TextStr};
@@ -82,12 +85,35 @@ impl Default for PdfOptions {
 }
 
 /// One bookmark of a PDF's outline: a title, how deep it is (0 = top level; an entry one level
-/// deeper than the one before it is its child), and the 0-based page it goes to.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// deeper than the one before it is its child), the 0-based page it goes to, and the spot of that
+/// page it scrolls to (`[x, y]` in the note's device units from its top-left corner; `None`: the
+/// page as a whole).
+#[derive(Debug, Clone, PartialEq)]
 pub struct OutlineEntry {
     pub title: String,
     pub level: usize,
     pub page: usize,
+    pub at: Option<[f32; 2]>,
+}
+
+/// How far above a bookmark's box the viewer's window starts when it goes there, device units (5 mm).
+const BOOKMARK_LEAD: f32 = 500.0;
+
+/// The outline entries of `note`'s bookmarks, in reading order, all at `level`, going to page `page`
+/// at the spot of each (a little above it). Empty without a bookmark.
+pub fn bookmark_outline(note: &Note, page: usize, level: usize) -> Vec<OutlineEntry> {
+    note.bookmark_objects()
+        .into_iter()
+        .map(|(object, body)| {
+            let [left, top, _, _] = object.page_bounds();
+            OutlineEntry {
+                title: body.label.trim().to_owned(),
+                level,
+                page,
+                at: Some([left.max(0.0), (top - BOOKMARK_LEAD).max(0.0)]),
+            }
+        })
+        .collect()
 }
 
 /// A PDF document with one page per note, in order (`&Note`s, or [`NoteView`]s for notes
@@ -123,6 +149,14 @@ where
     let info = next.bump();
     let pages: Vec<Ref> = notes.iter().map(|_| next.bump()).collect();
     let bookmarks = Bookmarks::of(outline, notes.len(), &mut next);
+    let places: Vec<Placement> = notes
+        .iter()
+        .map(|&view| {
+            let view: NoteView<'_> = view.into();
+            let page = view.note.page;
+            Placement::of(page.width as f32, page.height as f32, options.page)
+        })
+        .collect();
     let separate = options.layers == LayerMode::Separate;
     if !separate {
         let mut root = pdf.catalog(catalog);
@@ -134,7 +168,7 @@ where
         root.finish();
     }
     if let Some(bookmarks) = &bookmarks {
-        bookmarks.write(&mut pdf, &pages);
+        bookmarks.write(&mut pdf, &pages, &places);
     }
     pdf.pages(tree).kids(pages.iter().copied()).count(count);
     let mut groups = Groups::default();
@@ -201,6 +235,7 @@ struct Bookmark {
     id: Ref,
     title: String,
     page: usize,
+    at: Option<[f32; 2]>,
     parent: Option<usize>,
     children: Vec<usize>,
 }
@@ -222,6 +257,7 @@ impl Bookmarks {
                 id: next.bump(),
                 title: entry.title.clone(),
                 page: entry.page,
+                at: entry.at,
                 parent,
                 children: Vec::new(),
             });
@@ -247,7 +283,7 @@ impl Bookmarks {
             .sum()
     }
 
-    fn write(&self, pdf: &mut Pdf, pages: &[Ref]) {
+    fn write(&self, pdf: &mut Pdf, pages: &[Ref], places: &[Placement]) {
         let (first, last) = (self.top[0], self.top[self.top.len() - 1]);
         let mut root = pdf.outline(self.root);
         root.first(self.items[first].id)
@@ -274,7 +310,20 @@ impl Bookmarks {
                     .last(self.items[*last].id)
                     .count(self.below(index));
             }
-            dict.dest().page(pages[item.page]).fit();
+            match (item.at, places.get(item.page)) {
+                (Some([x, y]), Some(place)) => {
+                    // The spot as the content stream's transform puts it, in the page's user space
+                    // (y up).
+                    let left = place.left + x * place.scale;
+                    let top = place.height - (place.top + y * place.scale);
+                    dict.dest()
+                        .page(pages[item.page])
+                        .xyz(round(left), round(top), None);
+                }
+                _ => {
+                    dict.dest().page(pages[item.page]).fit();
+                }
+            }
             dict.finish();
         }
     }
@@ -1037,6 +1086,7 @@ mod tests {
             title: title.to_owned(),
             level,
             page,
+            at: None,
         }
     }
 

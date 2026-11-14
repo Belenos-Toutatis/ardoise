@@ -44,7 +44,9 @@ pub use canvas::{Backdrop, PageCanvas, PixelRect, PreparedObject, PreparedStroke
 pub use clipboard::{ClipboardImage, clipboard_image, clipboard_image_at};
 pub use labels::{LABEL_HEIGHT_PX, LabelSpot, draw_labels};
 pub use look::{Blend, Fill, Grain, Look};
-pub use pdf::{OutlineEntry, PdfOptions, PdfPage, notes_to_pdf, notes_to_pdf_with_outline};
+pub use pdf::{
+    OutlineEntry, PdfOptions, PdfPage, bookmark_outline, notes_to_pdf, notes_to_pdf_with_outline,
+};
 pub use picture::{NoteView, Picture, PictureError, PictureFormat, StoredImage};
 pub use svg::{SvgOptions, note_to_svg};
 
@@ -1027,21 +1029,25 @@ pub(crate) mod tests {
                 title: "Classe".into(),
                 level: 0,
                 page: 0,
+                at: None,
             },
             OutlineEntry {
                 title: "Cours d'électricité".into(),
                 level: 1,
                 page: 0,
+                at: None,
             },
             OutlineEntry {
                 title: "TP".into(),
                 level: 1,
                 page: 1,
+                at: None,
             },
             OutlineEntry {
                 title: "Autre".into(),
                 level: 0,
                 page: 2,
+                at: None,
             },
         ];
         let pdf =

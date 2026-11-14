@@ -1007,6 +1007,8 @@ fn text_frames_appear_whole_at_their_time_in_drawing_order() {
         // A hidden layer and a kind this version does not draw: never drawn, never waited for.
         text_at(2, 9000, (800.0, 3000.0), "Caché", RED),
         unknown,
+        // A bookmark is the editor's only (SPEC §4.4 « Signets »): never drawn, never waited for.
+        PageObject::bookmark("signet", 0, 9800, 800.0, 3200.0, "Signet"),
     ];
     let t = Timeline::new(&n, &ReplayOptions::default()).unwrap();
     assert_eq!(t.duration(), ms(3000));
@@ -1023,6 +1025,7 @@ fn text_frames_appear_whole_at_their_time_in_drawing_order() {
     assert_eq!(t.drawing_order(), [0, 1, 2]);
     assert!(!t.object_shown(0, 1499.0) && t.object_shown(0, 1500.0));
     assert!(!t.object_shown(2, 1e9) && !t.object_shown(3, 1e9) && !t.object_shown(9, 1e9));
+    assert!(!t.object_shown(4, 1e9), "a bookmark is not shown");
     assert_eq!(t.item_shown(DrawItem::Object(1), 2500.0), 1);
     assert!(t.note_at(ms(1499)).objects.is_empty());
     assert_eq!(t.note_at(ms(1500)).objects, n.objects[..1]);
