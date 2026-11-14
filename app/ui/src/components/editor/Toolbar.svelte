@@ -4,13 +4,13 @@
    * custom colours), width, eraser. With a shape tool, three toggles (`shapePrefs`): regular, from the centre, snap to
    * the page's template (docs/design/shape-tools.md). With the text tool (or text frames selected), the family, the size
    * and bold (docs/design/page-objects.md §5); their buttons and the colours do not take the focus from the frame being
-   * typed (`keepFocus`).
+   * typed (`keepFocus`). With the equation tool (or equations selected), the size (docs/design/equations.md).
    */
   import { INKSPACE_COLOR_NAMES, sameColor, toHex, fromHex } from '../../lib/editor/colors';
   import WidthControl from '../WidthControl.svelte';
   import { shapePrefs, type ShapeToggle } from '../../lib/editor/shape-prefs.svelte';
   import { isShapeKind } from '../../lib/editor/shape-tools';
-  import { textSettings, type EraserMode, type Mode, type TextSettings, type ToolSettings } from '../../lib/editor/state';
+  import { equationToolSize, textSettings, type EraserMode, type Mode, type TextSettings, type ToolSettings } from '../../lib/editor/state';
   import { CSS_FAMILY, TEXT_SIZES, TEXT_SIZE_NAMES } from '../../lib/text';
   import { FONT_FAMILIES } from '../../lib/note';
   import { t } from '../../lib/i18n.svelte';
@@ -30,6 +30,8 @@
     oneraser,
     ontext,
     textTargets = 0,
+    onequationsize,
+    equationTargets = 0,
     onapplyall,
     splitting = false,
     locked = false,
@@ -69,6 +71,10 @@
     ontext?: (change: Partial<TextSettings>) => void;
     /** How many text frames the text options act on now (the one typed in, or the selected ones). */
     textTargets?: number;
+    /** The equation tool's size changed (the selected equations take it too). */
+    onequationsize?: (size: number) => void;
+    /** How many selected equations the size acts on now. */
+    equationTargets?: number;
     onapplyall: (what: 'color' | 'tool' | 'width') => void;
     /** The split panel is open. */
     splitting?: boolean;
@@ -135,6 +141,7 @@
     { mode: 'rectangle' },
     { mode: 'ellipse' },
     { mode: 'text', icon: 'T' },
+    { mode: 'equation', icon: '√x' },
     { mode: 'eraser', icon: '⌫' },
     { mode: 'pan', icon: '✋' },
   ];
@@ -142,6 +149,11 @@
   const text = $derived(textSettings(tools));
   /** The text options show with the text tool, or when text frames are selected. */
   const textOptions = $derived(tools.mode === 'text' || textTargets > 0);
+  const equationSize = $derived(equationToolSize(tools));
+  /** The equation's size shows with the equation tool, or when equations are selected. */
+  const equationOptions = $derived(tools.mode === 'equation' || equationTargets > 0);
+  /** The tools that put objects down rather than ink: no ink nor width to choose. */
+  const objectTool = $derived(tools.mode === 'text' || tools.mode === 'equation');
 
   /** A press on a text option or a colour keeps the focus where it is: in the frame being typed. */
   function keepFocus(e: PointerEvent) {
@@ -280,6 +292,31 @@
     </div>
   {/if}
 
+  {#if equationOptions && tools.mode !== 'eraser'}
+    <div class="group text-options" role="group" aria-label={t('editor.equation.label')} data-slot="equation-options">
+      <div class="segmented" role="group" aria-label={t('editor.equation.size')}>
+        {#each TEXT_SIZE_NAMES as size}
+          <button
+            type="button"
+            class="button small-button toggle"
+            class:active={equationSize === TEXT_SIZES[size]}
+            aria-pressed={equationSize === TEXT_SIZES[size]}
+            disabled={locked}
+            data-action="equation-size-{size}"
+            title={t(`editor.text.sizes.${size}Hint`)}
+            onpointerdown={keepFocus}
+            onclick={() => onequationsize?.(TEXT_SIZES[size])}
+          >
+            {t(`editor.text.sizes.${size}`)}
+          </button>
+        {/each}
+      </div>
+      {#if tools.mode === 'equation'}
+        <span class="label text-help" data-slot="equation-help">{t('editor.equation.help')}</span>
+      {/if}
+    </div>
+  {/if}
+
   {#if tools.mode === 'eraser'}
     <div class="group" role="radiogroup" aria-label={t('editor.eraser.label')}>
       {#each ['whole', 'partial'] as const as mode}
@@ -309,7 +346,7 @@
       <span class="value">{t('editor.width.value', { mm: mm(tools.eraserRadius * 2) })}</span>
     </label>
   {:else}
-    {#if tools.mode !== 'text'}
+    {#if !objectTool}
     <label class="group">
       <span class="label">{t('editor.ink.label')}</span>
       <select value={tools.tool} disabled={locked} onchange={(e) => ontool(e.currentTarget.value as Tool)}>
@@ -355,7 +392,7 @@
       </label>
     </div>
 
-    {#if tools.mode !== 'text'}
+    {#if !objectTool}
     <div class="group slider" role="group" aria-label={t('editor.width.label')}>
       <span>{t('editor.width.label')}</span>
       <WidthControl

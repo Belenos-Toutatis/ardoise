@@ -32,9 +32,10 @@
  *   four handles drawn crisp over it. A drag that ends without an edit puts the strokes back on the cache the same
  *   way. The handles (`Scene.handles`) are drawn on the selection's frame the rest of the time too.
  *
- * - Page objects (text frames of a resumed sheet, of the note the editor projects or shares: `Scene.objects`) are drawn
- *   on the cache with their layer, after its strokes, as every export draws them (`lib/editor/objects.ts` `drawItems`),
- *   from the glyphs of `ardoise-text` (`ink.text`). Live mode never changes them: a new list (a snapshot, a page sent
+ * - Page objects (text frames and equations of a resumed sheet, of the note the editor projects or shares:
+ *   `Scene.objects`) are drawn on the cache with their layer, after its strokes, as every export draws them
+ *   (`lib/editor/objects.ts` `drawItems`): a frame from the glyphs of `ardoise-text` (`ink.text`), an equation from the
+ *   drawing it stores (`lib/equation-path.ts`; no MathJax here). Live mode never changes them: a new list (a snapshot, a page sent
  *   by the editor) redraws the cache, and a partial repaint or an appended stroke that would have to pass under one
  *   redraws it too.
  *
@@ -56,7 +57,19 @@ import {
   type Size,
   type Transform,
 } from './live-view';
-import { isTextObject, type Background, type Layer, type PageObject, type PageSize, type Paper, type Rgba, type Stroke } from './note';
+import {
+  equationDrawing,
+  isDrawnObject,
+  isEquationObject,
+  isTextObject,
+  type Background,
+  type Layer,
+  type PageObject,
+  type PageSize,
+  type Paper,
+  type Rgba,
+  type Stroke,
+} from './note';
 import { drawItems, objectBounds, objectMatrix, textStyle } from './editor/objects';
 import { parsePath, tracePath, type PathStep } from './text';
 import { HANDLE_SIZE_PX, corners, selectionFrame, transformRect, type PageTransform } from './selection-grab';
@@ -513,15 +526,22 @@ export class LiveRenderer {
     ctx.globalCompositeOperation = 'source-over';
   }
 
-  /** Draws a text frame (the page transform is set; it is restored afterwards). */
-  private drawObject(ctx: Ctx2D, scene: Scene, object: PageObject): void {
-    if (!this.ink || !isTextObject(object)) return;
+  /** The outlines of a page object, in its own units: a text frame's glyphs, an equation's stored drawing. */
+  private objectSteps(object: PageObject): PathStep[] | null {
+    if (isEquationObject(object)) return equationDrawing(object);
+    if (!this.ink || !isTextObject(object)) return null;
     let steps = this.glyphs.get(object);
     if (!steps) {
       steps = parsePath(this.ink.text.path(object.text, textStyle(object)));
       this.glyphs.set(object, steps);
     }
-    if (steps.length === 0) return;
+    return steps;
+  }
+
+  /** Draws a text frame or an equation (the page transform is set; it is restored afterwards). */
+  private drawObject(ctx: Ctx2D, scene: Scene, object: PageObject): void {
+    const steps = this.objectSteps(object);
+    if (!steps || steps.length === 0 || !isDrawnObject(object)) return;
     const k = scene.pixelRatio;
     const t = scene.transform;
     const m = objectMatrix(object);
@@ -542,9 +562,9 @@ export class LiveRenderer {
     return (object.layer < layers.length ? object.layer : layers.length) + 0.5;
   }
 
-  /** The objects the page draws (text frames of visible layers). */
+  /** The objects the page draws (text frames and equations of visible layers). */
   private drawnObjects(scene: Scene): PageObject[] {
-    return scene.objects.filter((o) => isTextObject(o) && scene.layers[o.layer]?.visible !== false);
+    return scene.objects.filter((o) => isDrawnObject(o) && scene.layers[o.layer]?.visible !== false);
   }
 
   private pageTransform(ctx: Ctx2D, scene: Scene): void {

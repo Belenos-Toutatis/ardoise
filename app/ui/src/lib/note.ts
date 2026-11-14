@@ -3,7 +3,9 @@
  * are page coordinates in device units (10 µm), origin top-left; an A4 landscape page is
  * 29700 × 21600. Times are milliseconds since `created`.
  */
+import { EQUATION_MAX_SOURCE_CHARS, readEquationPath, sourceLength } from './equation-path';
 import type { InkPoint, Tool } from './ink';
+import type { PathStep } from './text';
 import type { NarrationInfo } from './video';
 
 export interface Rgba {
@@ -88,7 +90,7 @@ export interface Note {
   favorite?: boolean;
   layers: Layer[];
   strokes: Stroke[];
-  /** What the page holds besides its strokes (format 1.4): text frames. Absent means none. */
+  /** What the page holds besides its strokes (format 1.4): text frames, equations (1.5). Absent means none. */
   objects?: PageObject[];
   timing: 'recorded' | 'synthesized';
   origin: Origin;
@@ -153,6 +155,52 @@ export function isTextObject(object: PageObject): object is TextObject {
   );
 }
 
+/**
+ * An equation (SPEC §4.4 « Équation », format 1.5, `docs/design/equations.md`): the LaTeX source the user typed and the
+ * drawing MathJax made of it, kept as path data in the equation's units (1/1000 em; `scale` is the em on the page divided
+ * by 1000), so that every output draws it without MathJax.
+ */
+export interface EquationObject extends PageObject {
+  kind: 'equation';
+  latex: string;
+  /** Absolute `M`, `L`, `Q`, `C`, `Z` (`lib/equation-path.ts`). */
+  path: string;
+  color: Rgba;
+}
+
+/** The drawing of each equation read, kept per object (an edit makes a new object). */
+const drawings = new WeakMap<PageObject, PathStep[] | null>();
+
+/** The steps of an equation's drawing, or null when they cannot be read (Rust then keeps the object without drawing it). */
+export function equationDrawing(object: PageObject): PathStep[] | null {
+  let steps = drawings.get(object);
+  if (steps === undefined) {
+    steps = typeof object.path === 'string' ? readEquationPath(object.path) : null;
+    drawings.set(object, steps);
+  }
+  return steps;
+}
+
+/**
+ * An equation this version can read and draw, as Rust reads it (`equation_body`): a source and a drawing within their
+ * limits, the drawing in the grammar, a colour. One that is not is kept but neither drawn nor selectable.
+ */
+export function isEquationObject(object: PageObject): object is EquationObject {
+  return (
+    object.kind === 'equation' &&
+    typeof object.latex === 'string' &&
+    sourceLength(object.latex) <= EQUATION_MAX_SOURCE_CHARS &&
+    typeof object.color === 'object' &&
+    object.color !== null &&
+    equationDrawing(object) !== null
+  );
+}
+
+/** Whether every output draws `object`: a text frame or an equation this version reads (`ObjectBody::is_drawn`). */
+export function isDrawnObject(object: PageObject): object is TextObject | EquationObject {
+  return isTextObject(object) || isEquationObject(object);
+}
+
 /** Modification time and size of a note file, as last seen; passed back when saving. */
 export interface FileStamp {
   modified: { secs_since_epoch: number; nanos_since_epoch: number };
@@ -171,7 +219,10 @@ export interface NoteSummary {
   modified: number;
   tags: string[];
   favorite: boolean;
-  /** The text of its text frames on visible layers, in reading order, one per line; empty without any (format 1.4). */
+  /**
+   * The text of its text frames and the LaTeX source of its equations on visible layers, in reading order, one per line;
+   * empty without any (formats 1.4, 1.5).
+   */
   typedText?: string;
   stamp: FileStamp;
   /** Set when the file is a Nextcloud conflict copy of `originalName`. */

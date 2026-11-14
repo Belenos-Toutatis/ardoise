@@ -405,7 +405,7 @@ describe('note editor', () => {
     await tick();
     // The Selection tool explains its gestures.
     expect(target.querySelector('.select-help')?.textContent).toBe(
-      'Lasso : sélectionner · Maj+lasso : ajouter · Ctrl+lasso : retirer · Double-clic sur un texte : le modifier · F : redresser les formes · Échap : tout désélectionner',
+      'Lasso : sélectionner · Maj+lasso : ajouter · Ctrl+lasso : retirer · Double-clic sur un texte ou une équation : le modifier · F : redresser les formes · Échap : tout désélectionner',
     );
     await key('a', { ctrlKey: true });
     expect(target.textContent).toContain('Traits sélectionnés : 1');

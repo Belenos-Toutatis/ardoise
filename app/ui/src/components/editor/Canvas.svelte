@@ -32,8 +32,12 @@
    * layer), and a move or a resize carries them. With the text tool, a tap on the page (a pen, the mouse or a finger)
    * asks for a new frame there, or to type in the frame under it (`ontext`); a double click on a frame with the
    * selection tool asks the same. The frame being typed (`editing`) gets its field (`TextField`) over it.
+   *
+   * Equations (docs/design/equations.md) are drawn the same way, from the drawing they store. With the equation tool,
+   * a tap asks for a new equation there or to rewrite the one under it (`onequation`), a double click on one with the
+   * selection tool too; the editor's panel for it (`equationPanel`) is put next to `equationAnchor`.
    */
-  import { untrack } from 'svelte';
+  import { untrack, type Snippet } from 'svelte';
   import { api } from '../../lib/api';
   import {
     applyAffine,
@@ -48,7 +52,17 @@
     type Vec,
   } from '../../lib/editor/geometry';
   import { drawingOrder, hitStroke, onLayer, selectInLasso } from '../../lib/editor/hit';
-  import { contentPoint, drawItems, hitObject, objectTransform, objectsInLasso, objectsOf, textAt, textStyle } from '../../lib/editor/objects';
+  import {
+    contentPoint,
+    drawItems,
+    equationAt,
+    hitObject,
+    objectTransform,
+    objectsInLasso,
+    objectsOf,
+    textAt,
+    textStyle,
+  } from '../../lib/editor/objects';
   import { offsetAt } from '../../lib/text';
   import TextField from './TextField.svelte';
   import {
@@ -84,6 +98,7 @@
     fitView,
     fitWidthView,
     panBy,
+    pageToScreen,
     screenToPage,
     visibleRect,
     zoomAt,
@@ -102,7 +117,7 @@
   import { nextStrokeBase, type StrokeClock } from '../../lib/editor/writing-clock';
   import { t } from '../../lib/i18n.svelte';
   import type { Ink, InkPoint } from '../../lib/ink';
-  import { cssColor, isTextObject, type Stroke, type TextObject } from '../../lib/note';
+  import { cssColor, isEquationObject, isTextObject, type Stroke, type TextObject } from '../../lib/note';
   import type { InProgress } from '../../lib/projection-feed';
   import type { NarrationInfo } from '../../lib/video';
 
@@ -129,6 +144,9 @@
     ontext,
     ontextinput,
     ontextblur,
+    onequation,
+    equationAnchor = null,
+    equationPanel,
   }: {
     doc: Doc;
     tools: ToolSettings;
@@ -183,6 +201,12 @@
     ontextinput?: (text: string) => void;
     /** The field of the frame being typed lost the focus. */
     ontextblur?: () => void;
+    /** A tap with the equation tool (or a double click on an equation): a new equation at `at`, or rewriting equation `index`. */
+    onequation?: (request: { kind: 'new'; at: Vec } | { kind: 'edit'; index: number }) => void;
+    /** The page point the equation panel stands by (where the new equation goes, or under the one rewritten); null: closed. */
+    equationAnchor?: Vec | null;
+    /** The equation panel, given where to stand in the canvas area (pixels) and how wide. */
+    equationPanel?: Snippet<[{ left: number; top: number; width: number }]>;
   } = $props();
 
   /** Screen pixels per device unit at real size (96 dpi, 10 µm units). */
@@ -259,7 +283,7 @@
   /** Which note the stroke goes to while splitting; null when not splitting. */
   type Side = 'kept' | 'moved' | null;
 
-  /** The glyphs of a text frame, cached per frame object (an edit makes a new object). */
+  /** The glyphs of a text frame, cached per frame object (an edit makes a new object); an equation draws its own path. */
   const glyphs = new WeakMap<TextObject, string>();
   function glyphPath(object: TextObject): string {
     let d = glyphs.get(object);
@@ -280,6 +304,8 @@
     faded: boolean;
     /** A page object: its index and its transform; absent for a stroke. */
     object?: { transform: string };
+    /** A page object's kind (`text`, `equation`); absent for a stroke. */
+    kind?: string;
   };
 
   const items = $derived.by(() => {
@@ -294,16 +320,18 @@
     for (const item of drawItems(note, drawingOrder(note))) {
       if (item.kind === 'object') {
         const object = objects[item.index];
-        if (!object || !isTextObject(object)) continue;
+        if (!object || !(isTextObject(object) || isEquationObject(object))) continue;
         out.push({
           i: item.index,
-          d: glyphPath(object),
+          // An equation's drawing is stored as path data in its own units (checked: `isEquationObject`).
+          d: isTextObject(object) ? glyphPath(object) : object.path,
           fill: cssColor(object.color),
           highlighter: false,
           selected: selectedObjects.has(item.index),
           faded: false,
           side: !preview ? null : preview.movedObjects.has(item.index) ? 'moved' : 'kept',
           object: { transform: objectTransform(object) },
+          kind: object.kind,
         });
         continue;
       }
@@ -355,17 +383,51 @@
     }
   }
 
-  /** A double click with the selection tool on a text frame of the chosen layer: typing in it. */
+  /** A tap with the equation tool at `p`: rewriting the equation of the chosen layer under it, or a new one there. */
+  function equationTap(p: Vec) {
+    const hit = equationAt(doc.note, p, 6 / view.scale, doc.activeLayer);
+    onequation?.(hit !== null ? { kind: 'edit', index: hit } : { kind: 'new', at: p });
+  }
+
+  /** A tap of the tool in use (the text or the equation tool). */
+  function toolTap(p: Vec) {
+    if (tools.mode === 'equation') equationTap(p);
+    else textTap(p);
+  }
+
+  /** The tools a finger's tap puts something down with. */
+  const tapsWith = (mode: string) => mode === 'text' || mode === 'equation';
+
+  /** A double click with the selection tool on a text frame or an equation of the chosen layer: editing it. */
   function ondblclick(e: MouseEvent) {
-    if (readonly || split || tools.mode !== 'select' || !ontext) return;
+    if (readonly || split || tools.mode !== 'select') return;
     const p = pagePoint(e);
+    const equation = onequation ? equationAt(doc.note, p, 6 / view.scale, doc.activeLayer) : null;
+    if (equation !== null) {
+      e.preventDefault();
+      onequation?.({ kind: 'edit', index: equation });
+      return;
+    }
+    if (!ontext) return;
     const hit = textAt(doc.note, p, 6 / view.scale, doc.activeLayer);
     if (hit === null) return;
     e.preventDefault();
     textTap(p);
   }
 
-  /** A finger that navigates, put down with the text tool: a tap if it is lifted soon, where it went down. */
+  /** Where the equation panel stands: under its anchor when there is room, else over it; within the canvas area. */
+  const PANEL_HEIGHT_PX = 400;
+  const panelPlace = $derived.by(() => {
+    if (!equationAnchor) return null;
+    const at = pageToScreen(view, equationAnchor);
+    const width = Math.max(220, Math.min(420, viewport.width - 16));
+    const left = Math.max(8, Math.min(at.x - 24, viewport.width - width - 8));
+    const below = at.y + 16;
+    const top = below + PANEL_HEIGHT_PX <= viewport.height - 8 ? below : Math.max(8, at.y - 16 - PANEL_HEIGHT_PX);
+    return { left, top, width };
+  });
+
+  /** A finger that navigates, put down with the text or equation tool: a tap if it is lifted soon, where it went down. */
   let fingerTap: { id: number; start: Vec; screen: Vec; time: number } | null = null;
 
   /** The straightened shapes of the setting's preview, as centre lines (a few strokes at most, not cached). */
@@ -654,8 +716,8 @@
       if (!fingerDraws()) {
         e.preventDefault();
         capture(id);
-        // The text tool: a finger's tap places a frame (or types in one), a drag moves the page.
-        fingerTap = tools.mode === 'text' && !readonly && !split ? { id, start: pagePoint(e), screen: local(e), time: e.timeStamp } : null;
+        // The text and equation tools: a finger's tap places a frame or an equation (or edits one), a drag moves the page.
+        fingerTap = tapsWith(tools.mode) && !readonly && !split ? { id, start: pagePoint(e), screen: local(e), time: e.timeStamp } : null;
         // A finger on the selection moves or resizes it instead of panning the page.
         const grab = e.button === 0 ? grabAt(e) : null;
         if (grab) {
@@ -753,6 +815,7 @@
         cropRect = rectFromCorners(p, p);
         break;
       case 'text':
+      case 'equation':
         begin({ kind: 'text', id, start: p, screen: local(e) });
         break;
       default:
@@ -856,7 +919,7 @@
       if (tap && tap.id === pointerId(e)) {
         fingerTap = null;
         const at = local(e);
-        if (!cancelled && Math.hypot(at.x - tap.screen.x, at.y - tap.screen.y) < TAP_PX && e.timeStamp - tap.time < TAP_MS) textTap(tap.start);
+        if (!cancelled && Math.hypot(at.x - tap.screen.x, at.y - tap.screen.y) < TAP_PX && e.timeStamp - tap.time < TAP_MS) toolTap(tap.start);
       }
     }
     finish(e, cancelled);
@@ -963,7 +1026,7 @@
       }
       case 'text': {
         const at = local(e);
-        if (!cancelled && Math.hypot(at.x - d.screen.x, at.y - d.screen.y) < TAP_PX) textTap(d.start);
+        if (!cancelled && Math.hypot(at.x - d.screen.x, at.y - d.screen.y) < TAP_PX) toolTap(d.start);
         break;
       }
       case 'pan':
@@ -1012,6 +1075,7 @@
             fill={item.fill}
             fill-rule="nonzero"
             data-object={item.i}
+            data-kind={item.kind}
             class="text-frame"
             class:editing={editing?.index === item.i}
             class:split-kept={item.side === 'kept'}
@@ -1105,6 +1169,9 @@
       />
     {/key}
   {/if}
+  {#if panelPlace && equationPanel}
+    {@render equationPanel(panelPlace)}
+  {/if}
   <div class="zoom" role="group" aria-label={t('editor.zoom.label')}>
     <button class="button ghost" type="button" title={t('editor.zoom.out')} aria-label={t('editor.zoom.out')} onclick={() => zoomBy(1 / 1.25)}>−</button>
     <span class="zoom-level" aria-live="polite">{t('editor.zoom.level', { percent: zoomPercent })}</span>
@@ -1159,6 +1226,10 @@
 
   .mode-text {
     cursor: text;
+  }
+
+  .mode-equation {
+    cursor: cell;
   }
 
   .mode-pan,

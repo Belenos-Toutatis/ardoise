@@ -34,6 +34,7 @@ export type EditorKeyKind =
   | 'pen'
   | 'eraser'
   | 'text'
+  | 'equation'
   | 'pan'
   | 'replay'
   | 'straighten';
@@ -103,6 +104,8 @@ export function editorKeyAction(e: KeyInput, context: EditorKeyContext): EditorK
       return { kind: 'eraser' };
     case 't':
       return { kind: 'text' };
+    case 'm':
+      return { kind: 'equation' };
     case 'h':
       return { kind: 'pan' };
     case 'r':

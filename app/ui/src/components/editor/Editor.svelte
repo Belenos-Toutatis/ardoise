@@ -65,6 +65,13 @@
    * another tool) makes one undoable step of it, or none when nothing changed; an empty frame goes (`endText`). The
    * family, the size and bold are the tool's (`tools.text`) and those of the frame typed in or of the selected frames;
    * the colour is the tool's colour.
+   *
+   * The equation tool (SPEC §4.4 « Équation », docs/design/equations.md): a tap opens its panel (`EquationPanel`, put
+   * by the canvas next to the tap, `equationEdit`) for a new equation there, or for the equation under it (a double
+   * click with the selection tool too); the panel converts the LaTeX with MathJax (loaded the first time) into our own
+   * drawing, and « Poser » / « Mettre à jour » makes one undoable step of it (`placeEquation`); Escape, another tool,
+   * undo or another note drop it (`cancelEquation`), the page unchanged. The equation rewritten stays selected while
+   * its panel is open, so that the colours and the sizes act on it.
    */
   import { tick, untrack } from 'svelte';
   import { api, errorMessage, onLibraryChanged, onSessionEnding, type AppState } from '../../lib/api';
@@ -74,7 +81,20 @@
   import { DraftKeeper, findOffer, type Offer } from '../../lib/editor/drafts';
   import { withSourceIn } from '../../lib/editor/revision';
   import { decodeClipboard, encodeClipboard } from '../../lib/editor/clipboard';
-  import { changeTexts, measureText, measureTexts, newObjectId, newTextObject, objectsOf } from '../../lib/editor/objects';
+  import {
+    changeTexts,
+    measureText,
+    measureTexts,
+    newEquationObject,
+    newObjectId,
+    newTextObject,
+    objectBounds,
+    objectsOf,
+    redrawnEquation,
+  } from '../../lib/editor/objects';
+  import type { Vec } from '../../lib/editor/geometry';
+  import type { EquationDrawing } from '../../lib/equation';
+  import { paperRgb } from '../../lib/live-render';
   import { LINE_HEIGHT, registerTextFonts } from '../../lib/text';
   import type { PixelsRef } from '../../lib/background';
   import { pixelsOf, removeBackgroundImage, setBackgroundImage, setImageFit, setImageOpacity } from '../../lib/editor/image';
@@ -98,6 +118,7 @@
     DEFAULT_TOOLS,
     addLayer,
     addObjectToDoc,
+    applyEquationSize,
     applyStyle,
     applyTextStyle,
     autoCrop,
@@ -106,6 +127,7 @@
     deleteSelection,
     docFromNote,
     duplicateSelection,
+    equationToolSize,
     hasSelection as anySelected,
     mergeDown,
     moveLayer,
@@ -153,7 +175,20 @@
   import { resumeBlock } from '../../lib/live-resume.svelte';
   import { tablet } from '../../lib/tablet-state.svelte';
   import { loadInk, type Ink, type Tool } from '../../lib/ink';
-  import { isTextObject, type BackgroundImage, type ExportSource, type FileStamp, type Note, type PageObject, type Rgba, type RevisionOfNote, type ShapeSettings, type SplitSpec, type Stroke } from '../../lib/note';
+  import {
+    isEquationObject,
+    isTextObject,
+    type BackgroundImage,
+    type ExportSource,
+    type FileStamp,
+    type Note,
+    type PageObject,
+    type Rgba,
+    type RevisionOfNote,
+    type ShapeSettings,
+    type SplitSpec,
+    type Stroke,
+  } from '../../lib/note';
   import type { NoteOriginal } from '../../lib/original';
   import type { NarrationInfo } from '../../lib/video';
   import ExportDialog from '../ExportDialog.svelte';
@@ -169,6 +204,7 @@
   import BackgroundImageSection from './BackgroundImageSection.svelte';
   import Canvas from './Canvas.svelte';
   import EditorSound from './EditorSound.svelte';
+  import EquationPanel from './EquationPanel.svelte';
   import OriginalPanel from './OriginalPanel.svelte';
   import PagePanel from './PagePanel.svelte';
   import RecoveryDialog from './RecoveryDialog.svelte';
@@ -378,6 +414,30 @@
     if (textEdit) return [textEdit.index];
     const objects = objectsOf(doc.note);
     return objectSelection(doc).filter((i) => isTextObject(objects[i]));
+  });
+  /**
+   * The equation tool's panel while it is open: where a new equation goes (`at`, the page point tapped) or the id of the
+   * equation rewritten (`at`: under it, where the panel stands), the source it starts with, and its number (a new
+   * panel each time it opens).
+   */
+  let equationEdit = $state.raw<{ at: Vec; id: string | null; latex: string; session: number } | null>(null);
+  let equationSessions = 0;
+  /** The selected equations the tool's size acts on. */
+  const equationTargets = $derived.by((): number => {
+    if (!doc) return 0;
+    const objects = objectsOf(doc.note);
+    return objectSelection(doc).filter((i) => isEquationObject(objects[i])).length;
+  });
+  /** The colour the equation of the panel has, or will have: the one rewritten keeps its own, a new one takes the tool's. */
+  const equationColor = $derived.by((): Rgba => {
+    const id = equationEdit?.id;
+    const object = id && doc ? objectsOf(doc.note).find((o) => o.id === id) : undefined;
+    return object && isEquationObject(object) ? object.color : tools.color;
+  });
+  /** The note's paper, under the panel's preview. */
+  const paperCss = $derived.by(() => {
+    const [r, g, b] = doc ? paperRgb(doc.note.background.paper) : [255, 255, 255];
+    return `rgb(${r}, ${g}, ${b})`;
   });
   /** The split panel is open or a replay runs: the tabs that edit the note are disabled. */
   const locked = $derived(split !== null || replaying);
@@ -731,8 +791,9 @@
       // The fonts of the text frames, for the field where one types and the toolbar's family buttons.
       void registerTextFonts(module.text);
       noteId = opened.note.id;
-      // A frame being typed belongs to the doc that goes.
+      // A frame being typed, an equation being written, belong to the doc that goes.
       textEdit = null;
+      equationEdit = null;
       history = createHistory(start);
       savedNote = start.note;
       stamp = opened.stamp;
@@ -1344,7 +1405,80 @@
 
   function setMode(mode: Mode) {
     if (mode !== 'text') endText();
+    if (mode !== 'equation') cancelEquation();
     tools = { ...tools, mode };
+  }
+
+  // --- Equations (the equation tool) ------------------------------------------------------------
+
+  /**
+   * A tap of the equation tool (or a double click on an equation): the panel for a new equation there, or for the one
+   * tapped. A tap elsewhere while a new equation is written moves where it will go (the source stays).
+   */
+  function startEquation(request: { kind: 'new'; at: Vec } | { kind: 'edit'; index: number }) {
+    if (!doc || !history || replaying || split) return;
+    endText();
+    if (tools.mode !== 'equation') tools = { ...tools, mode: 'equation' };
+    if (request.kind === 'new') {
+      if (!canDraw(doc)) return hiddenLayerNotice();
+      if (equationEdit && equationEdit.id === null) {
+        equationEdit = { ...equationEdit, at: request.at };
+        return;
+      }
+      // The tool's size and colour are for the new equation, not for one selected before.
+      reselect(clearSelection(doc));
+      equationSessions += 1;
+      equationEdit = { at: request.at, id: null, latex: '', session: equationSessions };
+      return;
+    }
+    const object = objectsOf(doc.note)[request.index];
+    if (!object || !isEquationObject(object)) return;
+    if (equationEdit?.id === object.id) return;
+    const box = objectBounds(object);
+    // Selected while it is rewritten: the colours and the sizes act on it.
+    reselect(selectItems(doc, [], [request.index]));
+    equationSessions += 1;
+    equationEdit = { at: { x: box.x, y: box.y + box.height }, id: object.id, latex: object.latex, session: equationSessions };
+  }
+
+  /** « Poser » or « Mettre à jour »: one undoable step, the equation selected afterwards; the panel closes. */
+  function placeEquation(latex: string, drawing: EquationDrawing) {
+    const edit = equationEdit;
+    if (!edit || !doc || !history) return;
+    equationEdit = null;
+    const objects = objectsOf(doc.note);
+    const index = edit.id === null ? -1 : objects.findIndex((o) => o.id === edit.id);
+    const existing = index >= 0 ? objects[index] : undefined;
+    if (existing && isEquationObject(existing)) {
+      const next = redrawnEquation(existing, latex, drawing);
+      change(selectItems(replaceObjectAt(doc, index, next), [], [index]));
+      return;
+    }
+    // A new one (or one that went meanwhile: put down anew where its panel stood).
+    if (!canDraw(doc)) return hiddenLayerNotice();
+    const object = newEquationObject({
+      id: newObjectId(),
+      layer: doc.activeLayer,
+      t: textTime(doc.note),
+      at: edit.at,
+      size: equationToolSize(tools),
+      latex,
+      drawing,
+      color: tools.color,
+    });
+    const next = addObjectToDoc(doc, object);
+    change(selectItems(next, [], [objectsOf(next.note).length - 1]));
+  }
+
+  /** The panel closes without changing anything. */
+  function cancelEquation() {
+    equationEdit = null;
+  }
+
+  /** The equation tool's size: the selected equations take it too. */
+  function setEquationSize(size: number) {
+    tools = { ...tools, equationSize: size };
+    if (doc && equationTargets > 0) change(applyEquationSize(doc, size));
   }
 
   // --- Text frames (the text tool) ------------------------------------------------------------
@@ -1357,6 +1491,7 @@
   /** A tap of the text tool: typing in a frame of the chosen layer, or in a new frame put there. */
   function startText(request: { kind: 'new'; at: { x: number; y: number } } | { kind: 'edit'; index: number; caret: number }) {
     if (!doc || !history || !ink || replaying || split) return;
+    cancelEquation();
     // The frame asked for, by its id: ending the typing of another one may remove that one (left empty) and move indices.
     const wanted = request.kind === 'edit' ? objectsOf(history.present.note)[request.index]?.id : undefined;
     endText();
@@ -1488,11 +1623,13 @@
 
   function doUndo() {
     endText();
+    cancelEquation();
     if (history && !split?.busy) history = undo(history);
   }
 
   function doRedo() {
     endText();
+    cancelEquation();
     if (history && !split?.busy) history = redo(history);
   }
 
@@ -1721,6 +1858,7 @@
     if (split) return cancelSplit();
     // A split by time cuts the timeline the recording is writing (O20).
     if (recorder.busy) return showNotice(t('editor.replay.recordingBusy'), true);
+    cancelEquation();
     if (hasSelection) reselect(clearSelection(doc));
     const span = timeRange(doc.note);
     split = {
@@ -1777,8 +1915,9 @@
         // The kept part has the same background image, with the same pixels.
         const pixels = result.note.backgroundImage ? present.backgroundPixels : undefined;
         const start = pixels ? { ...fresh, backgroundPixels: pixels } : fresh;
-        // A frame being typed belongs to the doc that goes.
+        // A frame being typed, an equation being written, belong to the doc that goes.
         textEdit = null;
+        equationEdit = null;
         history = createHistory(start);
         savedNote = start.note;
         stamp = result.stamp;
@@ -1807,6 +1946,8 @@
     if (!doc || split || replaying || canvas?.dragging()) return;
     // A writing recording is writing the timeline the replay would play (O20).
     if (recorder.busy) return showNotice(t('editor.replay.recordingBusy'), true);
+    // An equation being written is dropped: the replay is read-only.
+    cancelEquation();
     // The replay shows Son (the narration) and gives the tab back when it ends. The forced view is not remembered:
     // leaving the editor during the replay must keep the view the user had (the stored one).
     sideBeforeReplay = side.snapshot();
@@ -2144,6 +2285,7 @@
       case 'pen':
       case 'eraser':
       case 'text':
+      case 'equation':
       case 'pan':
         setMode(action.kind);
         break;
@@ -2174,6 +2316,7 @@
       owned: modalOpen() || !!exporting || !!printing || !!video || share.panelOpen || !!revisionDialog || !!offer,
       dragging: canvas?.dragging() ?? false,
       editingText: textEdit !== null,
+      editingEquation: equationEdit !== null,
       split: split !== null,
       settings: shapesPanel,
       typing: isTyping(e.target),
@@ -2191,6 +2334,8 @@
         return canvas?.cancelGesture();
       case 'endText':
         return endText();
+      case 'cancelEquation':
+        return cancelEquation();
       case 'closeSplit':
         return cancelSplit();
       case 'closeSettings':
@@ -2421,6 +2566,8 @@
       oneraser={setEraser}
       ontext={setTextStyle}
       textTargets={textTargets.length}
+      onequationsize={setEquationSize}
+      {equationTargets}
       onapplyall={applyAll}
       splitting={split !== null}
       locked={split !== null || replaying}
@@ -2484,6 +2631,9 @@
         ontext={startText}
         ontextinput={typeText}
         ontextblur={endText}
+        onequation={startEquation}
+        equationAnchor={equationEdit && !replaying ? equationEdit.at : null}
+        {equationPanel}
         oninprogress={(event) => {
           if (pageProjection.presentation) pageProjection.stroke(event);
         }}
@@ -2568,6 +2718,23 @@
         </SidePanel>
       </aside>
     </div>
+    {#snippet equationPanel(place: { left: number; top: number; width: number })}
+      {#if equationEdit}
+        {#key equationEdit.session}
+          <EquationPanel
+            latex={equationEdit.latex}
+            editing={equationEdit.id !== null}
+            color={equationColor}
+            paper={paperCss}
+            left={place.left}
+            top={place.top}
+            width={place.width}
+            onplace={placeEquation}
+            oncancel={cancelEquation}
+          />
+        {/key}
+      {/if}
+    {/snippet}
     {#snippet aboveBlock()}
       {#if split}
         <SplitPanel

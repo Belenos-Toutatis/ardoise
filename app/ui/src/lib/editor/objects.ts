@@ -2,13 +2,25 @@
  * Page objects in the editor (format 1.4, `docs/design/page-objects.md`): their place on the page, and the pure
  * operations that move them with the page or the selection, the way `ops.ts` moves strokes. The placement is the same
  * for every kind (`PageObject` in `note.ts`), so these work on kinds this version does not know too; only text frames
- * are measured (`measureText`) and drawn.
+ * (measured by `measureText`) and equations (measured when MathJax draws them, `lib/equation.ts`) are drawn and
+ * selectable.
  *
  * The rules match Rust's (`ardoise_core::objects`, `ardoise_core::ops`): a lasso or a zone takes an object when the
  * centre of its box is inside; a crop drops a visible object whose box is wholly outside; objects are drawn with their
  * layer, above its strokes.
  */
-import { isTextObject, type Note, type PageObject, type Rgba, type TextObject, type FontFamily } from '../note';
+import { EQUATION_UNITS_PER_EM } from '../equation-path';
+import {
+  isDrawnObject,
+  isEquationObject,
+  isTextObject,
+  type EquationObject,
+  type FontFamily,
+  type Note,
+  type PageObject,
+  type Rgba,
+  type TextObject,
+} from '../note';
 import type { TextEngine, TextStyle } from '../text';
 import { affineScale, applyAffine, containsPoint, inflate, pointInPolygon, union, type Affine, type Rect, type Vec } from './geometry';
 
@@ -167,14 +179,103 @@ export function measureTexts(note: Note, engine: TextEngine): Note {
   return measured.some((o, i) => o !== objects[i]) ? withObjects(note, measured) : note;
 }
 
-/** The text of the note's text frames on visible layers, top to bottom then left to right, one per line (`Note::typed_text`). */
+/**
+ * The text of the note's text frames and the LaTeX source of its equations on visible layers, top to bottom then left to
+ * right, one per line (`Note::typed_text`).
+ */
 export function typedText(note: Pick<Note, 'layers' | 'objects'>): string {
   return objectsOf(note)
-    .filter((o): o is TextObject => isTextObject(o) && note.layers[o.layer]?.visible !== false && o.text.trim() !== '')
-    .map((o) => ({ o, box: objectBounds(o) }))
+    .filter((o) => note.layers[o.layer]?.visible !== false)
+    .map((o) => ({ o, text: isTextObject(o) ? o.text : isEquationObject(o) ? o.latex : '' }))
+    .filter(({ text }) => text.trim() !== '')
+    .map((entry) => ({ ...entry, box: objectBounds(entry.o) }))
     .sort((a, b) => a.box.y - b.box.y || a.box.x - b.box.x)
-    .map(({ o }) => o.text)
+    .map(({ text }) => text)
     .join('\n');
+}
+
+/** The scale an equation takes at the size `size` of the tool (its em on the page, device units). */
+export function equationScale(size: number): number {
+  return size / EQUATION_UNITS_PER_EM;
+}
+
+/** The em of an equation on the page (device units). */
+export function equationSize(object: Pick<PageObject, 'scale'>): number {
+  return object.scale * EQUATION_UNITS_PER_EM;
+}
+
+/**
+ * A new equation from its drawing (`lib/equation.ts`), at the tool's size, its left end at `at` and its middle at `at`'s
+ * height (where the page was tapped).
+ */
+export function newEquationObject(fields: {
+  id: string;
+  layer: number;
+  t: number;
+  at: Vec;
+  size: number;
+  latex: string;
+  drawing: { path: string; width: number; height: number };
+  color: Rgba;
+}): EquationObject {
+  const scale = equationScale(fields.size);
+  return {
+    kind: 'equation',
+    id: fields.id,
+    layer: fields.layer,
+    t: fields.t,
+    x: fields.at.x,
+    y: fields.at.y - (fields.drawing.height * scale) / 2,
+    scale,
+    quarterTurns: 0,
+    width: fields.drawing.width,
+    height: fields.drawing.height,
+    latex: fields.latex,
+    path: fields.drawing.path,
+    color: { ...fields.color },
+  };
+}
+
+/** The equation with a new source and drawing, its placement kept and the top-left corner of its box where it was. */
+export function redrawnEquation(
+  object: EquationObject,
+  latex: string,
+  drawing: { path: string; width: number; height: number },
+): EquationObject {
+  const corner = objectBounds(object);
+  const next: EquationObject = { ...object, latex, path: drawing.path, width: drawing.width, height: drawing.height };
+  const box = objectBounds(next);
+  return { ...next, x: next.x + corner.x - box.x, y: next.y + corner.y - box.y };
+}
+
+/**
+ * The equations at `indices` given the tool's size `size` (their em on the page), the top-left corner of each staying;
+ * the others, and those already so, stay the same objects.
+ */
+export function resizeEquations(note: Note, indices: Iterable<number>, size: number): Note {
+  const only = indexSet(indices);
+  const scale = equationScale(size);
+  let changed = false;
+  const objects = objectsOf(note).map((o, i) => {
+    if (!only.has(i) || !isEquationObject(o) || o.scale === scale) return o;
+    changed = true;
+    const corner = objectBounds(o);
+    const next = { ...o, scale };
+    const box = objectBounds(next);
+    return { ...next, x: next.x + corner.x - box.x, y: next.y + corner.y - box.y };
+  });
+  return changed ? withObjects(note, objects) : note;
+}
+
+/** The topmost equation of `only`'s layer (visible) whose box, grown by `margin`, holds `p` (a tap of the equation tool). */
+export function equationAt(note: Pick<Note, 'layers' | 'objects'>, p: Vec, margin: number, only?: number): number | null {
+  const hit = hitObject(note, p, margin, only);
+  return hit !== null && isEquationObject(objectsOf(note)[hit]) ? hit : null;
+}
+
+/** Whether an object takes the tool's colour (a text frame or an equation this version reads). */
+export function takesColor(object: PageObject): boolean {
+  return isDrawnObject(object);
 }
 
 /** A new text frame (its box measured). */
@@ -283,11 +384,11 @@ export function objectDrawingOrder(note: Pick<Note, 'layers' | 'objects'>, only?
 }
 
 /**
- * Whether the editor can select and change an object: a kind it draws (text frames). An object of a kind this version does
- * not know is drawn nowhere, so it is not selectable either: it only moves with the page.
+ * Whether the editor can select and change an object: a kind it draws (text frames, equations). An object of a kind this
+ * version does not know is drawn nowhere, so it is not selectable either: it only moves with the page.
  */
 export function selectable(object: PageObject): boolean {
-  return isTextObject(object);
+  return isDrawnObject(object);
 }
 
 /** The objects a lasso `polygon` takes: selectable ones of visible layers (of `only` alone when given) whose centre is inside. */

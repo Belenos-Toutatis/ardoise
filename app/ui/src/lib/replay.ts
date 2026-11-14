@@ -19,7 +19,7 @@
  */
 import { drawingOrder } from './editor/hit';
 import { objectDrawingOrder, objectsOf } from './editor/objects';
-import { isTextObject, type Note, type PageObject, type Stroke } from './note';
+import { isDrawnObject, type Note, type PageObject, type Stroke } from './note';
 import { MAX_SPEED, MIN_SPEED } from './video';
 
 /** How the note is replayed. */
@@ -82,7 +82,7 @@ function makeClock(note: Note, maxPauseMs: number | null): Clock {
 
   const objects = objectsOf(note);
   const objectTimes: (number | null)[] = objects.map(() => null);
-  for (const i of objectDrawingOrder(note)) if (isTextObject(objects[i])) objectTimes[i] = Math.max(0, objects[i].t);
+  for (const i of objectDrawingOrder(note)) if (isDrawnObject(objects[i])) objectTimes[i] = Math.max(0, objects[i].t);
 
   // When something is being drawn: the union of the strokes' spans and of the instants objects appear.
   const spans: [number, number][] = order.map((i) => [times[i][0], times[i][times[i].length - 1]]);

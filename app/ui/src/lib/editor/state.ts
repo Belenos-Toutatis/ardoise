@@ -3,7 +3,7 @@
  * `Doc`, what undo/redo restores), and the tool settings (not part of the history: undo never
  * changes the pen). Doc operations keep the selection and the active layer consistent.
  *
- * The selection holds strokes (`selection`) and page objects (`objectSelection`, text frames: `lib/editor/objects.ts`),
+ * The selection holds strokes (`selection`) and page objects (`objectSelection`, text frames and equations: `lib/editor/objects.ts`),
  * chosen and changed together: a lasso takes both, a move, a resize, a delete, a copy or a duplicate acts on both.
  */
 import type { PixelsRef } from '../background';
@@ -19,7 +19,9 @@ import {
   objectsOf,
   remapObjectLayers,
   removeObjects,
+  resizeEquations,
   selectable,
+  takesColor,
   transformObjects,
   withObjects,
   type TextChange,
@@ -28,8 +30,11 @@ import * as ops from './ops';
 import type { Orientation } from './page-size';
 import type { ShapeKind } from './shape-tools';
 
-/** What a drag (or a tap) on the page does: select, write, draw a line, a rectangle or an ellipse (`ShapeKind`), erase, type text, move the page, crop. */
-export type Mode = 'select' | 'pen' | ShapeKind | 'eraser' | 'text' | 'pan' | 'crop';
+/**
+ * What a drag (or a tap) on the page does: select, write, draw a line, a rectangle or an ellipse (`ShapeKind`), erase,
+ * type text, put an equation, move the page, crop.
+ */
+export type Mode = 'select' | 'pen' | ShapeKind | 'eraser' | 'text' | 'equation' | 'pan' | 'crop';
 
 /** The modes whose drag puts new ink on the active layer (they need it visible). */
 export function inksNewStrokes(mode: Mode): boolean {
@@ -38,7 +43,15 @@ export function inksNewStrokes(mode: Mode): boolean {
 
 /** The modes that put something new on the active layer (they need it visible). */
 export function addsToLayer(mode: Mode): boolean {
-  return inksNewStrokes(mode) || mode === 'text';
+  return inksNewStrokes(mode) || mode === 'text' || mode === 'equation';
+}
+
+/** The equation tool's size (SPEC §4.4): the em of a new equation, one of `TEXT_SIZES`; its colour is the tool's. */
+export const DEFAULT_EQUATION_SIZE = 600;
+
+/** The equation tool's size of `tools`. */
+export function equationToolSize(tools: ToolSettings): number {
+  return tools.equationSize ?? DEFAULT_EQUATION_SIZE;
 }
 export type EraserMode = 'whole' | 'partial';
 
@@ -63,6 +76,8 @@ export interface ToolSettings {
   eraserRadius: number;
   /** The text tool's family, weight and size; absent: `DEFAULT_TEXT`. */
   text?: TextSettings;
+  /** The equation tool's size (device units, an em); absent: `DEFAULT_EQUATION_SIZE`. */
+  equationSize?: number;
 }
 
 export interface Doc {
@@ -215,15 +230,15 @@ export function erase(doc: Doc, path: readonly Vec[], radius: number, mode: Eras
 }
 
 /**
- * The style on the selection, or on the whole note when nothing is selected. Text frames take the colour (the tool and
- * the width are the ink's).
+ * The style on the selection, or on the whole note when nothing is selected. Text frames and equations take the colour
+ * (the tool and the width are the ink's).
  */
 export function applyStyle(doc: Doc, style: ops.StrokeStyle, wholeNote = !hasSelection(doc)): Doc {
   let note = ops.setStyle(doc.note, wholeNote ? null : doc.selection, style);
   if (style.color) {
     const color = style.color;
     const objects = objectsOf(note).map((o, i) =>
-      o.kind === 'text' && (wholeNote || objectSelection(doc).includes(i)) && !sameRgba(o.color as Rgba | undefined, color)
+      takesColor(o) && (wholeNote || objectSelection(doc).includes(i)) && !sameRgba(o.color as Rgba | undefined, color)
         ? { ...o, color: { ...color } }
         : o,
     );
@@ -240,6 +255,12 @@ function sameRgba(a: Rgba | undefined, b: Rgba): boolean {
 export function applyTextStyle(doc: Doc, change: TextChange, engine: TextEngine): Doc {
   if (objectSelection(doc).length === 0) return doc;
   return withNote(doc, changeTexts(doc.note, objectSelection(doc), change, engine));
+}
+
+/** The equation tool's size on the selected equations (their em on the page; their top-left corner stays). */
+export function applyEquationSize(doc: Doc, size: number): Doc {
+  if (objectSelection(doc).length === 0) return doc;
+  return withNote(doc, resizeEquations(doc.note, objectSelection(doc), size));
 }
 
 export function transformSelection(doc: Doc, m: Affine): Doc {

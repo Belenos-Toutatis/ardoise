@@ -168,6 +168,10 @@ const PROBES: Record<string, (v: View) => Promise<void>> = {
     await v.press('text');
     expect(v.pressed()).toBe('Texte');
   },
+  equation: async (v) => {
+    await v.press('equation');
+    expect(v.pressed()).toBe('Équation');
+  },
   pan: async (v) => {
     await v.press('pan');
     expect(v.pressed()).toBe('Déplacer la page');
