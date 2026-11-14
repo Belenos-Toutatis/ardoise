@@ -52,6 +52,10 @@ const MAX_PRINTED: usize = 60;
 /// * `testdata/golden/`: rendering reference images made by `cargo xtask golden` from synthetic
 ///   notes defined in `crates/ardoise-render/tests/golden.rs`.
 /// * `app/src-tauri/icons/`: the application icons.
+/// * `docs/guide/images/`: the pictures of the guides and of the README, taken by
+///   `app/e2e/screenshots.mjs` from the application running on its demonstration library, with
+///   simulated tablets and a synthetic computer name. Looked at one by one before the folder
+///   was added (2026-11-14): pictures made any other way do not belong there.
 ///
 /// A new folder (docs illustrations, UI assets…) must be added here on purpose, after checking
 /// that its content is synthetic.
@@ -59,6 +63,7 @@ const SYNTHETIC_DATA_DIRS: &[&str] = &[
     "testdata/format/",
     "testdata/golden/",
     "app/src-tauri/icons/",
+    "docs/guide/images/",
 ];
 
 /// The only folder where `.jsonl` diagnostic captures may be committed: captures that were
