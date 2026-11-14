@@ -289,9 +289,20 @@ export const q20Journeys = [
             if (attempt >= 2) throw error;
           }
         }
-        await app.click('button[data-action="page-previous"]');
-        await app.click('button[data-action="page-previous"]');
-        await app.waitFor(`document.querySelector('.editor')?.dataset.path === ${j(path[0])}`, 'the editor on Gamma');
+        // One turn at a time: a second turn asked while the first note is still being read is dropped by the editor.
+        const turnBack = async (to, what) => {
+          for (let attempt = 0; ; attempt++) {
+            await app.click('button[data-action="page-previous"]');
+            try {
+              await app.waitFor(`document.querySelector('.editor')?.dataset.path === ${j(to)}`, what, 3000);
+              return;
+            } catch (error) {
+              if (attempt >= 2) throw error;
+            }
+          }
+        };
+        await turnBack(path[1], 'the editor back on Alpha');
+        await turnBack(path[0], 'the editor on Gamma');
         await app.click('.editor button', l('editor.back'));
         await app.waitFor(`document.querySelector('.note-card') !== null`, 'the library again');
       });
