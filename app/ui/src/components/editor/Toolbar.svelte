@@ -10,7 +10,7 @@
   import WidthControl from '../WidthControl.svelte';
   import { shapePrefs, type ShapeToggle } from '../../lib/editor/shape-prefs.svelte';
   import { isShapeKind } from '../../lib/editor/shape-tools';
-  import { equationToolSize, textSettings, type EraserMode, type Mode, type TextSettings, type ToolSettings } from '../../lib/editor/state';
+  import { equationToolSize, selectWay, textSettings, type EraserMode, type Mode, type TextSettings, type ToolSettings } from '../../lib/editor/state';
   import { CSS_FAMILY, TEXT_SIZES, TEXT_SIZE_NAMES } from '../../lib/text';
   import { FONT_FAMILIES } from '../../lib/note';
   import { t } from '../../lib/i18n.svelte';
@@ -134,9 +134,9 @@
     return () => window.removeEventListener('pointerdown', away, true);
   });
 
-  /** `icon`: a glyph; the shape tools have a drawn one (`ShapeIcon`). */
+  /** `icon`: a glyph; the selection and the shape tools have a drawn one. */
   const MODES: { mode: Mode; icon?: string }[] = [
-    { mode: 'select', icon: '⬚' },
+    { mode: 'select' },
     { mode: 'pen', icon: '✎' },
     { mode: 'line' },
     { mode: 'rectangle' },
@@ -147,6 +147,12 @@
     { mode: 'eraser', icon: '⌫' },
     { mode: 'pan', icon: '✋' },
   ];
+
+  /** The selection tool's way (rectangle or lasso): its button says which, and the next click on it turns to the other; from another tool, a click gives the rectangle. */
+  const way = $derived(tools.mode === 'select' ? selectWay(tools) : 'rectangle');
+
+  /** The label and the tooltip of a tool's button: the selection tool's name says how it selects now (the help line says that another click changes it). */
+  const modeLabel = (mode: Mode) => (mode === 'select' ? t(way === 'lasso' ? 'editor.modes.selectLasso' : 'editor.modes.selectRectangle') : t(`editor.modes.${mode}`));
 
   const text = $derived(textSettings(tools));
   /** The text options show with the text tool, or when text frames are selected. */
@@ -184,14 +190,20 @@
         class:active={tools.mode === mode}
         aria-pressed={tools.mode === mode}
         disabled={locked}
-        title={t(`editor.modes.${mode}`)}
+        title={modeLabel(mode)}
+        data-way={mode === 'select' ? way : undefined}
         onclick={() => onmode(mode)}
       >
         {#if icon}
           <span aria-hidden="true">{icon}</span>
         {:else}
           <svg class="shape-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-            {#if mode === 'line'}
+            {#if mode === 'select' && way === 'rectangle'}
+              <rect x="4" y="6" width="16" height="12" stroke-dasharray="3 2.5" />
+            {:else if mode === 'select'}
+              <path d="M12 5C7.6 5 4 7.2 4 10s3.6 5 8 5 8-2.2 8-5-3.6-5-8-5z" stroke-dasharray="3 2.5" />
+              <path d="M9.5 14.6C9 17 8 18.5 6 19.5" />
+            {:else if mode === 'line'}
               <path d="M5 19 19 5" />
             {:else if mode === 'rectangle'}
               <rect x="4" y="6" width="16" height="12" rx="1" />
@@ -200,7 +212,7 @@
             {/if}
           </svg>
         {/if}
-        <span class="tool-label">{t(`editor.modes.${mode}`)}</span>
+        <span class="tool-label">{modeLabel(mode)}</span>
       </button>
     {/each}
   </div>
@@ -471,7 +483,7 @@
           {/if}
         </div>
       </div>
-      <p class="group label select-help">{t('editor.selectHelp')}</p>
+      <p class="group label select-help">{t(way === 'lasso' ? 'editor.selectHelpLasso' : 'editor.selectHelpRectangle')}</p>
     {/if}
   {/if}
 

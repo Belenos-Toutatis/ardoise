@@ -156,13 +156,13 @@ describe('straighten shapes', () => {
     await key('v');
     const button = action('straighten');
     expect(button.disabled).toBe(true);
-    expect(button.title).toBe("Sélectionnez d'abord des traits avec le lasso, puis redressez-les.");
+    expect(button.title).toBe("Sélectionnez d'abord des traits, puis redressez-les.");
     expect(button.textContent).toContain('Redresser les formes');
     // The help line of the selection tool tells about it.
     expect(document.body.textContent).toContain('F : redresser les formes');
     // The key says the same instead of doing nothing.
     await key('f');
-    expect(notice()).toBe("Sélectionnez d'abord des traits avec le lasso, puis redressez-les.");
+    expect(notice()).toBe("Sélectionnez d'abord des traits, puis redressez-les.");
 
     await key('a', { ctrlKey: true });
     expect(action('straighten').disabled).toBe(false);

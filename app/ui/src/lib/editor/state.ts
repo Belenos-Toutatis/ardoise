@@ -55,6 +55,23 @@ export function equationToolSize(tools: ToolSettings): number {
 }
 export type EraserMode = 'whole' | 'partial';
 
+/**
+ * How the selection tool selects: a rectangle (a drag from one corner to the opposite one) or a lasso (a free outline).
+ * A click on the tool's button from another tool gives the rectangle; a click while it is the tool turns to the other
+ * one, and so on (`nextSelectWay`).
+ */
+export type SelectWay = 'rectangle' | 'lasso';
+
+/** The way the selection tool selects with `tools`: absent is the rectangle. */
+export function selectWay(tools: ToolSettings): SelectWay {
+  return tools.select ?? 'rectangle';
+}
+
+/** The other way. */
+export function nextSelectWay(way: SelectWay): SelectWay {
+  return way === 'rectangle' ? 'lasso' : 'rectangle';
+}
+
 /** The text tool's settings (SPEC §4.4): its colour is the tool's colour (`ToolSettings.color`). */
 export interface TextSettings {
   font: FontFamily;
@@ -74,6 +91,11 @@ export interface ToolSettings {
   eraser: EraserMode;
   /** Eraser radius, device units. */
   eraserRadius: number;
+  /**
+   * The selection tool's way (`SelectWay`); absent: the rectangle. It lasts while the tool is the active one: coming
+   * back to it from another tool starts at the rectangle again.
+   */
+  select?: SelectWay;
   /** The text tool's family, weight and size; absent: `DEFAULT_TEXT`. */
   text?: TextSettings;
   /** The equation tool's size (device units, an em); absent: `DEFAULT_EQUATION_SIZE`. */

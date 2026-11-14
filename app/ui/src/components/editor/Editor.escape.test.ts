@@ -173,9 +173,29 @@ describe('step 1: the action in progress', () => {
     expect(onclose).not.toHaveBeenCalled();
   });
 
+  it('drops a rectangle being drawn without selecting anything', async () => {
+    const { pointer, escape, tool, selected, onclose } = await render();
+    tool('Sélection : rectangle').click();
+    await tick();
+    const marquee = () => document.querySelectorAll('svg.canvas rect.marquee').length;
+    pointer('pointerdown', 1000, 1000);
+    pointer('pointermove', 29_000, 20_000);
+    await tick();
+    expect(marquee()).toBe(1);
+    await escape();
+    expect(marquee()).toBe(0);
+    pointer('pointerup', 29_000, 20_000);
+    await tick();
+    expect(selected()).toBe(false);
+    expect(onclose).not.toHaveBeenCalled();
+  });
+
   it('drops a lasso being drawn without selecting anything', async () => {
     const { pointer, escape, tool, selected, onclose } = await render();
-    tool('Sélection').click();
+    tool('Sélection : rectangle').click();
+    await tick();
+    // A second click on the tool: the lasso.
+    tool('Sélection : rectangle').click();
     await tick();
     const lasso = () => document.querySelectorAll('svg.canvas polyline.lasso').length;
     pointer('pointerdown', 1000, 1000);
@@ -268,14 +288,14 @@ describe('step 2: the panel or the tool mode that is open', () => {
     expect(action('manual-crop')!.getAttribute('aria-pressed')).toBe('true');
     await escape();
     expect(action('manual-crop')!.getAttribute('aria-pressed')).toBe('false');
-    expect(mode()).toBe('Sélection');
+    expect(mode()).toBe('Sélection : rectangle');
     expect(onclose).not.toHaveBeenCalled();
   });
 
   it('closes the setting of « Redresser les formes » before the selection', async () => {
     const { q, action, tool, selectAll, escape, selected, onclose } = await render();
     // The setting belongs to the selection tool.
-    tool('Sélection').click();
+    tool('Sélection : rectangle').click();
     await tick();
     await selectAll();
     action('straighten-settings')!.click();
@@ -304,7 +324,7 @@ describe('step 2: the panel or the tool mode that is open', () => {
 
   it('goes by the order: the setting, then the selection, then the library', async () => {
     const { q, action, tool, selectAll, escape, selected, onclose } = await render();
-    tool('Sélection').click();
+    tool('Sélection : rectangle').click();
     await tick();
     await selectAll();
     action('straighten-settings')!.click();

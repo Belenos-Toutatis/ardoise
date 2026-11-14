@@ -147,6 +147,7 @@
     hasSelection as anySelected,
     mergeDown,
     moveLayer,
+    nextSelectWay,
     objectSelection,
     pasteStrokes,
     removeObjectAt,
@@ -156,6 +157,7 @@
     rotate,
     rotateBackgroundImage,
     selectAll,
+    selectWay,
     select as selectItems,
     selectedObjects,
     selectedStrokes,
@@ -1482,7 +1484,18 @@
     if (mode !== 'text') endText();
     if (mode !== 'equation') cancelEquation();
     if (mode !== 'bookmark') endBookmark();
-    tools = { ...tools, mode };
+    // Another tool, and coming back to the selection tool, start at the rectangle again (`SelectWay`).
+    const { select: _way, ...kept } = tools;
+    tools = { ...(mode === tools.mode ? tools : kept), mode };
+  }
+
+  /**
+   * The tool the user chose with its button or its key: the same tool again turns the selection tool from the rectangle
+   * to the lasso and back (the other tools have only one way); anything else is `setMode`.
+   */
+  function chooseMode(mode: Mode) {
+    if (mode === 'select' && tools.mode === 'select') tools = { ...tools, select: nextSelectWay(selectWay(tools)) };
+    else setMode(mode);
   }
 
   // --- Equations (the equation tool) ------------------------------------------------------------
@@ -2660,6 +2673,9 @@
         }
         break;
       case 'select':
+        // Held down, the key does not go round the two ways: one turn per press.
+        if (!(e.repeat && tools.mode === 'select')) chooseMode('select');
+        break;
       case 'pen':
       case 'eraser':
       case 'text':
@@ -2949,7 +2965,7 @@
       {tools}
       {customColors}
       {hasSelection}
-      onmode={setMode}
+      onmode={chooseMode}
       ontool={setTool}
       oncolor={setColor}
       oncustomcolor={addCustomColor}

@@ -1343,9 +1343,14 @@ The toolbar offers these tools (**Tool**):
 - **Equation**: a formula or a chemical equation written in LaTeX (see **Writing an equation**, below).
 - **Bookmark**: a word or a short phrase put at a spot of the page, to find a passage again (see **Putting bookmarks**, below).
 - **Eraser**: **Whole strokes** or **Partial**, with its **Size**. It erases only on the chosen layer (see **Layers**).
-- **Select** (the lasso): draw around strokes and texts of the chosen layer to select them (a text is taken when its middle
-  is in the lasso; a click on a text takes it alone); `Shift` + lasso adds, `Ctrl` + lasso removes. The
-  **Selection** block, above the open tab of the side panel, offers **Copy**, **Cut**, **Paste**, **Duplicate**,
+- **Select**: a **rectangle** or a **lasso**, as you like, on the strokes and texts of the chosen layer. A click on **Select**
+  (from another tool) gives the **rectangle**: drag from one corner to the opposite one to select what it holds. Clicking the
+  button again, or pressing `V` again, switches to the **lasso**: draw around the items freehand; another click goes back to
+  the rectangle, and so on. The button ("Select: rectangle" or "Select: lasso"), its tooltip and the help line below say which of
+  the two is on. Both take the same things for the same area: a stroke when at least half of its points are inside, a text, an
+  equation or a bookmark when its middle is inside. A click on a stroke or a text takes it alone, a click on the empty page
+  deselects; `Shift` + rectangle (or lasso) adds, `Ctrl` + rectangle (or lasso) removes. Coming back to **Select** from another
+  tool always gives the rectangle again. The **Selection** block, above the open tab of the side panel, offers **Copy**, **Cut**, **Paste**, **Duplicate**,
   **Straighten shapes**, **Delete**. Changes of
   colour, ink and width then apply to the selection; you move it (by grabbing it inside its frame) and resize it (by the
   frame's handles) with the mouse, or with the pen (see below and chapter 12).
@@ -1425,7 +1430,7 @@ Under the toolbar, with the **Text** tool or when texts are selected:
 These settings apply to the whole frame (no formatting inside a frame): to the frame you are typing, else to the selected
 texts, and to the next frames. Clicking these buttons does not end the typing.
 
-A text lives with the strokes: it is selected with the lasso, moved, resized (it grows or shrinks with the strokes; choosing a
+A text lives with the strokes: it is selected with the rectangle or the lasso, moved, resized (it grows or shrinks with the strokes; choosing a
 size gives it that size again), duplicated, copied and pasted, deleted, turned with the page, put on the chosen layer and
 follows its layer. The eraser does not erase it: select it and delete it. It appears at once in the replay and in videos, at
 the moment it was put down, and is in every export (images, SVG, PDF, clipboard, printing, projection, network share; in the
@@ -1600,7 +1605,7 @@ The **Layers** zone, in the **Layers** tab of the side panel (open at the start)
 transparent sheet laid over the others: a tablet's writing, your annotations, a correction.
 
 - **Choosing a layer**: click its row, which gets a frame. **The pen, the eraser and the selection act only on the
-  chosen layer**: the lasso, the click, `Ctrl + A` (**Select everything**) and the eraser take only its strokes, and what
+  chosen layer**: the rectangle, the lasso, the click, `Ctrl + A` (**Select everything**) and the eraser take only its strokes, and what
   you draw, paste or duplicate goes onto it. To touch the ink of another layer, choose it first. Choosing another layer
   clears the selection. When a note opens, the chosen layer is the highest of the shown layers.
 - **Showing or hiding**: the *eye* at the start of the row; it is *crossed* when the layer is hidden, and its name turns
@@ -1982,7 +1987,7 @@ presentation can be used with the pen or a finger.
 - The stroke *gets thicker with pressure*.
 - The *back of the pen* (the eraser) *erases*, with the eraser settings (**Whole strokes** or **Partial**), whatever the
   tool chosen. An eraser circle appears when it hovers over the page.
-- The pen's *button* draws a *selection lasso*, whatever the tool. Afterwards, the pen's *tip* (like a finger) grabs the
+- The pen's *button* draws a *selection lasso*, whatever the tool (even when the **Select** tool is in rectangle mode). Afterwards, the pen's *tip* (like a finger) grabs the
   selection instead of drawing: put down inside the frame, it moves it; put down on a handle, it resizes it (with the
   **Pen** and **Eraser** tools). Outside the frame, it draws as usual.
 - A *palm* resting on the screen is ignored while the pen is in use or near the screen.
@@ -2183,7 +2188,7 @@ keys stay as described in this chapter.
 | `Esc` | In steps, one press per step: drop the gesture under way, end the typing of a text or an equation (what is written stays; an equation with incorrect code stays in its panel); close the split, the replay, the crop or the **Straighten shapes** setting; deselect; go back to the library, asking whether to save if there are changes (never while a narration is being recorded) |
 | `Shift`, `Alt` (held while drawing a shape) | Invert **Regular shape** (`Shift`) or **From the centre** (`Alt`) for that stroke |
 | `Alt + ←`, `Alt + →` | **Previous page**, **Next page** (the note before, the note after in the library) |
-| `V`, `P`, `E`, `T`, `M`, `B`, `H` | Tools **Select**, **Pen**, **Eraser**, **Text**, **Equation**, **Bookmark**, **Move the page** |
+| `V`, `P`, `E`, `T`, `M`, `B`, `H` | Tools **Select**, **Pen**, **Eraser**, **Text**, **Equation**, **Bookmark**, **Move the page** (`V` when **Select** is already the tool: switches from the rectangle to the lasso, and back) |
 | `Space` (held) | Move the page (unless a button has the focus: `Space` then works that button, a rail icon included) |
 | `F` | **Straighten shapes** |
 | `R` | **Replay** |

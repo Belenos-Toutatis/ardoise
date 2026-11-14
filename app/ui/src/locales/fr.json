@@ -1028,6 +1028,8 @@
     "modes": {
       "label": "Outil",
       "select": "Sélection",
+      "selectRectangle": "Sélection : rectangle",
+      "selectLasso": "Sélection : lasso",
       "pen": "Stylo",
       "line": "Ligne",
       "rectangle": "Rectangle",
@@ -1247,7 +1249,8 @@
       "tool": "Encre",
       "width": "Épaisseur"
     },
-    "selectHelp": "Lasso : sélectionner · Maj+lasso : ajouter · Ctrl+lasso : retirer · Double-clic sur un texte ou une équation : le modifier · F : redresser les formes · Échap : tout désélectionner",
+    "selectHelpRectangle": "Rectangle : tracez un rectangle pour sélectionner · Maj+rectangle : ajouter · Ctrl+rectangle : retirer · Un nouveau clic sur le bouton (ou V) : lasso · Double-clic sur un texte ou une équation : le modifier · F : redresser les formes · Échap : tout désélectionner",
+    "selectHelpLasso": "Lasso : tracez un contour pour sélectionner · Maj+lasso : ajouter · Ctrl+lasso : retirer · Un nouveau clic sur le bouton (ou V) : rectangle · Double-clic sur un texte ou une équation : le modifier · F : redresser les formes · Échap : tout désélectionner",
     "selection": {
       "label": "Sélection",
       "count": "Traits sélectionnés : {count}",
@@ -1266,7 +1269,7 @@
     "straighten": {
       "button": "Redresser les formes",
       "hint": "Transforme les traits sélectionnés qui ressemblent à une droite, un cercle, une ellipse, un rectangle ou une flèche en formes nettes (touche F). Les autres traits, dont l'écriture, ne changent pas.",
-      "disabledHint": "Sélectionnez d'abord des traits avec le lasso, puis redressez-les.",
+      "disabledHint": "Sélectionnez d'abord des traits, puis redressez-les.",
       "doneOne": "1 forme redressée (Ctrl+Z pour annuler).",
       "doneMany": "{count} formes redressées (Ctrl+Z pour annuler).",
       "none": "Aucune forme reconnue dans la sélection. Ardoise redresse les droites et les flèches d'au moins {line} mm, les cercles, ellipses et rectangles d'au moins {closed} mm, tracés assez nettement (réglage : le petit bouton à droite du bouton). Sélectionnez les dessins plutôt que le texte : un petit ovale debout (moins de 2,5 cm) ressemble à un O ou à un 0 et ne change pas, comme tout ce qui n'est pas une forme nette.",
@@ -1274,7 +1277,7 @@
         "button": "Réglage du redressement",
         "title": "Redresser les formes",
         "count": {
-          "noSelection": "Sélectionnez des traits avec le lasso pour voir ce qui serait redressé.",
+          "noSelection": "Sélectionnez des traits pour voir ce qui serait redressé.",
           "none": "Avec ces valeurs, aucune forme n'est reconnue dans la sélection.",
           "some": "Avec ces valeurs : {shapes} sur {strokes}.",
           "shapes": {
@@ -1478,7 +1481,7 @@
     "backgroundLoadFailed": "L'image de fond de cette note n'a pas pu être chargée ({message}). La note s'ouvre sans elle ; l'image reste dans le fichier tant que vous ne la retirez pas.",
     "keys": {
       "list": {
-        "select": "Outil Sélection",
+        "select": "Outil Sélection (une nouvelle pression : rectangle ou lasso)",
         "pen": "Outil Stylo",
         "eraser": "Outil Gomme",
         "text": "Outil Texte",

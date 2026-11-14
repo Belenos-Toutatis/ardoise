@@ -1433,8 +1433,14 @@ La barre d'outils propose les outils suivants (**Outil**) :
   plus bas).
 - **Gomme** : **Traits entiers** ou **Partielle**, avec sa **Taille**. Elle n'efface que sur le calque choisi (voir
   **Calques**).
-- **Sélection** (le lasso) : entourez des traits et des textes du calque choisi pour les sélectionner (un texte est pris quand
-  son milieu est dans le lasso ; un clic sur un texte le prend seul) ; `Maj` + lasso ajoute, `Ctrl` + lasso retire. Le
+- **Sélection** : un **rectangle** ou un **lasso**, au choix, sur les traits et les textes du calque choisi. Un clic sur
+  **Sélection** (depuis un autre outil) donne le **rectangle** : faites glisser d'un coin à l'autre pour sélectionner ce qu'il
+  contient. Un nouveau clic sur le bouton, ou un nouvel appui sur `V`, passe au **lasso** : entourez les éléments à main levée ;
+  un autre clic revient au rectangle, et ainsi de suite. Le bouton (« Sélection : rectangle » ou « Sélection : lasso »), son
+  infobulle et la ligne d'aide dessous disent lequel des deux est actif. Les deux prennent la même chose pour la même zone :
+  un trait quand la moitié au moins de ses points est dedans, un texte, une équation ou un signet quand son milieu est dedans.
+  Un clic sur un trait ou sur un texte le prend seul, un clic sur la page vide désélectionne ; `Maj` + rectangle (ou lasso)
+  ajoute, `Ctrl` + rectangle (ou lasso) retire. Revenir à **Sélection** depuis un autre outil redonne toujours le rectangle. Le
   bloc **Sélection**, au-dessus de l'onglet ouvert du panneau de côté, propose **Copier**, **Couper**, **Coller**,
   **Dupliquer**, **Redresser les formes**, **Supprimer**.
   Les changements de couleur, d'encre et d'épaisseur s'appliquent alors à la sélection ; on la déplace (en la saisissant
@@ -1521,7 +1527,7 @@ Sous la barre d'outils, avec l'outil **Texte** ou quand des textes sont sélecti
 Ces réglages s'appliquent à tout le cadre (pas de mise en forme à l'intérieur d'un cadre) : au cadre que vous tapez, sinon aux
 textes sélectionnés, et aux prochains cadres. Un clic sur ces boutons ne fait pas quitter la saisie.
 
-Un texte vit avec les traits : il se sélectionne au lasso, se déplace, se redimensionne (il grandit ou rapetisse avec les
+Un texte vit avec les traits : il se sélectionne au rectangle ou au lasso, se déplace, se redimensionne (il grandit ou rapetisse avec les
 traits ; choisir une taille lui rend cette taille), se duplique, se copie et se colle, se supprime, tourne avec la page, va sur
 le calque choisi et suit son calque. La gomme ne l'efface pas : sélectionnez-le et supprimez-le. Il apparaît d'un coup dans la
 relecture et dans les vidéos, au moment où il a été posé, et figure dans tous les exports (images, SVG, PDF, presse-papiers,
@@ -1706,7 +1712,7 @@ La zone **Calques**, dans l'onglet **Calques** du panneau de côté (ouvert au d
 une feuille transparente superposée aux autres : l'écriture d'une tablette, vos annotations, une correction.
 
 - **Choisir un calque** : cliquez sur sa ligne, qui s'entoure d'un cadre. **Le stylo, la gomme et la sélection n'agissent
-  que sur le calque choisi** : le lasso, le clic, `Ctrl + A` (**Tout sélectionner**) et la gomme ne prennent que ses
+  que sur le calque choisi** : le rectangle, le lasso, le clic, `Ctrl + A` (**Tout sélectionner**) et la gomme ne prennent que ses
   traits, et ce que vous dessinez, collez ou dupliquez y va. Pour toucher à l'encre d'un autre calque, choisissez-le
   d'abord. Changer de calque choisi enlève la sélection. À l'ouverture d'une note, le calque choisi est le plus haut des
   calques affichés.
@@ -2106,7 +2112,8 @@ présentation s'utilisent au stylet ou au doigt.
 - Le trait *s'épaissit avec la pression*.
 - Le *dos du stylet* (la gomme) *efface*, avec les réglages de la gomme (**Traits entiers** ou **Partielle**), quel que
   soit l'outil choisi. Un cercle de gomme apparaît quand il survole la page.
-- Le *bouton du stylet* trace un *lasso de sélection*, quel que soit l'outil. Ensuite, la *pointe* du stylet (comme un
+- Le *bouton du stylet* trace un *lasso de sélection*, quel que soit l'outil (même quand l'outil **Sélection** est en mode
+  rectangle). Ensuite, la *pointe* du stylet (comme un
   doigt) saisit la sélection au lieu de dessiner : posée dans le cadre, elle la déplace ; posée sur une poignée, elle la
   redimensionne (avec les outils **Stylo** et **Gomme**). Hors du cadre, elle dessine comme d'habitude.
 - La *paume* posée sur l'écran est ignorée tant que le stylet est utilisé ou proche de l'écran.
@@ -2313,7 +2320,7 @@ l'impression d'Ardoise (jamais l'impression de la fenêtre comme une page web). 
 | `Échap` | Par étapes, un appui par étape : abandonner le geste en cours, terminer la saisie d'un texte ou d'une équation (ce qui est écrit reste ; une équation au code incorrect reste dans son panneau) ; fermer la découpe, la relecture, le recadrage ou le réglage de **Redresser les formes** ; désélectionner ; revenir à la bibliothèque, en demandant d'enregistrer s'il y a des modifications (jamais pendant l'enregistrement d'une narration) |
 | `Maj`, `Alt` (tenues pendant le tracé d'une forme) | Inverser **Forme régulière** (`Maj`) ou **Depuis le centre** (`Alt`) pour ce tracé |
 | `Alt + ←`, `Alt + →` | **Page précédente**, **Page suivante** (la note d'avant, la note d'après dans la bibliothèque) |
-| `V`, `P`, `E`, `T`, `M`, `B`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Texte**, **Équation**, **Signet**, **Déplacer la page** |
+| `V`, `P`, `E`, `T`, `M`, `B`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Texte**, **Équation**, **Signet**, **Déplacer la page** (`V` quand **Sélection** est déjà l'outil : passe du rectangle au lasso, et inversement) |
 | `Espace` (maintenu) | Déplacer la page (sauf si un bouton a le focus : `Espace` agit alors sur ce bouton, y compris une icône du rail) |
 | `F` | **Redresser les formes** |
 | `R` | **Relecture** |

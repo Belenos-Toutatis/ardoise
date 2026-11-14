@@ -50,7 +50,7 @@ The library is the one configured for this PC. A `LibraryWatcher` runs while the
   tags, favourite, trash; drag notes onto a binder in the sidebar; conflict copies flagged; refresh on
   `library-changed`.
 - **Trash**: restore, delete for good, empty (with confirmation).
-- **Editor**: toolbar (tools: select/lasso, pen, eraser whole/partial, pan; ink tool, colour (Inkspace palette +
+- **Editor**: toolbar (tools: select (a rectangle, then a lasso at the next click on its button or `V`: `SelectWay`, docs/questions.md Q22), pen, eraser whole/partial, pan; ink tool, colour (Inkspace palette +
   remembered custom colours), width; paper, template, texture; rotate ¼ turn; crop auto/manual; undo/redo; save), a
   side panel whose last block is the layers zone (`LayersZone.svelte`, shared with live mode: a click on a row chooses
   the layer that the pen, the eraser and the selection act on; eye, pencil, up/down/merge on the chosen row, « Add a
@@ -127,8 +127,9 @@ when `buttons & 32` (or `button === 5`); anything else is a mouse (its behaviour
 - The stroke width follows the pen's pressure (it already did: the editor records `pointer.pressure`, the geometry
   maps it to the diameter). A mouse keeps its constant 0.5, a finger a constant 0.6 (`inkPressure`), a pen reporting
   0 counts as 0.6.
-- **Barrel button** (`buttons & 2` on a pen): a **temporary lasso**, whatever the tool; the selection it makes is the
-  one the Select tool would make (Shift adds, Ctrl removes), and the tool does not change. A mouse's right button is
+- **Barrel button** (`buttons & 2` on a pen): a **temporary lasso**, whatever the tool and whatever the way of the Select
+  tool (rectangle or lasso, below); the selection it makes is the one the Select tool would make (Shift adds, Ctrl
+  removes), and the tool does not change. A mouse's right button is
   not the barrel. Pressing the barrel button of a pen that is not drawing may arrive as a `pointermove` whose `buttons`
   changed, with no `pointerdown` (this is what WebView2 does with the DevTools protocol): it starts the lasso too, and
   releasing the button ends it. The DevTools protocol cannot send the eraser button (it drops bit 32), so the eraser
@@ -213,6 +214,7 @@ Tests build an archive from a fake exe and a throwaway guide.
 - **Errors.** `genericError()` (api.ts) composes « Une erreur est survenue. » with the coded phrase made a sentence; `saveFailed` events carry the library error's `code`.
 - **Long PDF.** `cancel_create_notes` sets a flag that `notes_from_file_cancellable` checks before and after each rendered page; the notes already made are removed and the call fails with the code `cancelled`. The dialog shows a progress bar and a « Cancel » button while notes are made.
 - **Selection with the pen or a finger.** After a lasso made with the pen's barrel button (the tool is still the pen), the tip and a finger move and resize the selection instead of drawing (`barrelPicked` in `Canvas.svelte`; handles are shown); with the selection tool, a finger that would navigate takes hold of the selection when pressed on a handle or inside the frame. A `lostpointercapture` coming from a child (implicit capture of a finger pressed on ink) no longer cancels the gesture.
+- **The selection tool's two ways** (docs/questions.md Q22). `ToolSettings.select` (`'rectangle'`, absent: the rectangle, or `'lasso'`; `selectWay`, `nextSelectWay` in `lib/editor/state.ts`) is tool state, not part of the `Doc` and never in the history. `Editor.chooseMode` (the toolbar's button and the V key, one turn per press: a held key does not go round) turns it when the tool is already the select tool; `setMode`, which every other way of changing tool goes through (the manual crop's end included), drops it, so coming back to the tool always starts at the rectangle, and the toolbar's button offers what a click gives (the rectangle) while another tool is in use. In `Canvas` the rectangle is the same `lasso` drag with `box` set (its `points` are the two corners): it is drawn as `rect.lasso.marquee` (the lasso's dashed look, the danger colour with Ctrl) and ends by asking `selectInLasso` and `objectsInLasso` about the rectangle's four corners, so both ways take the same strokes (half of their samples inside) and the same objects (box centre inside) for the same area; a click and the Shift/Ctrl/frame rules are the lasso's. The pen's barrel button always starts the free lasso (`startBarrelLasso`). Nothing of it reaches the projection, the replay (its tool is the pan) or the exports. The toolbar's button says the way by its title and label (`editor.modes.selectRectangle`, `selectLasso`), its drawn icon (`data-way`) and the help line (`editor.selectHelpRectangle`, `selectHelpLasso`). The live control window's Select tool is not concerned: it stays a lasso.
 
 ## M10: library features
 

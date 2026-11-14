@@ -2,6 +2,10 @@
 
 ## Non publié
 
+### Modifié (demande de l'utilisateur du 2026-11-14 : l'outil Sélection a deux façons de sélectionner)
+
+- **L'outil Sélection de l'éditeur est d'abord un rectangle, puis un lasso** : un clic sur **Sélection** depuis un autre outil donne le **rectangle** (on fait glisser d'un coin de la page au coin opposé, un cadre en pointillés montre la zone) ; un nouveau clic sur le bouton, ou un nouvel appui sur `V`, passe au **lasso** (comme avant) ; un autre clic revient au rectangle, et ainsi de suite. Le bouton, son infobulle (« Sélection : rectangle », « Sélection : lasso »), son icône et la ligne d'aide disent laquelle est active. Les deux prennent la même chose pour la même zone (un trait quand la moitié au moins de ses points est dedans, un texte, une équation ou un signet quand son milieu est dedans) ; `Maj` ajoute, `Ctrl` retire, un clic prend ce qui est dessous, un clic sur la page vide désélectionne, un glissement dans le cadre de la sélection la déplace. Revenir à **Sélection** depuis un autre outil redonne toujours le rectangle ; le choix n'est pas enregistré dans la note. Le bouton du stylet trace toujours un lasso. Dans l'éditeur seulement : l'outil **Sélection** du mode direct reste un lasso. Q22.
+
 ### Ajouté (demandes de l'utilisateur du 2026-11-14 : texte tapé)
 
 - **Le texte tapé revient à la ligne tout seul** : un nouveau cadre revient à la ligne au bord droit de la page (moins 1 cm), à partir de l'endroit où il est posé ; `Entrée` commence un paragraphe, un mot plus long que la ligne est coupé. Un cadre sélectionné seul a deux **poignées sur les côtés** qui changent sa largeur (le texte revient à la ligne, la hauteur suit) ; les poignées des coins l'agrandissent toujours en entier. Les cadres tapés avant gardent leurs lignes tant qu'on ne change pas leur largeur. Même mise en page à l'écran et dans tous les exports ; le format des notes passe en 1.7 (clé `wrapWidth`, qu'une version plus ancienne garde).

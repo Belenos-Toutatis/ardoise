@@ -220,7 +220,7 @@ describe('note editor', () => {
   it('shows the editor in English', async () => {
     setLocale('en');
     const { target, button } = await render('Liste de courses');
-    for (const label of ['Library', 'Save', 'Undo (Ctrl+Z)', 'Pen', 'Eraser', 'Select', 'Black', 'Orange']) {
+    for (const label of ['Library', 'Save', 'Undo (Ctrl+Z)', 'Pen', 'Eraser', 'Select: rectangle', 'Black', 'Orange']) {
       expect(button(label)).toBeTruthy();
     }
     expect(target.textContent).toContain('Layers');
@@ -363,16 +363,13 @@ describe('note editor', () => {
     expect(svg.getAttribute('data-page-height')).toBe('8000');
   });
 
-  it('selects with the lasso, deletes, undoes, and duplicates with Ctrl+C / Ctrl+V', async () => {
+  it('selects with the rectangle, deletes, undoes, and duplicates with Ctrl+C / Ctrl+V', async () => {
     const { target, paths, button, drag, key } = await render('Liste de courses');
-    button('Sélection').click();
+    button('Sélection : rectangle').click();
     await tick();
     await drag([
       [2000, 3000],
-      [13000, 3000],
       [13000, 5000],
-      [2000, 5000],
-      [2000, 3000],
     ]);
     expect(target.querySelector('rect.selection')).toBeTruthy();
     expect(target.textContent).toContain('Traits sélectionnés : 1');
@@ -401,11 +398,14 @@ describe('note editor', () => {
 
   it('removes strokes from the selection with Ctrl+lasso, even started on its frame', async () => {
     const { path, target, button, drag, key } = await render('Liste de courses');
-    button('Sélection').click();
+    // A second click on the tool turns the rectangle into the lasso.
+    button('Sélection : rectangle').click();
+    await tick();
+    button('Sélection : rectangle').click();
     await tick();
     // The Selection tool explains its gestures.
     expect(target.querySelector('.select-help')?.textContent).toBe(
-      'Lasso : sélectionner · Maj+lasso : ajouter · Ctrl+lasso : retirer · Double-clic sur un texte ou une équation : le modifier · F : redresser les formes · Échap : tout désélectionner',
+      'Lasso : tracez un contour pour sélectionner · Maj+lasso : ajouter · Ctrl+lasso : retirer · Un nouveau clic sur le bouton (ou V) : rectangle · Double-clic sur un texte ou une équation : le modifier · F : redresser les formes · Échap : tout désélectionner',
     );
     await key('a', { ctrlKey: true });
     expect(target.textContent).toContain('Traits sélectionnés : 1');
@@ -430,9 +430,43 @@ describe('note editor', () => {
     expect(mockLibrary().notes.get(path)!.note.strokes[0].points[0]).toEqual(before);
   });
 
+  it('adds to the selection with Shift+rectangle and removes from it with Ctrl+rectangle, even started on its frame', async () => {
+    const { path, target, button, drag, key } = await render('Liste de courses');
+    button('Sélection : rectangle').click();
+    await tick();
+    expect(target.querySelector('.select-help')?.textContent).toBe(
+      'Rectangle : tracez un rectangle pour sélectionner · Maj+rectangle : ajouter · Ctrl+rectangle : retirer · Un nouveau clic sur le bouton (ou V) : lasso · Double-clic sur un texte ou une équation : le modifier · F : redresser les formes · Échap : tout désélectionner',
+    );
+    await key('a', { ctrlKey: true });
+    expect(target.textContent).toContain('Traits sélectionnés : 1');
+    const before = structuredClone(mockLibrary().notes.get(path)!.note.strokes[0].points[0]);
+    // Started inside the frame: a rectangle adding what is already selected, not a move.
+    await drag(
+      [
+        [7500, 3000],
+        [13000, 5000],
+      ],
+      { shiftKey: true },
+    );
+    expect(target.textContent).toContain('Traits sélectionnés : 1');
+    // Started inside the frame: the stroke leaves the selection.
+    await drag(
+      [
+        [7500, 3000],
+        [2000, 5000],
+      ],
+      { ctrlKey: true },
+    );
+    expect(target.querySelector('rect.selection')).toBeNull();
+    expect(target.querySelector('.lasso')).toBeNull();
+    // Nothing moved.
+    await key('s', { ctrlKey: true });
+    expect(mockLibrary().notes.get(path)!.note.strokes[0].points[0]).toEqual(before);
+  });
+
   it('moves the selection by dragging it, in one undo step', async () => {
     const { path, target, button, drag, key } = await render('Liste de courses');
-    button('Sélection').click();
+    button('Sélection : rectangle').click();
     await tick();
     await key('a', { ctrlKey: true });
     const before = mockLibrary().notes.get(path)!.note.strokes[0].points[0];
@@ -1033,7 +1067,7 @@ describe('note editor', () => {
     button('+ Ajouter un calque').click();
     await tick();
     await drag(line(5000, 15000, 15000));
-    button('Sélection').click();
+    button('Sélection : rectangle').click();
     await tick();
     // The new layer holds one stroke, the first holds the note's two.
     await key('a', { ctrlKey: true });
@@ -1380,7 +1414,7 @@ describe('note editor: split, copy image and export', () => {
 
   it('says so when the note is empty', async () => {
     const { target, button, key } = await render('Cours de physique');
-    button('Sélection').click();
+    button('Sélection : rectangle').click();
     await tick();
     await key('a', { ctrlKey: true });
     await key('Delete');

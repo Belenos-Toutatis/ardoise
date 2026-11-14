@@ -204,7 +204,7 @@ describe('a frame that wraps', () => {
     const before = (await v.saved())[0];
     // The text tool: no handles (the selection's handles are the selection tool's).
     expect(v.q('[data-slot="wrap-handle-right"]')).toBeNull();
-    v.tool('Sélection').click();
+    v.tool('Sélection : rectangle').click();
     await tick();
     const right = v.q<SVGRectElement>('[data-slot="wrap-handle-right"]')!;
     expect(right).not.toBeNull();
@@ -375,7 +375,7 @@ describe('the Greek palette', () => {
     expect(document.activeElement).toBe(letter(v, 'β'));
     await v.key('ArrowLeft', {}, document.activeElement!);
     expect(document.activeElement).toBe(alpha);
-    v.tool('Sélection').click();
+    v.tool('Sélection : rectangle').click();
     await tick();
     expect(textInput.paletteOpen).toBe(false);
     expect(v.q('[data-slot="greek-palette"]')).toBeNull();

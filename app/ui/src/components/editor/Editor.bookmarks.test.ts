@@ -165,7 +165,7 @@ describe('the bookmark tool', () => {
     await tick();
     expect(v.mode()).toBe('Signet');
     expect(v.q('[data-slot="bookmark-help"]')?.textContent).toContain('signet');
-    v.tool('Sélection').click();
+    v.tool('Sélection : rectangle').click();
     await tick();
     await v.key('b');
     expect(v.mode()).toBe('Signet');
@@ -301,7 +301,7 @@ describe('the bookmark tool', () => {
   it('renames with a double click of the selection tool, and removes by emptying the label', async () => {
     withBookmarks([['Avant', 3000, 5000]]);
     const v = await render();
-    v.tool('Sélection').click();
+    v.tool('Sélection : rectangle').click();
     await tick();
     v.pointer('dblclick', 3200, 5400);
     await tick();
@@ -332,7 +332,7 @@ describe('the bookmark tool', () => {
     withBookmarks([['Ici', 3000, 5000]]);
     const v = await render();
     // A click selects it, a drag from inside its frame moves it.
-    v.tool('Sélection').click();
+    v.tool('Sélection : rectangle').click();
     await tick();
     await v.tap(3200, 5400);
     expect(v.count()).toBe('Traits sélectionnés : 0 — textes, équations et signets : 1');
@@ -361,7 +361,7 @@ describe('the bookmark tool', () => {
     withBookmarks([['Sur un calque caché', 3000, 5000]], 1);
     const v = await render();
     expect(v.labels()).toEqual(['Sur un calque caché']);
-    v.tool('Sélection').click();
+    v.tool('Sélection : rectangle').click();
     await tick();
     await v.tap(3200, 5400);
     expect(v.count()).toBe('Traits sélectionnés : 0 — textes, équations et signets : 1');
@@ -378,7 +378,7 @@ describe('the bookmark tool', () => {
     };
     Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true });
     const v = await render();
-    v.tool('Sélection').click();
+    v.tool('Sélection : rectangle').click();
     await tick();
     await v.tap(3200, 5400);
     await v.key('c', { ctrlKey: true });
