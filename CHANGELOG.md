@@ -2,6 +2,13 @@
 
 ## Non publié
 
+### Ajouté (le README et les guides illustrés)
+
+- **`README.md` mis à jour** : ce que fait Ardoise aujourd'hui (deux tablettes, mode direct et projection, bibliothèque, éditeur, relecture et vidéo, exports et impression), l'état des essais sur le matériel réel, les crédits (MathJax, Latin Modern, Andika) et la limite de l'exécutable à 40 Mo.
+- **Les guides d'utilisation FR et EN en tutoriel illustré** : section « Premiers pas » / « Getting started » (13 étapes du premier lancement à une première note exportée), table des matières cliquable, 26 captures de l'application réelle par langue (`docs/guide/images/fr/` et `en/`, WebP, 1 Mo par langue), bandeau d'état des essais corrigé, passages périmés mis à jour (texte tapé, essais H1 à H7, partage sur le réseau…). Le README reprend les images françaises.
+- **`cargo xtask dist`** copie `docs/guide/images/**` dans l'archive (`guide/images/…`), met les images des guides en HTML avec un fin cadre, et **échoue si un guide montre une image absente** (l'archive passe de 12,4 à 14,2 Mo).
+- **`app/e2e/screenshots.mjs`** reprend les captures sur l'exécutable de production (`node app/e2e/screenshots.mjs <ardoise.exe> docs/guide/images/fr --lang fr [--only …]`, puis `--lang en`) : bibliothèque de démonstration, tablettes simulées, notes écrites avec des événements de stylet (`shots-handwriting.mjs`), aucune boîte de dialogue du système, jamais le micro. Il ne fait pas partie de `cargo xtask e2e`. Le banc (`startApp`) est sorti de `run.mjs` dans `harness.mjs`, sans changer ce que `cargo xtask e2e` lance.
+
 ### Modifié (retour de l'utilisateur du 2026-11-14 : le contenu du sommaire)
 
 - **« Dans le sommaire »** remplace la case « Afficher les dates », qui ne réglait pas ce qui gênait (les lignes de notes elles-mêmes) : trois choix indépendants, les mêmes pour le sommaire du classeur, les signets du PDF du classeur et la page de sommaire au début du PDF. **Les sous-classeurs** (leur nom, en titre), **les notes** (« Titre » : une note sans titre est « Note sans titre », numérotée s'il y en a plusieurs ; « Titre ou date » : l'ancien comportement ; « Non » : aucune ligne de note) et **les signets**. Sans les notes, les signets viennent directement sous le nom de leur sous-classeur (ou en haut, pour les notes du classeur) à leur page et à leur endroit, sans niveau vide ; une note sans signet ne donne aucune ligne et un sous-classeur dont rien ne reste n'a pas de titre ; l'ordre du classeur est conservé.

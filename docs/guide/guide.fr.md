@@ -3,39 +3,131 @@
 Ardoise est une application pour Windows qui remplace Wacom Inkspace pour la tablette *Bamboo Slate*. Elle récupère
 par Bluetooth les pages que vous écrivez sur la tablette, vous laisse écrire en direct à l'écran (et au
 vidéoprojecteur, en classe), range vos notes dans un dossier que vous choisissez, et permet de les retoucher, de les
-rejouer et de les exporter.
+rejouer et de les exporter. Elle lit aussi la tablette *Xiaomi Mijia « petit tableau noir »* (version mémoire).
 
 Ce guide suit l'ordre dans lequel on rencontre les choses. Les noms des boutons et des menus sont écrits en gras,
-tels qu'ils apparaissent à l'écran. English version: [guide.en.md](guide.en.md).
+tels qu'ils apparaissent à l'écran. Si vous découvrez Ardoise, commencez par **Premiers pas** : un fil conducteur
+court, du premier lancement à une première note exportée, qui renvoie aux chapitres détaillés. English version:
+[guide.en.md](guide.en.md).
 
-> *Où en est cette première version ?* Tout ce qui ne demande pas la tablette (bibliothèque, édition, relecture,
-> exports, import des notes d'Inkspace) a été vérifié sous Windows par des tests automatiques ; quelques essais à la
-> main restent à faire (impression, stylet et écran tactile, export Word ouvert dans Word, import avec Inkspace
-> ouvert, fermeture de session de Windows avec une note non enregistrée, couleurs des étiquettes sur deux PC avec
-> Nextcloud…). Tout ce qui parle à la
-> vraie tablette (enregistrement, synchronisation, mode direct, projection du direct) a été vérifié avec une tablette
-> simulée, mais *pas encore avec une Bamboo Slate réelle* : ces essais sont prévus au travail. Les passages concernés
-> le signalent par la mention « *Demande la tablette* ». Voir aussi les notes de version.
+> *Où en est cette version ?* Aucune version n'est encore publiée. La *Bamboo Slate* A4 a été essayée à la main par
+> l'auteur : enregistrement, synchronisation, mode direct, vidéoprojecteur, partage sur le réseau, reprise d'une
+> feuille, correction au stylet d'une Surface, papier et fiche en direct, projection de l'éditeur, son pendant
+> l'écriture. La tablette *Xiaomi* a eu de premiers essais réels le 13 novembre 2026, qui ont fait corriger plusieurs
+> défauts ; la procédure complète d'essai n'est pas terminée, et son mode direct est surtout vérifié avec une tablette
+> simulée. Tout le reste (bibliothèque, édition, relecture, exports, import des notes d'Inkspace) est vérifié sous
+> Windows par des tests automatiques sur le vrai programme. Restent à essayer à la main : l'impression sur une vraie
+> imprimante, l'export Word ouvert dans Word, l'import avec Inkspace ouvert, la fermeture de session de Windows avec une
+> note non enregistrée. Les passages qui ne marchent qu'avec une tablette le signalent par la mention « *Demande la
+> tablette* ». Voir aussi les notes de version.
 
 ## Sommaire
 
-1. Ce qu'est Ardoise
-2. Installer Ardoise
-3. Premier démarrage
-4. Enregistrer la tablette (et ajouter la tablette Xiaomi)
-5. Récupérer ses pages : la synchronisation
-6. Le mode direct et la présentation en classe
-7. La bibliothèque
-8. Modifier une note
-9. Relecture, narration et vidéo
-10. Exporter, imprimer, partager
-11. Importer les notes d'Inkspace
-12. Stylet et écran tactile
-13. Diagnostics et essais avec la tablette
-14. L'assistant (Claude Code, Claude Desktop)
-15. Vie privée
-16. En cas de problème
-17. Raccourcis clavier
+- [Premiers pas](#premiers-pas)
+- [1. Ce qu'est Ardoise](#1-ce-quest-ardoise)
+- [2. Installer Ardoise](#2-installer-ardoise)
+- [3. Premier démarrage](#3-premier-démarrage)
+- [4. Enregistrer la tablette (et ajouter la tablette Xiaomi)](#4-enregistrer-la-tablette)
+- [5. Récupérer ses pages : la synchronisation](#5-récupérer-ses-pages--la-synchronisation)
+- [6. Le mode direct et la présentation en classe](#6-le-mode-direct-et-la-présentation-en-classe)
+- [7. La bibliothèque](#7-la-bibliothèque)
+- [8. Modifier une note](#8-modifier-une-note)
+- [9. Relecture, narration et vidéo](#9-relecture-narration-et-vidéo)
+- [10. Exporter, imprimer, partager](#10-exporter-imprimer-partager)
+- [11. Importer les notes d'Inkspace](#11-importer-les-notes-dinkspace)
+- [12. Stylet et écran tactile](#12-stylet-et-écran-tactile)
+- [13. Diagnostics et essais avec la tablette](#13-diagnostics-et-essais-avec-la-tablette)
+- [14. L'assistant (Claude Code, Claude Desktop)](#14-lassistant-claude-code-claude-desktop)
+- [15. Vie privée](#15-vie-privée)
+- [16. En cas de problème](#16-en-cas-de-problème)
+- [17. Raccourcis clavier](#17-raccourcis-clavier)
+
+---
+
+## Premiers pas
+
+Ce fil conducteur va du premier lancement à une première note exportée. Chaque étape renvoie au chapitre qui détaille.
+Les captures montrent le programme avec des notes de démonstration et une tablette simulée.
+
+1. **Décompressez et lancez.** Faites un clic droit sur l'archive `ardoise-<version>-windows-x64.zip`, *Extraire tout…*,
+   puis double-cliquez sur `ardoise.exe` dans le dossier obtenu. Il n'y a rien à installer. Windows peut afficher un
+   écran bleu « *Windows a protégé votre ordinateur* » : *Informations complémentaires*, puis *Exécuter quand même*
+   (chapitre [2](#2-installer-ardoise)).
+
+2. **Choisissez le dossier de vos notes.** Au premier lancement, la fenêtre **Bienvenue dans Ardoise** demande où ranger
+   la bibliothèque. Cliquez sur **Choisir un dossier…**, de préférence un dossier synchronisé (Nextcloud, OneDrive…),
+   puis sur **Continuer** (chapitre [3](#3-premier-démarrage)). La langue se change au bas de la même fenêtre.
+
+   ![Fenêtre Bienvenue dans Ardoise : le bouton Choisir un dossier… et le choix de la langue](images/fr/premier-lancement.webp)
+
+3. **Découvrez la bibliothèque.** C'est la page d'accueil : à gauche, **Toutes les notes**, **Favoris**, les
+   **Classeurs**, les **Étiquettes**, la **Corbeille** et le bloc **Tablette** ; au milieu, une carte par note. Un clic sur
+   une carte ouvre la note (chapitre [7](#7-la-bibliothèque)).
+
+   ![La bibliothèque : classeurs, étiquettes, favoris et cartes des notes](images/fr/bibliotheque.webp)
+
+4. **Avec une tablette : enregistrez-la.** Cliquez sur le bloc **Tablette** de la barre latérale, puis sur
+   **Enregistrer la Bamboo Slate** (pour la tablette Xiaomi, **Ajouter la tablette Xiaomi**). Lisez l'avertissement
+   **Avant de commencer**, cliquez sur **Continuer**, puis suivez l'assistant : maintenir le bouton de la tablette environ
+   6 secondes, puis un appui bref pour confirmer (chapitre [4](#4-enregistrer-la-tablette)). *Sans tablette, passez à
+   l'étape 6.*
+
+   ![Assistant d'enregistrement : l'avertissement Avant de commencer, puis Continuer](images/fr/enregistrer-tablette.webp)
+
+5. **Avec une tablette : récupérez ses pages.** Écrivez une page sur la tablette, puis un appui bref sur son bouton
+   l'enregistre dans sa mémoire. Dans le panneau **Tablette**, onglet **Utiliser**, cliquez sur **Synchroniser** : chaque
+   page devient une note de la bibliothèque. **Mode direct** montre au contraire ce que vous écrivez sur la tablette au
+   fur et à mesure, à l'écran et au vidéoprojecteur (chapitres [5](#5-récupérer-ses-pages--la-synchronisation) et
+   [6](#6-le-mode-direct-et-la-présentation-en-classe)).
+
+   ![Panneau Tablette, onglet Utiliser : tablette connectée, boutons Mode direct et Synchroniser](images/fr/tablette-utiliser.webp)
+
+6. **Sans tablette : créez une note.** Cliquez sur **Nouvelle note** (ou `Ctrl + N`) : une page blanche A4 en paysage
+   s'ouvre dans l'éditeur. Pour annoter un document existant, **Depuis un PDF ou une image…** (chapitre
+   [7](#7-la-bibliothèque)).
+
+7. **Écrivez.** Avec l'outil **Stylo**, écrivez à la souris ou au stylet ; un doigt fait défiler la page, sauf si vous
+   cochez **Doigt** (chapitre [12](#12-stylet-et-écran-tactile)). Choisissez l'**Encre**, la **Couleur** et l'**Épaisseur**
+   dans la barre d'outils ; **Gomme**, **Sélection**, **Ligne**, **Rectangle** et **Ellipse** sont à côté
+   (chapitre [8](#8-modifier-une-note)).
+
+   ![L'éditeur : écriture à la main, texte tapé, équation, formes et signet sur papier quadrillé](images/fr/editeur.webp)
+
+8. **Ajoutez un texte tapé.** Choisissez l'outil **Texte** (touche `T`), cliquez à l'endroit voulu, tapez ; `Échap`
+   termine la saisie. Les boutons **Latin Modern** et **Andika**, **Petit**, **Moyen**, **Grand** et **Gras** règlent le
+   texte (voir « Taper du texte », chapitre [8](#8-modifier-une-note)).
+
+   ![Barre d'outils avec l'outil Texte : police, taille et gras](images/fr/outils-texte.webp)
+
+9. **Ajoutez une équation.** Choisissez l'outil **Équation** (touche `M`), cliquez sur la page, tapez le code dans **Code
+   LaTeX** (par exemple `E_c = \dfrac{1}{2} m v^2`), vérifiez l'aperçu, puis cliquez sur **Poser** (voir « Écrire une
+   équation », chapitre [8](#8-modifier-une-note)).
+
+   ![L'outil Équation : le code LaTeX d'une équation de chimie et son aperçu](images/fr/equation.webp)
+
+10. **Posez un signet.** L'outil **Signet** (touche `B`) pose sur la page un mot ou une courte phrase (« Chapitre 3 ») :
+    il servira au sommaire du classeur et à la recherche (voir « Poser des signets », chapitre
+    [8](#8-modifier-une-note)).
+
+11. **Enregistrez.** Rien n'est enregistré tant que vous ne cliquez pas sur **Enregistrer** (`Ctrl + S`) : l'état
+    **Modifications non enregistrées** devient **Enregistrée**. Au besoin, donnez un titre à la note dans le champ
+    **Titre de la note** (chapitre [8](#8-modifier-une-note)).
+
+12. **Exportez en PDF.** Cliquez sur **Exporter…** dans la barre d'outils, choisissez **PDF**, réglez la page si besoin
+    (**Taille réelle de la page** ou **A4**), cliquez sur **Exporter…** et indiquez le fichier à créer. Pour imprimer,
+    **Imprimer…** ou `Ctrl + P` (chapitre [10](#10-exporter-imprimer-partager)).
+
+    ![La fenêtre Exporter : formats PNG, JPG, WebP, SVG et PDF, résolution et texte reconnu](images/fr/exporter-note.webp)
+
+13. **Retrouvez la note.** Revenez à la bibliothèque (**Bibliothèque**, ou `Échap` qui enregistre et revient) et tapez
+    quelques lettres dans **Rechercher une note** (`Ctrl + F`) : Ardoise cherche dans les titres, les étiquettes, les
+    signets, les textes tapés et l'écriture manuscrite (chapitre [7](#7-la-bibliothèque)).
+
+    ![Recherche du mot énergie : deux notes trouvées, et sous « Trouvé dans l'écriture manuscrite » l'extrait reconnu, surligné](images/fr/recherche.webp)
+
+Pour aller plus loin : mettre le cours en vidéo (chapitre [9](#9-relecture-narration-et-vidéo)), projeter la classe
+(chapitre [6](#6-le-mode-direct-et-la-présentation-en-classe)), importer les notes d'Inkspace (chapitre
+[11](#11-importer-les-notes-dinkspace)).
 
 ---
 
@@ -49,14 +141,15 @@ tels qu'ils apparaissent à l'écran. English version: [guide.en.md](guide.en.md
 - *Un dossier, plusieurs ordinateurs* : si ce dossier est synchronisé par Nextcloud, OneDrive ou autre, vous
   retrouvez vos notes, et même l'enregistrement de la tablette, sur tous vos PC.
 - *Une note = un fichier* `.ardoise`, rangé dans des sous-dossiers qui sont vos classeurs.
-- Interface en *français et en anglais*.
+- Interface en *français et en anglais*, thèmes clair et sombre.
 
 *Ce qui demande la tablette* : enregistrer la tablette, la synchroniser, le mode direct (et donc la projection du
 direct), le test de la tablette. *Tout le reste marche sans elle*, y compris créer des notes à la souris, au stylet
 ou au doigt, annoter un PDF, rejouer, exporter.
 
 *Ce qu'Ardoise ne fait pas* : le nuage Wacom et la collaboration en temps réel d'Inkspace, macOS et Linux, les
-applications pour téléphone. Les notes ne peuvent pas contenir de zone de texte tapée au clavier.
+applications pour téléphone. Une note, c'est de l'écriture à la main, mais aussi des formes nettes, du texte tapé au
+clavier, des équations en LaTeX (chimie comprise) et des signets : voir le chapitre 8.
 
 ## 2. Installer Ardoise
 
@@ -65,8 +158,8 @@ applications pour téléphone. Les notes ne peuvent pas contenir de zone de text
 - Windows 11 (Windows 10 n'a pas été essayé). Le moteur d'affichage *WebView2* de Microsoft doit être présent : il
   l'est dans Windows 11.
 - Pour la tablette : le Bluetooth à basse consommation (Bluetooth 4.0 ou plus), intégré au PC ou par une petite clé
-  USB. Aucun réglage préalable dans les paramètres Bluetooth de Windows n'est prévu : l'enregistrement de la tablette se
-  fait dans Ardoise (*à confirmer avec la vraie tablette*).
+  USB. Ardoise ne demande aucun réglage préalable dans les paramètres Bluetooth de Windows : l'enregistrement de la
+  tablette se fait dans Ardoise (chapitre 4).
 
 ### Installer = décompresser
 
@@ -156,7 +249,10 @@ copies de secours qu'après avoir vérifié que vous n'en avez plus besoin.
 
 ## 3. Premier démarrage
 
-Au premier lancement sur un PC, la fenêtre **Bienvenue dans Ardoise** demande le dossier où ranger vos notes.
+Au premier lancement sur un PC, la fenêtre **Bienvenue dans Ardoise** demande le dossier où ranger vos notes (la
+**Langue** de l'interface se choisit au bas de la même fenêtre).
+
+![La fenêtre Bienvenue dans Ardoise : le bouton Choisir un dossier… et la Langue](images/fr/premier-lancement.webp)
 
 1. Cliquez sur **Choisir un dossier…** et choisissez de préférence un dossier synchronisé (Nextcloud…), par exemple
    `C:\Users\Prénom\Nextcloud\Ardoise\Notes`.
@@ -192,7 +288,8 @@ bibliothèque de démonstration (des notes inventées). Dans PowerShell, dans le
 
 puis choisissez ce dossier comme bibliothèque. Et, pour essayer la synchronisation et le mode direct sans tablette,
 lancez `.\ardoise.exe --simulated-tablet` : une *tablette simulée* (trois pages en mémoire) remplace le Bluetooth ;
-elle n'est jamais mêlée à l'enregistrement de la vraie tablette. Une note de la bibliothèque de démonstration, « Cours
+elle n'est jamais mêlée à l'enregistrement de la vraie tablette. `--simulated-blackboard` fait de même avec une tablette
+Xiaomi simulée (trois pages en mémoire), seule ou avec la première. Une note de la bibliothèque de démonstration, « Cours
 d'optique », est écrite à la main (glyphes de synthèse) et sert à essayer la recherche dans l'écriture.
 
 ## 4. Enregistrer la tablette
@@ -205,8 +302,12 @@ d'optique », est écrite à la main (glyphes de synthèse) et sert à essayer l
 
 1. Chargez la tablette et gardez-la près de l'ordinateur ; le Bluetooth doit être activé sur le PC.
 2. Dans la barre latérale, en bas, cliquez sur le bloc **Tablette** (il affiche **Aucune tablette enregistrée**), puis
-   sur **Enregistrer la tablette**.
+   sur **Enregistrer la Bamboo Slate** (dans l'onglet **Tablettes**, sous **Ajouter une tablette**, quand une autre
+   tablette est déjà connue).
 3. Lisez l'avertissement (**Avant de commencer**) et cliquez sur **Continuer**.
+
+   ![L'avertissement Avant de commencer de l'assistant d'enregistrement de la Bamboo Slate](images/fr/enregistrer-tablette.webp)
+
 4. Suivez l'assistant, qui montre un dessin de la tablette :
    - **Maintenez le bouton de la tablette** enfoncé environ 6 secondes, jusqu'à ce que le voyant clignote en bleu ;
    - **Recherche de la tablette**, puis **Connexion à la tablette** : ne bougez pas, cela peut prendre quelques
@@ -228,6 +329,8 @@ l'un à l'autre, `Entrée` ouvre celui qui a le focus), et rien à faire défile
 - **Tablettes** : les tablettes connues, avec ce qu'elles ont indiqué à leur dernière connexion (modèle, batterie, version
   du firmware ou mémoire libre, nombre de pages en mémoire, zone de dessin, date de lecture), **Oublier la tablette**
   pour chacune, **Ajouter une tablette** et **Tester la tablette…**. Ces informations sont lues à la première connexion.
+
+![Onglet Tablettes du panneau Tablette : la Bamboo Slate connectée avec son modèle, sa batterie et son firmware, la tablette Xiaomi pas connectée, et un bouton Oublier la tablette pour chacune](images/fr/tablettes.webp)
 
 La tablette est ensuite reconnue sur *tous* vos PC qui utilisent la même bibliothèque. Pour la défaire : **Réglages**,
 section **Tablette** (ou l'onglet **Tablettes** du panneau), **Oublier la tablette** (elle devra être enregistrée de
@@ -258,6 +361,9 @@ rien enregistrer.
 4. Ardoise liste ce qu'elle entend. Une seule tablette est le cas habituel : cliquez sur **Ajouter cette tablette**.
    S'il y en a plusieurs (un voisin de classe, par exemple), le **Signal** de chacune est affiché : plus il est fort,
    plus la tablette est proche.
+
+   ![Fenêtre Ajouter la tablette Xiaomi : une tablette a été trouvée, avec le bouton Ajouter cette tablette](images/fr/ajouter-xiaomi.webp)
+
 5. **Tablette Xiaomi ajoutée** : Ardoise s'y connecte dès qu'elle est allumée et que rien d'autre ne l'occupe.
 
 Si rien n'est entendu, Ardoise le dit (**Aucune tablette Xiaomi trouvée**) : vérifiez que la tablette est allumée et
@@ -294,6 +400,8 @@ Les pages sont reçues automatiquement à la connexion, ou à la demande avec **
 panneau **Tablette**). Une barre indique **Page 1 sur 3**… et **Annuler** arrête la synchronisation (les pages déjà reçues
 restent des notes, les autres restent sur la tablette). Le panneau résume ensuite : **3 notes enregistrées.**,
 **3 pages effacées de la tablette.** ou **Aucune nouvelle page.**
+
+![Onglet Utiliser du panneau Tablette : la tablette connectée avec sa batterie, Mode direct, Synchroniser et le résultat de la dernière synchronisation](images/fr/tablette-utiliser.webp)
 
 Chaque page devient une *note* à la racine de la bibliothèque, sans titre (la carte affiche la date), à la taille de
 la tablette. Vous pouvez la titrer, la ranger, l'étiqueter (chapitre 7).
@@ -544,6 +652,12 @@ Un simple changement de titre, d'étiquette ou de favori fait ailleurs ne crée 
 
 ### La fenêtre de commande
 
+La capture montre le mode direct sur le tableau noir : l'écriture à la craie vient de la tablette, le mot « à revoir »
+est écrit en rouge par l'enseignant avec le stylet de l'ordinateur, sur le calque **Correction** (voir **Corriger
+pendant le direct**, plus bas).
+
+![Fenêtre de commande du mode direct sur le tableau noir : barre d'outils Tablette et Ordinateur, page en craie blanche avec « à revoir » en rouge, et l'onglet Calques avec les calques Correction et Calque 1](images/fr/direct.webp)
+
 - **Tablette** : **Outil** (stylo à bille, plume, feutre, crayon, pinceau, surligneur, craie), **Couleur** (dont
   **Blanc craie** et **Jaune**) et **Épaisseur** sont le style de la tablette : le trait suivant en tient compte, pas
   les précédents. Le groupe **Ordinateur** (**Sélection**, **Stylo**, l'encre de l'ordinateur, **Annuler**,
@@ -570,8 +684,8 @@ Un simple changement de titre, d'étiquette ou de favori fait ailleurs ne crée 
 
 Le *bouton de la tablette* fait, pendant le direct, ce que l'option **Bouton de la tablette en mode direct** indique
 (nouvelle page ou nouveau calque). Un nouveau calque est créé en haut et reçoit aussitôt l'écriture de la tablette ;
-l'ordinateur reste sur son calque. *Ce que la Bamboo Slate envoie à l'appui n'est pas encore vérifié sur la vraie
-tablette.* Les touches de la page suivante et précédente marchent dans tous les cas.
+l'ordinateur reste sur son calque. Le signal que la Bamboo Slate envoie à l'appui a été relevé sur la vraie tablette
+(un appui crée une nouvelle page). Les touches de la page suivante et précédente marchent dans tous les cas.
 
 ### Le panneau de côté de la fenêtre de commande
 
@@ -762,7 +876,7 @@ présentation (voir plus bas) ne changent pas : elles ne sont jamais enregistré
 
 ### Le papier et l'image de la page en cours
 
-*Demande la tablette. Vérifié avec la tablette simulée, pas encore avec la vraie (essai H7).* Pendant le direct, vous
+*Demande la tablette.* Pendant le direct, vous
 pouvez changer le papier de la page qui est à l'écran et mettre une fiche ou un document *sous* l'écriture, sans arrêter
 la tablette : un élève écrit, vous passez du blanc au Seyès, ou vous posez l'énoncé d'un exercice pour que la classe le
 complète. Le changement apparaît aussitôt au vidéoprojecteur et sur l'écran du partage, et il est enregistré avec la page.
@@ -815,6 +929,9 @@ cours, **Entière** (toute visible, sans déformation) ; **Placement** (**Entiè
 3. Une fenêtre de *présentation* s'ouvre *en plein écran sur l'écran choisi*, sans aucun élément d'interface (le
    curseur de la souris disparaît après 2 secondes d'immobilité). La fenêtre de commande reste sur l'écran de
    l'ordinateur. Ce que vous écrivez s'affiche sur les deux.
+
+   ![Ce que voit la classe au vidéoprojecteur : la page en plein écran, sans aucun élément d'interface, avec l'écriture à la craie et le mot « à revoir » en rouge](images/fr/projection.webp)
+
 4. **Arrêter la projection** ferme la présentation. Ardoise retient l'écran choisi sur ce PC.
 
 Avec un seul écran, la présentation recouvre la fenêtre de commande : appuyez sur `Échap` dans la présentation pour la
@@ -842,8 +959,9 @@ envoie Page suivante et Page précédente) : voir le chapitre 17, ou l'onglet **
 ### Montrer la feuille sur un autre ordinateur du réseau
 
 *Le partage du mode direct demande la tablette ; celui d'une note ouverte dans l'éditeur n'en demande pas. Ce partage a
-été vérifié par des tests automatiques (serveur, page de l'autre écran, tablette simulée), mais pas encore sur deux
-vrais ordinateurs ni avec le pare-feu de l'école : l'essai H4 est prévu au travail.*
+été vérifié par des tests automatiques (serveur, page de l'autre écran, tablette simulée), et essayé sur deux vrais
+ordinateurs du même réseau, à la maison, puis au travail à travers le filtre web de l'établissement. Restent à
+confirmer à l'usage : Chrome sur Android, et une note ouverte partagée sur le réseau de l'établissement.*
 
 Un autre ordinateur du même réseau (par exemple le PC de la salle, relié au vidéoprojecteur) peut afficher la feuille
 dans un *simple navigateur* : rien à installer dessus. Il montre :
@@ -963,11 +1081,16 @@ boutons **Nouvelle note**, **Depuis un PDF ou une image…** et **Réglages**. �
 **Toutes les notes**, **Favoris**, les **Classeurs**, les **Étiquettes**, la **Corbeille**, l'entrée
 **Importer depuis Inkspace…** (chapitre 11), et en bas le bloc **Tablette** et le bouton **Tester la tablette**.
 
+![La bibliothèque : la barre latérale (classeurs, étiquettes, favoris, corbeille, tablette) et les cartes des notes avec miniature, titre, date, classeur et étiquettes](images/fr/bibliotheque.webp)
+
 Une carte montre la miniature, le titre (ou la date si la note n'a pas de titre), la date, le classeur et les
 étiquettes. Un clic ouvre la note dans l'éditeur. Sur la carte : la case pour *sélectionner*, l'étoile des favoris, le menu
-**Actions pour…** (**Renommer**, favoris, **Dupliquer**, **Changer la date…**, **Mettre à la corbeille**) et une poignée,
+**Actions pour…** (**Renommer**, favoris, **Reprendre en mode direct** (chapitre 6), **Dupliquer**, **Changer la date…**,
+**Mettre à la corbeille**) et une poignée,
 qui apparaît sur la carte, pour glisser la note hors d'Ardoise (chapitre 10). Le **clic droit** sur une carte ouvre ce
 même menu. Renommer une note renomme aussi son fichier.
+
+![Le menu ⋯ d'une carte : Renommer, Ajouter aux favoris, Reprendre en mode direct, Dupliquer, Changer la date…, Mettre à la corbeille](images/fr/menu-carte.webp)
 
 **Le clic droit** n'affiche jamais le menu d'une page web (« Enregistrer l'image sous… », « Outils supplémentaires »…) :
 Ardoise montre son propre menu, ou rien. Le menu s'ouvre **sous le pointeur** (la touche `Menu`, ou `Maj + F10`, sur une carte ou
@@ -1049,6 +1172,8 @@ sommaire**, trois choix indépendants :
   plusieurs : « Note sans titre (2) »), **Titre ou date** (une note sans titre porte sa date) ou **Non** (aucune ligne de note) ;
 - **Les signets** (case) : ceux de chaque note, dans l'ordre de la page.
 
+![Sommaire du classeur Classe : le groupe Dans le sommaire (Les sous-classeurs, Les notes avec Titre, Titre ou date ou Non, Les signets), le champ Filtrer le sommaire et la liste, avec le sous-classeur 3e B, ses notes et leurs signets](images/fr/sommaire-classeur.webp)
+
 Au départ : les sous-classeurs et les signets, sans ligne par note, c'est-à-dire le sommaire d'un livre. Les signets viennent alors
 directement sous le nom de leur sous-classeur (ou en haut, pour les notes du classeur lui-même) ; une note sans signet ne donne
 aucune ligne, et un sous-classeur dont rien ne reste n'a pas de titre. **Un classeur qui n'a aucun signet** commencerait par un
@@ -1103,6 +1228,8 @@ Cochez les cartes, ou : `Ctrl + clic` ajoute ou retire une note, `Maj + clic` s�
 **Imprimer…**, **Assembler…**, **Dupliquer**, **Tourner**, **Mettre en favoris** (ou **Retirer des favoris**),
 **Mettre à la corbeille**, **Désélectionner**.
 
+![Toutes les notes sélectionnées : cartes entourées de bleu, et la barre d'actions Déplacer vers…, Étiquettes…, Exporter…, Imprimer…, Assembler…, Dupliquer, Tourner, Mettre en favoris, Mettre à la corbeille, Désélectionner](images/fr/selection.webp)
+
 **Tourner** fait pivoter *toutes* les notes sélectionnées d'un coup : choisissez **Un quart de tour à gauche** ou
 **Un quart de tour à droite**. La feuille, l'écriture et l'image de fond tournent ensemble, exactement comme
 **Tourner la feuille avec l'écriture** dans l'éditeur (chapitre 8). Une barre indique l'avancement (« Rotation des notes :
@@ -1123,8 +1250,12 @@ de la première note est gardée.
   (même un PDF de plusieurs centaines de pages s'ouvre vite) : un clic choisit ou retire une page, **Maj + clic** choisit toute
   une suite de pages depuis la dernière cliquée, **Toutes** et **Aucune** les prennent ou les retirent toutes ; le champ des
   numéros reste là et suit les miniatures (et inversement). Au clavier : les flèches déplacent le curseur sur les pages,
-  `Espace` choisit la page, `Maj + flèche` étend la suite, `Ctrl + A` les choisit toutes. Une
-  image donne une note de la taille d'une feuille A4, dans l'orientation de l'image. Les PDF protégés par un mot de
+  `Espace` choisit la page, `Maj + flèche` étend la suite, `Ctrl + A` les choisit toutes. Le bouton **Créer les N notes**
+  lance la création.
+
+  ![Fenêtre Nouvelle note depuis un PDF ou une image : un PDF de trois pages dont les pages 1 et 2 sont choisies sur les miniatures, le champ des numéros et le bouton Créer les 2 notes](images/fr/depuis-pdf.webp)
+
+  Une image donne une note de la taille d'une feuille A4, dans l'orientation de l'image. Les PDF protégés par un mot de
   passe ne sont pas lus : enregistrez-en une copie sans mot de passe. Pour un long PDF, une barre indique
   l'avancement (« Création des notes : 3 sur 12… ») et **Annuler** arrête la création : aucune note n'est alors gardée
   (« Création annulée : aucune note n'a été gardée »).
@@ -1134,6 +1265,8 @@ de la première note est gardée.
 Tapez dans **Rechercher une note** : Ardoise cherche dans les *titres*, les *étiquettes*, les *signets*, les *textes tapés* (outil
 **Texte**, et le code des équations, sur les calques affichés) et l'*écriture manuscrite*, sans tenir compte des accents ni des majuscules. Les notes trouvées grâce à l'écriture sont regroupées
 sous **Trouvé dans l'écriture manuscrite**. `Ctrl + F` place le curseur dans le champ, `Échap` l'efface.
+
+![La recherche du mot énergie : les notes trouvées, et l'extrait de l'écriture manuscrite reconnue, surligné](images/fr/recherche.webp)
 
 La recherche dans l'écriture utilise la *reconnaissance d'écriture manuscrite de Windows*, hors connexion, sur ce PC.
 Il faut que le module de la langue soit installé dans Windows (le français l'est en général ; pour l'anglais :
@@ -1176,6 +1309,8 @@ Cliquez sur une carte pour ouvrir la note. En haut : **Bibliothèque** (retour),
 **Enregistrer** (`Ctrl + S`). *Rien n'est enregistré tant que vous ne cliquez pas sur Enregistrer* ; en quittant avec des
 modifications, Ardoise demande : **Enregistrer et revenir**, **Revenir sans enregistrer** ou **Rester**. Annuler et
 rétablir n'ont pas de limite pendant que la note est ouverte.
+
+![L'éditeur : la barre du haut, la barre d'outils, une note avec de l'écriture à la main, du texte tapé, des équations, des formes et un signet sur papier quadrillé, et le panneau de côté avec son rail d'icônes](images/fr/editeur.webp)
 
 **La touche `Échap`, par étapes.** Chaque appui fait la plus petite chose qui s'applique : d'abord il abandonne le geste en
 cours (un trait, une forme, un lasso, un déplacement, la question qu'Ardoise pose à l'écran) ou termine la saisie d'un texte, d'un signet ou
@@ -1311,6 +1446,8 @@ l'épaisseur indiquée, quelle que soit la pression) et va sur le calque choisi.
 ellipse est inscrit dans la boîte que vous tracez. Trois boutons à bascule, sous la barre d'outils tant qu'un de ces outils est
 choisi, s'utilisent au doigt, au stylet ou à la souris, sans clavier :
 
+![Barre d'outils avec l'outil Rectangle choisi et ses trois boutons à bascule : Forme régulière, Depuis le centre, Aimanter au quadrillage](images/fr/outils-formes.webp)
+
 - **Forme régulière** : un carré, un cercle ; une ligne se cale sur l'horizontale, la verticale ou la diagonale à 45° la plus
   proche. La touche `Maj`, tenue pendant un tracé, inverse ce bouton pour ce tracé.
 - **Depuis le centre** : le premier point est le centre de la forme (une ligne grandit des deux côtés). La touche `Alt`, tenue
@@ -1339,6 +1476,8 @@ Pour modifier un texte, touchez-le avec l'outil **Texte**, ou double-cliquez des
 place à l'endroit touché.
 
 Sous la barre d'outils, avec l'outil **Texte** ou quand des textes sont sélectionnés :
+
+![La barre d'outils avec l'outil Texte choisi : Police (Latin Modern ou Andika), Taille (Petit, Moyen, Grand) et Gras](images/fr/outils-texte.webp)
 
 - **Police** : **Latin Modern** (la police de LaTeX) ou **Andika** (une police dessinée pour l'apprentissage de la lecture).
   Les deux sont fournies avec Ardoise : le texte est le même sur tous les ordinateurs, dans tous les exports. Les lettres
@@ -1373,6 +1512,8 @@ de l'éditeur. La première fois, l'outil met une seconde à se charger.
 Si le code n'est pas correct, l'aperçu le dit avec le message de MathJax (en anglais, par exemple « Missing close brace » pour
 une accolade oubliée) et l'équation ne peut pas être posée : rien n'est corrigé ni deviné à votre place. Ardoise refuse aussi un
 caractère qu'il ne sait pas dessiner (des écritures autres que la latine et la grecque) et les numéros d'équation (`\tag`).
+
+![L'outil Équation : le panneau Nouvelle équation avec le code LaTeX d'une équation de chimie, son aperçu, et les boutons Annuler et Poser](images/fr/equation.webp)
 
 Quelques exemples :
 
@@ -1474,7 +1615,11 @@ qui ne vient pas d'Ardoise est ignoré.
 
 Le **clic droit sur la page** (à la souris : pas avec le bouton du stylet, qui lasse, ni avec le doigt) ouvre un menu des mêmes
 commandes. Avec l'outil **Sélection**, le trait ou le texte sous le pointeur est d'abord sélectionné s'il ne l'est pas ; une
-sélection qui existe reste telle quelle quand le pointeur est sur une de ses parties. Avec une sélection : **Copier**,
+sélection qui existe reste telle quelle quand le pointeur est sur une de ses parties.
+
+![Clic droit sur un trait de la page : le menu Copier, Couper, Coller, Dupliquer, Redresser les formes, Supprimer, avec l'objet sélectionné entouré de ses poignées](images/fr/menu-contextuel.webp)
+
+Avec une sélection : **Copier**,
 **Couper**, **Coller**, **Dupliquer**, **Modifier** (un seul texte, une seule équation ou un seul signet), **Redresser les
 formes** (quand des traits sont sélectionnés) et **Supprimer**. Sans sélection : **Coller**, **Tout sélectionner**,
 **Annuler** et **Rétablir**. **Coller** est toujours proposé : si le presse-papiers ne contient rien d'Ardoise, un message le
@@ -1483,6 +1628,8 @@ dit. Rien pendant la relecture ni avec le panneau de découpe ouvert.
 ### La feuille : papier, modèle, format, orientation
 
 L'onglet **Page** du panneau de côté règle la feuille :
+
+![Onglet Page du panneau de côté : Papier (quatre couleurs), Modèle et Texture du papier, Format de la feuille avec Portrait ou Paysage, Format et dimensions, Adapter l'écriture à la feuille, Tourner et recadrer](images/fr/panneau-page.webp)
 
 - **Papier** : quatre pastilles de couleur, **Blanc**, **Crème**, **Kraft**, **Ardoise noire** (et **Personnalisé** quand
   la note a un papier d'une autre couleur) ; **Modèle** : **Uni**, **Ligné**, **Seyès**, **Quadrillé 5 mm**,
@@ -1634,6 +1781,8 @@ Le bouton **Relecture** (ou la touche `R`) rejoue le tracé *tel qu'il a été �
 
 Les écrans tactiles marchent comme dans l'éditeur : un doigt fait défiler, deux doigts zooment.
 
+![La relecture : la barre avec Lecture, la ligne du temps, la Vitesse et Supprimer les temps morts, au-dessus de la page qui se réécrit ; l'onglet Son propose Enregistrer une narration](images/fr/relecture.webp)
+
 ### Narration
 
 Une note a *une seule narration*, un son rangé *dans la note*. L'onglet **Son** du panneau de côté dit ce que la note
@@ -1712,6 +1861,8 @@ La taille, la durée et le *temps d'export estimé* s'affichent avant de lancer 
 WebM (compression AV1) est nettement plus lent : réduisez la taille ou le nombre d'images par seconde si l'estimation
 est longue.
 
+![La fenêtre Exporter en vidéo : les quatre formats MP4, GIF animé, WebP animé et WebM, les réglages de taille, d'images par seconde et de durée, et l'estimation de l'export](images/fr/export-video.webp)
+
 *MP4 sur une édition « N » de Windows.* Ardoise écrit le MP4 avec l'encodeur intégré à Windows. Il manque sur les
 éditions « N » installées sans le *Media Feature Pack*. Dans **Réglages**, la section **Encodeur vidéo de secours
 (OpenH264)** vous laisse alors **Télécharger depuis Cisco** l'encodeur OpenH264 (le fichier vient du serveur de Cisco et son
@@ -1736,6 +1887,8 @@ la fenêtre **Exporter** avec la question **Quel format choisir ?** :
 | Idéal pour | Word, OneNote, diapositive | Site ou formulaire qui exige un JPG | Page web, messagerie | Retoucher le dessin | Imprimer, envoyer, archiver |
 
 En cas de doute : le **PDF** pour imprimer ou envoyer une note, le **PNG** pour l'insérer dans un document.
+
+![La fenêtre Exporter : les cinq formats PNG, JPG, WebP, SVG et PDF, la résolution, Inclure le fond, et en bas le texte reconnu à enregistrer en .txt, Markdown ou Word](images/fr/exporter-note.webp)
 
 Réglages : **Résolution** (**96 ppp (écran)**, **150 ppp (usuel)**, **300 ppp (impression)**), **Qualité JPG**, **Page du
 PDF** (**Taille réelle de la page** ou **A4 (note ajustée et centrée)**), **Inclure le fond** (décoché, seul le tracé est
@@ -1790,14 +1943,20 @@ moins juste. *Relisez toujours le texte* : la reconnaissance peut se tromper.
 ### Copier, imprimer, glisser
 
 - **Copier l'image** : met la note dans le presse-papiers de Windows ; collez-la dans Word ou OneNote.
-- **Imprimer…** (éditeur, ou barre de la sélection ; `Ctrl + P` fait la même chose, voir ci-dessous) : la fenêtre d'impression de Windows s'ouvre pour choisir
-  l'imprimante. Chaque note est imprimée sur une page, dans son orientation. Vous réglez **Imprimer le fond**, la
+- **Imprimer…** (éditeur, ou barre de la sélection ; `Ctrl + P` fait la même chose, voir le chapitre 17) : la fenêtre
+  d'impression d'Ardoise s'ouvre, puis celle de Windows pour choisir l'imprimante. Chaque note est imprimée sur une page, dans son orientation. Vous réglez **Imprimer le fond**, la
   **Taille sur la feuille** (**Taille réelle** ou **Ajustée à la feuille**) et les **Notes par feuille** : **1**, **2 par
   feuille** ou **4 par feuille**. Avec 2 ou 4, Ardoise range les notes dans l'ordre sur la feuille, chacune dans sa case sans
   être déformée (deux notes en hauteur côte à côte sur une feuille en largeur, deux notes en largeur l'une sous l'autre ;
   quatre notes en deux fois deux) ; ce réglage est celui d'Ardoise, pas celui du pilote de l'imprimante (qui n'agirait que
   sur des feuilles déjà faites). Dans la fenêtre de Windows, les *pages* sont alors les feuilles : cinq notes à deux par feuille
   font trois pages.
+
+  ![La fenêtre Imprimer d'Ardoise : Imprimer le fond, Taille sur la feuille (Taille réelle ou Ajustée à la feuille) et Notes par feuille (1, 2 par feuille ou 4 par feuille)](images/fr/imprimer.webp)
+
+- *Glisser hors d'Ardoise* : la poignée d'une carte de la bibliothèque dépose une *image PNG* de la note dans
+  l'Explorateur, sur le bureau, dans Word, OneNote ou un courriel (une image par note si plusieurs sont sélectionnées).
+  Gardez le bouton enfoncé pendant la préparation de l'image.
 
 ### Exporter ou imprimer un classeur
 
@@ -1808,11 +1967,13 @@ que si le classeur a des sous-classeurs) ; leurs notes viennent après celles du
 **Un classeur qui n'a pas de note à lui**, seulement dans ses sous-classeurs, a la case cochée dès l'ouverture, et la fenêtre
 le dit ; décochée, il n'y a plus rien à exporter : le bouton **Exporter…** attend et une phrase dit quoi cocher. Un classeur
 sans aucune note affiche « Ce classeur ne contient aucune note. » et le bouton reste grisé.
+
 Le PDF a des **signets** que règle le groupe **Dans le sommaire** (les mêmes trois choix que le sommaire du classeur, voir **Le
 sommaire d'un classeur**) : le nom des sous-classeurs, une ligne par note (son titre, ou **Note sans titre**, ou sa date), et les
 **signets posés dans les notes** (outil **Signet**), qui mènent à leur endroit de la page ; ouvrez le panneau des signets de votre
 lecteur PDF pour les voir. Sans les notes, les signets de page viennent directement sous le nom de leur sous-classeur. Si les choix
 ne laissent rien, le PDF n'a pas de signets (la phrase « le sommaire serait vide » le dit).
+
 La case **Ajouter une page de sommaire au début** (décochée au départ, et gardée) met en tête du PDF une **page de sommaire** :
 le nom du classeur, puis ce que vous avez choisi dans **Dans le sommaire**, avec les **numéros de page** et des points de
 conduite, comme dans un livre ; une liste longue prend plusieurs pages, et les numéros les comptent. Chaque ligne est un **lien**
@@ -1820,12 +1981,14 @@ vers sa page (ou vers l'endroit du signet), et le PDF a un signet **Sommaire** e
 choisi la page A4, sinon à la taille de la première note. Si les choix ne laissent rien, la case est grisée. Pour l'avoir sur
 papier, imprimez ce PDF (**Imprimer le classeur…** n'ajoute pas de page de sommaire : les numéros de page n'auraient pas de sens
 avec plusieurs notes par feuille).
+
+![Exporter un classeur en PDF : la case Inclure les sous-classeurs, le groupe Dans le sommaire, la case Ajouter une page de sommaire au début et les réglages de la page du PDF](images/fr/export-classeur.webp)
+
+![La page de sommaire au début du PDF du classeur Classe : le sous-classeur 3e B, les notes et leurs signets, avec des points de conduite et les numéros de page](images/fr/page-sommaire.webp)
+
 **Imprimer le classeur…** ouvre la fenêtre d'impression avec les mêmes notes, dans le même ordre, la même case
 **Inclure les sous-classeurs** (cochée d'emblée pour un classeur sans note à lui) et les mêmes phrases ; la page imprimée ne
 porte ni date ni signet, il n'y a donc pas de choix pour le sommaire.
-- *Glisser hors d'Ardoise* : la poignée d'une carte de la bibliothèque dépose une *image PNG* de la note dans
-  l'Explorateur, sur le bureau, dans Word, OneNote ou un courriel (une image par note si plusieurs sont sélectionnées).
-  Gardez le bouton enfoncé pendant la préparation de l'image.
 
 ### Montrer la feuille en direct
 
@@ -1913,8 +2076,8 @@ présentation s'utilisent au stylet ou au doigt.
   **Doigt** de la barre de zoom) : le doigt dessine alors comme la souris, et le zoom à deux doigts marche toujours. Ce
   réglage est propre à chaque PC. Avec l'outil **Déplacer la page**, ou en relecture, un doigt fait toujours défiler.
 
-*Le dos du stylet et le bouton ne peuvent pas être simulés par les tests automatiques ; ils sont à essayer sur le PC
-tactile.*
+*Le dos du stylet et le bouton ne peuvent pas être simulés par les tests automatiques ; l'auteur les a essayés à la main
+sur une Surface.*
 
 ## 13. Diagnostics et essais avec la tablette
 
@@ -1925,10 +2088,12 @@ se tester et garder la trace de ce qu'elle échange avec elle.
 
 Cliquez sur **Tester la tablette** (en bas de la barre latérale, ou dans **Réglages**). Le **Test de la tablette** déroule
 huit étapes : **Adaptateur Bluetooth**, **Pages de référence**, **Recherche de la tablette**, **Connexion**,
-**Informations**, **Téléchargement des pages**, **Mode direct**, **Reconnexion**. Il dure environ 5 minutes ; suivez les
-consignes à l'écran, cliquez sur **C'est fait, continuer** après chaque action, **Passer cette étape** si une étape bloque,
+**Informations**, **Téléchargement des pages**, **Mode direct**, **Reconnexion**. Il dure environ 5 minutes ; cliquez sur
+**Démarrer le test**, suivez les consignes à l'écran, cliquez sur **C'est fait, continuer** après chaque action, **Passer cette étape** si une étape bloque,
 **Arrêter le test** pour terminer. Pour les pages de référence, dessinez : un carré et un cercle aussi grands que possible ;
 « Ardoise 2026 » en écriture normale ; trois traits horizontaux, très léger, normal, très appuyé.
+
+![Panneau Test de la tablette : les deux cases, le bouton Démarrer le test et les huit étapes à faire](images/fr/tester-tablette.webp)
 
 Deux cases à connaître : **Effacer les pages de la tablette une fois ajoutées à la bibliothèque comme notes** (cochée
 par défaut) et **Simulation (sans tablette)**. Le test peut enregistrer la tablette si elle ne l'est pas encore, avec les mêmes
@@ -2055,9 +2220,10 @@ comparent aux touches que la fenêtre traite vraiment.
 
 ### Les touches d'un navigateur
 
-Ardoise est une application, pas une page web : les touches d'un navigateur n'y font rien. `F5`, `Ctrl + R` (recharger la page, ce
-qui ferait perdre une note non enregistrée), `Ctrl + F` hors de la bibliothèque, `F3`, `Ctrl + G` (barre de recherche du
-navigateur), `Ctrl + U`, `Ctrl + J`, `Ctrl + H`, `Ctrl + O`, `F7` et `F12` sont sans effet ; `Ctrl + P` et `Ctrl + Maj + P` ouvrent
+Ardoise est une application, pas une page web : les touches d'un navigateur n'y font rien. `F5`, `Ctrl + R` et `Ctrl + Maj + R`
+(recharger la page, ce qui ferait perdre une note non enregistrée), `Ctrl + F` hors de la bibliothèque, `F3`, `Ctrl + G` (barre
+de recherche du navigateur), `Ctrl + U`, `Ctrl + J`, `Ctrl + H`, `Ctrl + O`, `Ctrl + S` hors de l'éditeur, `F7`, `F12` et les
+raccourcis des outils de développement sont sans effet ; `Ctrl + P` et `Ctrl + Maj + P` ouvrent
 l'impression d'Ardoise (jamais l'impression de la fenêtre comme une page web). Les touches d'édition (`Ctrl + A`, `C`, `V`, `X`,
 `Z`, `Y`) et toutes celles d'Ardoise restent comme décrit dans ce chapitre.
 

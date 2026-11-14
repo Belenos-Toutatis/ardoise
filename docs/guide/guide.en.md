@@ -2,38 +2,123 @@
 
 Ardoise is a Windows application that replaces Wacom Inkspace for the *Bamboo Slate* tablet. It receives over
 Bluetooth the pages you write on the tablet, lets you write live on screen (and on a projector, in class), keeps your
-notes in a folder of your choice, and lets you edit, replay and export them.
+notes in a folder of your choice, and lets you edit, replay and export them. It also reads the *Xiaomi Mijia "small
+blackboard"* tablet (memory edition).
 
 This guide follows the order in which you meet things. The names of buttons and menus are written in bold, as they
-appear on screen. Version française : [guide.fr.md](guide.fr.md).
+appear on screen. If you are new to Ardoise, start with **Getting started**: a short thread from the first start to a
+first exported note, which points to the detailed chapters. Version française : [guide.fr.md](guide.fr.md).
 
-> *Where does this first version stand?* Everything that does not need the tablet (library, editing, replay, exports,
-> import of Inkspace notes) has been checked on Windows by automated tests; a few hands-on checks are still to be done
-> (printing, pen and touch screen, a Word export opened in Word, an import with Inkspace open, a Windows logoff with an
-> unsaved note, tag colours on two PCs through Nextcloud…). Everything that talks to the real tablet
-> (registration, sync, live mode, projecting the live mode) has been checked with a simulated tablet, but *not yet with
-> a real Bamboo Slate*: those trials are planned at work. The passages concerned carry the mention
-> "*Needs the tablet*". See also the release notes.
+> *Where does this version stand?* No version has been published yet. The A4 *Bamboo Slate* has been tried by hand by
+> the author: registration, sync, live mode, projector, sharing on the network, resuming a sheet, correcting with a
+> Surface's pen, paper and sheet in live mode, projecting the editor, sound while writing. The *Xiaomi* tablet had its
+> first real trials on 13 November 2026, which led to several defects being fixed; the full trial procedure is not
+> finished, and its live mode is mostly checked with a simulated tablet. Everything else (library, editing, replay,
+> exports, import of Inkspace notes) is checked on Windows by automated tests on the real program. Still to be tried by
+> hand: printing on a real printer, a Word export opened in Word, an import with Inkspace open, a Windows logoff with an
+> unsaved note. The passages that only work with a tablet carry the mention "*Needs the tablet*". See also the release
+> notes.
 
 ## Contents
 
-1. What Ardoise is
-2. Installing Ardoise
-3. First start
-4. Registering the tablet (and adding the Xiaomi tablet)
-5. Getting your pages: sync
-6. Live mode and presenting in class
-7. The library
-8. Editing a note
-9. Replay, narration and video
-10. Exporting, printing, sharing
-11. Importing your Inkspace notes
-12. Pen and touch screen
-13. Diagnostics and trials with the tablet
-14. The assistant (Claude Code, Claude Desktop)
-15. Privacy
-16. When something goes wrong
-17. Keyboard shortcuts
+- [Getting started](#getting-started)
+- [1. What Ardoise is](#1-what-ardoise-is)
+- [2. Installing Ardoise](#2-installing-ardoise)
+- [3. First start](#3-first-start)
+- [4. Registering the tablet (and adding the Xiaomi tablet)](#4-registering-the-tablet)
+- [5. Getting your pages: sync](#5-getting-your-pages-sync)
+- [6. Live mode and presenting in class](#6-live-mode-and-presenting-in-class)
+- [7. The library](#7-the-library)
+- [8. Editing a note](#8-editing-a-note)
+- [9. Replay, narration and video](#9-replay-narration-and-video)
+- [10. Exporting, printing, sharing](#10-exporting-printing-sharing)
+- [11. Importing your Inkspace notes](#11-importing-your-inkspace-notes)
+- [12. Pen and touch screen](#12-pen-and-touch-screen)
+- [13. Diagnostics and trials with the tablet](#13-diagnostics-and-trials-with-the-tablet)
+- [14. The assistant (Claude Code, Claude Desktop)](#14-the-assistant-claude-code-claude-desktop)
+- [15. Privacy](#15-privacy)
+- [16. When something goes wrong](#16-when-something-goes-wrong)
+- [17. Keyboard shortcuts](#17-keyboard-shortcuts)
+
+---
+
+## Getting started
+
+This thread goes from the first start to a first exported note. Each step points to the chapter that gives the details.
+The screenshots show the program with demonstration notes and a simulated tablet.
+
+1. **Unzip and start.** Right-click the archive `ardoise-<version>-windows-x64.zip`, *Extract all…*, then double-click
+   `ardoise.exe` in the resulting folder. There is nothing to install. Windows may show a blue "*Windows protected your
+   PC*" screen: *More info*, then *Run anyway* (chapter [2](#2-installing-ardoise)).
+
+2. **Choose the folder for your notes.** At the first start, the **Welcome to Ardoise** window asks where to keep the
+   library. Click **Choose a folder…**, preferably a synced folder (Nextcloud, OneDrive…), then **Continue** (chapter
+   [3](#3-first-start)). The language is changed at the bottom of the same window.
+
+   ![Welcome to Ardoise window: the Choose a folder… button and the language choice](images/en/premier-lancement.webp)
+
+3. **Discover the library.** It is the home page: on the left, **All notes**, **Favourites**, the **Binders**, the
+   **Tags**, the **Trash** and the **Tablet** block; in the middle, one card per note. A click on a card opens the note
+   (chapter [7](#7-the-library)).
+
+   ![The library: binders, tags, favourites and the cards of the notes](images/en/bibliotheque.webp)
+
+4. **With a tablet: register it.** Click the **Tablet** block of the sidebar, then **Register the Bamboo Slate** (for the
+   Xiaomi tablet, **Add the Xiaomi tablet**). Read the **Before you start** warning, click **Continue**, then follow the
+   assistant: hold the tablet's button for about 6 seconds, then press it briefly to confirm (chapter
+   [4](#4-registering-the-tablet)). *Without a tablet, go to step 6.*
+
+   ![Registration assistant: the Before you start warning, then Continue](images/en/enregistrer-tablette.webp)
+
+5. **With a tablet: get its pages.** Write a page on the tablet, then press its button briefly to save it in its memory.
+   In the **Tablet** panel, **Use** tab, click **Sync**: each page becomes a note in the library. **Live mode**, on the
+   other hand, shows what you write on the tablet as you write it, on screen and on the projector (chapters
+   [5](#5-getting-your-pages-sync) and [6](#6-live-mode-and-presenting-in-class)).
+
+   ![Tablet panel, Use tab: connected tablet, Live mode and Sync buttons](images/en/tablette-utiliser.webp)
+
+6. **Without a tablet: create a note.** Click **New note** (or `Ctrl + N`): a blank landscape A4 page opens in the
+   editor. To annotate an existing document, **From a PDF or an image…** (chapter [7](#7-the-library)).
+
+7. **Write.** With the **Pen** tool, write with the mouse or the pen; a finger scrolls the page, unless you tick
+   **Finger** (chapter [12](#12-pen-and-touch-screen)). Choose the **Ink**, the **Colour** and the **Width** in the
+   toolbar; **Eraser**, **Select**, **Line**, **Rectangle** and **Ellipse** are next to them (chapter
+   [8](#8-editing-a-note)).
+
+   ![The editor: handwriting, typed text, an equation, shapes and a bookmark on squared paper](images/en/editeur.webp)
+
+8. **Add typed text.** Choose the **Text** tool (`T` key), click where you want it, type; `Esc` ends the entry. The
+   **Latin Modern** and **Andika** buttons, **Small**, **Medium**, **Large** and **Bold** set the text (see "Typing
+   text", chapter [8](#8-editing-a-note)).
+
+   ![Toolbar with the Text tool: font, size and bold](images/en/outils-texte.webp)
+
+9. **Add an equation.** Choose the **Equation** tool (`M` key), click the page, type the code in **LaTeX code** (for
+   example `E_c = \dfrac{1}{2} m v^2`), check the preview, then click **Place** (see "Writing an equation", chapter
+   [8](#8-editing-a-note)).
+
+   ![The Equation tool: the LaTeX code of a chemistry equation and its preview](images/en/equation.webp)
+
+10. **Place a bookmark.** The **Bookmark** tool (`B` key) places a word or a short phrase ("Chapter 3") on the page: it
+    will be used by the binder's summary and by search (see "Putting bookmarks", chapter [8](#8-editing-a-note)).
+
+11. **Save.** Nothing is saved until you click **Save** (`Ctrl + S`): the state **Unsaved changes** becomes **Saved**.
+    If you like, give the note a title in the **Title of the note** field (chapter [8](#8-editing-a-note)).
+
+12. **Export as PDF.** Click **Export…** in the toolbar, choose **PDF**, set the page if needed (**The page's actual
+    size** or **A4**), click **Export…** and say which file to create. To print, **Print…** or `Ctrl + P` (chapter
+    [10](#10-exporting-printing-sharing)).
+
+    ![The Export window: PNG, JPG, WebP, SVG and PDF formats, resolution and recognised text](images/en/exporter-note.webp)
+
+13. **Find the note again.** Go back to the library (**Library**, or `Esc`, which saves and goes back) and type a few
+    letters in **Search notes** (`Ctrl + F`): Ardoise searches the titles, the tags, the bookmarks, the typed texts and
+    the handwriting (chapter [7](#7-the-library)).
+
+    ![Searching for the word energy: the library lists the note found](images/en/recherche.webp)
+
+To go further: put a lesson on video (chapter [9](#9-replay-narration-and-video)), project the class (chapter
+[6](#6-live-mode-and-presenting-in-class)), import your Inkspace notes (chapter [11](#11-importing-your-inkspace-notes)).
 
 ---
 
@@ -47,14 +132,15 @@ appear on screen. Version française : [guide.fr.md](guide.fr.md).
 - *One folder, several computers*: if that folder is synced by Nextcloud, OneDrive or similar, you find your notes, and
   even the tablet's registration, on all your PCs.
 - *One note = one file* `.ardoise`, kept in subfolders that are your binders.
-- The interface is in *English and French*.
+- The interface is in *English and French*, with light and dark themes.
 
 *What needs the tablet*: registering the tablet, syncing it, live mode (and so projecting the live mode), the tablet
 test. *Everything else works without it*, including creating notes with the mouse, the pen or a finger, annotating a
 PDF, replaying, exporting.
 
-*What Ardoise does not do*: Wacom's cloud and Inkspace's real-time collaboration, macOS and Linux, phone apps. Notes
-cannot contain a text box typed on the keyboard.
+*What Ardoise does not do*: Wacom's cloud and Inkspace's real-time collaboration, macOS and Linux, phone apps. A note
+is handwriting, but also clean shapes, text typed on the keyboard, LaTeX equations (chemistry included) and
+bookmarks: see chapter 8.
 
 ## 2. Installing Ardoise
 
@@ -63,8 +149,7 @@ cannot contain a text box typed on the keyboard.
 - Windows 11 (Windows 10 has not been tried). Microsoft's *WebView2* display engine must be present: it is part of
   Windows 11.
 - For the tablet: Bluetooth Low Energy (Bluetooth 4.0 or later), built into the PC or through a small USB dongle. No
-  prior setup in the Windows Bluetooth settings is planned: the tablet is registered inside Ardoise (*to be confirmed
-  with the real tablet*).
+  prior setup in the Windows Bluetooth settings is needed: the tablet is registered inside Ardoise (chapter 4).
 
 ### Installing = unzipping
 
@@ -146,7 +231,10 @@ themselves; delete the backup copies only after making sure you no longer need t
 
 ## 3. First start
 
-At the first start on a PC, the **Welcome to Ardoise** window asks for the folder where your notes will be kept.
+At the first start on a PC, the **Welcome to Ardoise** window asks for the folder where your notes will be kept (the
+**Language** of the interface is chosen at the bottom of the same window).
+
+![The Welcome to Ardoise window: the Choose a folder… button and the Language](images/en/premier-lancement.webp)
 
 1. Click **Choose a folder…** and preferably pick a synced folder (Nextcloud…), for example
    `C:\Users\Name\Nextcloud\Ardoise\Notes`.
@@ -180,7 +268,8 @@ library (invented notes). In PowerShell, in the folder of `ardoise.exe`:
 
 then choose that folder as your library. And to try sync and live mode without a tablet, start
 `.\ardoise.exe --simulated-tablet`: a *simulated tablet* (three pages in memory) replaces Bluetooth; it is never mixed
-up with the real tablet's registration. One note of the demonstration library, "Cours d'optique", is handwritten
+up with the real tablet's registration. `--simulated-blackboard` does the same with a simulated Xiaomi tablet (three
+pages in memory), alone or together with the first one. One note of the demonstration library, "Cours d'optique", is handwritten
 (synthetic glyphs) and lets you try the handwriting search.
 
 ## 4. Registering the tablet
@@ -193,8 +282,11 @@ up with the real tablet's registration. One note of the demonstration library, "
 
 1. Charge the tablet and keep it near the computer; Bluetooth must be on, on the PC.
 2. In the sidebar, at the bottom, click the **Tablet** block (it shows **No tablet registered**), then
-   **Register the tablet**.
+   **Register the Bamboo Slate** (in the **Tablets** tab, under **Add a tablet**, when another tablet is already known).
 3. Read the warning (**Before you start**) and click **Continue**.
+
+   ![The Before you start warning of the Bamboo Slate registration assistant](images/en/enregistrer-tablette.webp)
+
 4. Follow the assistant, which shows a drawing of the tablet:
    - **Hold the tablet's button** down for about 6 seconds, until the light blinks blue;
    - **Looking for the tablet**, then **Connecting to the tablet**: stay still, it can take a few seconds;
@@ -215,6 +307,8 @@ The **Tablet** panel is narrow: three tabs, icons on a rail at the right (the up
 - **Tablets**: the known tablets, with what they reported at their last connection (model, battery, firmware version or
   free memory, number of pages in memory, drawing area, date read), **Forget the tablet** for each, **Add a tablet** and
   **Test the tablet…**. This information is read at the first connection.
+
+![Tablets tab of the Tablet panel: the connected Bamboo Slate with its model, battery and firmware, the Xiaomi tablet not connected, and a Forget the tablet button for each](images/en/tablettes.webp)
 
 The tablet is then recognised on *all* your PCs that use the same library. To undo this: **Settings**, **Tablet**
 section (or the panel's **Tablets** tab), **Forget the tablet** (it will have to be registered again, on all your
@@ -241,6 +335,9 @@ Bluetooth; model `jiqid.sxb.v1` in Mi Home). It is added next to the Bamboo Slat
    reconnect it.
 4. Ardoise lists what it hears. One tablet is the usual case: click **Add this tablet**. If several are heard (a
    neighbouring classroom, say), each one's **Signal** is shown: the stronger, the closer.
+
+   ![Add the Xiaomi tablet window: a tablet was found, with the Add this tablet button](images/en/ajouter-xiaomi.webp)
+
 5. **Xiaomi tablet added**: Ardoise connects to it as soon as it is switched on and nothing else is using it.
 
 If nothing is heard, Ardoise says so (**No Xiaomi tablet found**): check that the tablet is on and close, that Mi Home
@@ -275,6 +372,8 @@ wakes it up. The state appears in the **Tablet** block of the sidebar: **Looking
 The pages are received automatically on connection, or on request with **Sync** (**Use** tab of the **Tablet** panel). A bar
 shows **Page 1 of 3**… and **Cancel** stops the sync (the pages already received stay as notes, the others stay on the
 tablet). The panel then summarises: **3 notes saved.**, **3 pages deleted from the tablet.** or **No new pages.**
+
+![Use tab of the Tablet panel: the connected tablet with its battery, Live mode, Sync and the result of the last sync](images/en/tablette-utiliser.webp)
 
 Each page becomes a *note* at the root of the library, untitled (the card shows the date), at the tablet's size. You
 can title it, file it, tag it (chapter 7).
@@ -511,6 +610,12 @@ does not create a new note.
 
 ### The control window
 
+The screenshot shows live mode on the blackboard: the chalk writing comes from the tablet, the words "to revise" are
+written in red by the teacher with the computer's pen, on the **Correction** layer (see **Correcting during live
+mode**, below).
+
+![Live mode control window on the blackboard: Tablet and Computer toolbar, a page in white chalk with "to revise" in red, and the Layers tab with the Correction and Layer 1 layers](images/en/direct.webp)
+
 - **Tablet**: **Tool** (ballpoint, fountain pen, felt-tip, pencil, brush, highlighter, chalk), **Colour** (including
   **Chalk white** and **Yellow**) and **Width** are the tablet's style: the next stroke follows them, the previous ones
   do not change. The **Computer** group (**Select**, **Pen**, the computer's ink, **Undo**, **Redo**) is for touching up
@@ -535,8 +640,8 @@ does not create a new note.
 
 The *tablet's button* does, during live mode, what the **Tablet button in live mode** option says (new page or new
 layer). A new layer is created on top and receives the tablet's writing at once; the computer stays on its own layer.
-*What the Bamboo Slate sends when the button is pressed has not yet been checked on the real tablet.* The keys for next
-and previous page work in any case.
+The signal the Bamboo Slate sends when the button is pressed has been recorded on the real tablet (one press creates a
+new page). The keys for next and previous page work in any case.
 
 ### The control window's side panel
 
@@ -718,7 +823,7 @@ never saved.
 
 ### The paper and the image of the current page
 
-*Needs the tablet. Checked with the simulated tablet, not yet with the real one (trial H7).* During live mode you can
+*Needs the tablet.* During live mode you can
 change the paper of the page on screen and put a worksheet or a document *under* the writing, without stopping the
 tablet: a pupil is writing, you go from white to Seyès, or you put an exercise's text down for the class to complete. The
 change appears at once on the projector and on the share's screen, and it is saved with the page. The **Page** and
@@ -769,6 +874,9 @@ current page, **Whole** (all of it visible, without distortion); **Placement** (
 3. A *presentation* window opens *full screen on the chosen screen*, with no interface element at all (the mouse
    cursor disappears after 2 seconds without moving). The control window stays on the computer's screen. What you
    write appears on both.
+
+   ![What the class sees on the projector: the page full screen, with no interface element, with the chalk writing and the word "to revise" in red](images/en/projection.webp)
+
 4. **Stop projecting** closes the presentation. Ardoise remembers the chosen screen on this PC.
 
 With a single screen, the presentation covers the control window: press `Esc` in the presentation to close it. There
@@ -796,8 +904,9 @@ Up): see chapter 17, or the **Help** tab of the side panel.
 ### Showing the sheet on another computer of the network
 
 *Sharing live mode needs the tablet; sharing a note open in the editor does not. This sharing has been checked by
-automated tests (server, the other screen's page, simulated tablet), but not yet on two real computers nor with the
-school's firewall: test H4 is planned at work.*
+automated tests (server, the other screen's page, simulated tablet), and tried on two real computers of the same
+network, at home, then at work through the school's web filter. Still to be confirmed in use: Chrome on Android, and
+an open note shared on the school's network.*
 
 Another computer on the same network (for instance the classroom PC linked to the projector) can show the sheet in a
 *plain web browser*: nothing to install on it. It shows:
@@ -910,10 +1019,15 @@ The library is the home page. At the top: the **Search notes** field, the sort (
 **Trash**, the **Import from Inkspace…** entry (chapter 11), and at the bottom the **Tablet** block and the **Test the
 tablet** button.
 
+![The library: the sidebar (binders, tags, favourites, trash, tablet) and the cards of the notes with thumbnail, title, date, binder and tags](images/en/bibliotheque.webp)
+
 A card shows the thumbnail, the title (or the date if the note has no title), the date, the binder and the tags. A click
 opens the note in the editor. On the card: the box to *select* it, the favourites star, the **Actions for…** menu (**Rename**,
-favourites, **Duplicate**, **Change the date…**, **Move to trash**) and a handle, which appears on the card, to drag the
+favourites, **Resume in live mode** (chapter 6), **Duplicate**, **Change the date…**, **Move to trash**) and a handle,
+which appears on the card, to drag the
 note out of Ardoise (chapter 10). A **right click** on a card opens the same menu. Renaming a note also renames its file.
+
+![The ⋯ menu of a card: Rename, Add to favourites, Resume in live mode, Duplicate, Change the date…, Move to trash](images/en/menu-carte.webp)
 
 **The right click** never shows a web page's menu ("Save image as…", "More tools"…): Ardoise shows its own menu, or nothing.
 The menu opens **under the pointer** (the `Menu` key, or `Shift + F10`, on a card or a binder opens it under its **⋯** button).
@@ -989,6 +1103,8 @@ holds is set in the **In the summary** group, three independent choices:
   several: "Untitled note (2)"), **Title or date** (an untitled note carries its date) or **No** (no note line);
 - **The bookmarks** (a box): those of each note, in the order of the page.
 
+![Summary of the binder Classe: the In the summary group (The sub-binders, The notes with Title, Title or date or No, The bookmarks), the Filter the summary field and the list, with the sub-binder 3e B, its notes and their bookmarks](images/en/sommaire-classeur.webp)
+
 At first: the sub-binders and the bookmarks, no line per note, that is a book's contents. The bookmarks then stand right under the
 name of their sub-binder (or at the top, for the notes of the binder itself); a note without a bookmark gives no line, and a
 sub-binder with nothing left has no heading. **A binder with no bookmark at all** would start with an empty summary: until you have
@@ -1037,6 +1153,8 @@ Tick the cards, or: `Ctrl + click` adds or removes a note, `Shift + click` selec
 `Esc` deselects. An action bar appears: **Move to…**, **Tags…**, **Export…**, **Print…**, **Assemble…**, **Duplicate**, **Turn**,
 **Add to favourites** (or **Remove from favourites**), **Move to trash**, **Deselect**.
 
+![All notes selected: cards outlined in blue, and the action bar Move to…, Tags…, Export…, Print…, Assemble…, Duplicate, Turn, Add to favourites, Move to trash, Deselect](images/en/selection.webp)
+
 **Turn** rotates *all* the selected notes at once: choose **A quarter turn to the left** or **A quarter turn to the
 right**. The sheet, the writing and the background image turn together, exactly like **Turn the sheet with the writing**
 in the editor (chapter 8). A bar shows progress ("Turning the notes: 2 of 5"), **Stop** interrupts the operation between
@@ -1056,7 +1174,10 @@ Give the **Title of the new note** and click **Assemble**. Only the first note's
   opens quickly): a click chooses or removes a page, **Shift + click** chooses a whole run of pages from the last one clicked,
   **All** and **None** take or remove them all; the field of page numbers is still there and follows the thumbnails (and the
   other way round). With the keyboard: the arrows move the cursor over the pages, `Space` chooses the page, `Shift + arrow`
-  extends the run, `Ctrl + A` chooses them all.
+  extends the run, `Ctrl + A` chooses them all. The **Create N notes** button starts the creation.
+
+  ![New note from a PDF or an image window: a three-page PDF with pages 1 and 2 chosen on the thumbnails, the field of page numbers and the Create 2 notes button](images/en/depuis-pdf.webp)
+
   An image gives a note the size of an A4 sheet, in the image's orientation. PDFs protected by a password are not read:
   save a copy without a password. For a long PDF, a bar shows progress ("Creating the notes: 3 of 12…") and **Cancel**
   stops the creation: no note is then kept ("Cancelled: no note was kept").
@@ -1066,6 +1187,8 @@ Give the **Title of the new note** and click **Assemble**. Only the first note's
 Type in **Search notes**: Ardoise searches the *titles*, the *tags*, the *bookmarks*, the *typed texts* (**Text** tool, and the code
 of the equations, on the layers shown) and the *handwriting*, ignoring accents and capital letters. Notes found through the handwriting are grouped under **Found in the handwriting**. `Ctrl + F` puts
 the cursor in the field, `Esc` clears it.
+
+![Searching for the word energy: the library lists the note found](images/en/recherche.webp)
 
 Searching the handwriting uses *Windows' handwriting recognition*, offline, on this PC. The language module must be
 installed in Windows (French usually is; for English: *Windows Settings > Time & language > Language & region*, the
@@ -1105,6 +1228,8 @@ Click a card to open the note. At the top: **Library** (back), the **Title of th
 **Unsaved changes**), **Undo (Ctrl+Z)**, **Redo (Ctrl+Y)** and **Save** (`Ctrl + S`). *Nothing is saved until you click
 Save*; when you leave with changes, Ardoise asks: **Save and go back**, **Go back without saving** or **Stay**. Undo
 and redo have no limit while the note is open.
+
+![The editor: the top bar, the toolbar, a note with handwriting, typed text, equations, shapes and a bookmark on squared paper, and the side panel with its icon rail](images/en/editeur.webp)
 
 **The `Esc` key, in steps.** Each press does the smallest thing that applies: first it drops the gesture under way (a
 stroke, a shape, a lasso, a move, a question Ardoise is asking on screen) or ends the typing of a text, a bookmark or an
@@ -1228,6 +1353,8 @@ goes on the chosen layer.
 is inscribed in the box you drag. Three toggle buttons, under the toolbar while one of these tools is chosen, work by touch,
 pen or mouse, no keyboard needed:
 
+![Toolbar with the Rectangle tool chosen and its three toggle buttons: Regular shape, From the centre, Snap to the grid](images/en/outils-formes.webp)
+
 - **Regular shape**: a square, a circle; a line snaps to the nearest of horizontal, vertical or 45° diagonal. The `Shift`
   key, held during a stroke, inverts this button for that stroke.
 - **From the centre**: the first point is the centre of the shape (a line grows both ways). The `Alt` key, held during a
@@ -1255,6 +1382,8 @@ the editor's shortcuts.
 To change a text, tap it with the **Text** tool, or double-click it with the **Select** tool: the cursor goes where you tapped.
 
 Under the toolbar, with the **Text** tool or when texts are selected:
+
+![The toolbar with the Text tool chosen: Font (Latin Modern or Andika), Size (Small, Medium, Large) and Bold](images/en/outils-texte.webp)
 
 - **Font**: **Latin Modern** (the font of LaTeX) or **Andika** (a font designed for learning to read). Both come with
   Ardoise: the text is the same on every computer and in every export. The Greek letters Latin Modern lacks are taken from
@@ -1287,6 +1416,8 @@ takes a second to load.
 If the code is not correct, the preview says so with MathJax's message (for example "Missing close brace" for a forgotten
 brace) and the equation cannot be placed: nothing is corrected or guessed for you. Ardoise also refuses a character it cannot
 draw (scripts other than Latin and Greek) and equation numbers (`\tag`).
+
+![The Equation tool: the New equation panel with the LaTeX code of a chemistry equation, its preview, and the Cancel and Place buttons](images/en/equation.webp)
 
 A few examples:
 
@@ -1353,7 +1484,7 @@ a clear shape do not change. Ardoise straightens lines and arrows at least 1 cm 
 rectangles at least 1.3 cm across; a small upright oval (under 2.5 cm) looks like an "O" or a "0" and stays as it
 is. Select the drawings rather than the text. A single undo cancels it all (`Ctrl + Z`).
 
-**Setting the straightening.** The small button to the right (**Straightening settings**) opens a panel with three
+**Setting the straightening.** The small button to the right of the **Straighten shapes** button (**Straightening settings**, a settings icon) opens a panel with three
 settings:
 
 - **Tolerance**: from **strict** to **lenient**, in five steps. Lenient also straightens shapes drawn less clearly;
@@ -1382,7 +1513,11 @@ and width, texts their font, size and colour; they are replayed last. Anything t
 
 The **right click on the page** (with the mouse: not with the pen's button, which lassoes, nor with a finger) opens a menu of the
 same commands. With the **Select** tool, the stroke or text under the pointer is selected first if it is not already; an
-existing selection stays as it is when the pointer is on a part of it. With a selection: **Copy**, **Cut**, **Paste**,
+existing selection stays as it is when the pointer is on a part of it.
+
+![Right click on a stroke of the page: the menu Copy, Cut, Paste, Duplicate, Straighten shapes, Delete, with the selected object outlined by its handles](images/en/menu-contextuel.webp)
+
+With a selection: **Copy**, **Cut**, **Paste**,
 **Duplicate**, **Edit** (one text, one equation or one bookmark only), **Straighten shapes** (when strokes are selected) and
 **Delete**. Without a selection: **Paste**, **Select all**, **Undo** and **Redo**. **Paste** is always offered: if the clipboard
 holds nothing from Ardoise, a message says so. Nothing during a replay or with the split panel open.
@@ -1390,6 +1525,8 @@ holds nothing from Ardoise, a message says so. Nothing during a replay or with t
 ### The sheet: paper, template, format, orientation
 
 The **Page** tab of the side panel sets up the sheet:
+
+![Page tab of the side panel: Paper (four colours), Template and Paper texture, Sheet format with Portrait or Landscape, Size and dimensions, Scale the writing with the sheet, Turn and crop](images/en/panneau-page.webp)
 
 - **Paper**: four colour swatches, **White**, **Cream**, **Kraft**, **Black slate** (and **Custom** when the note has a
   paper of another colour); **Template**: **Blank**, **Lined**, **Seyès**, **5 mm squares**, **Graph paper (mm)**,
@@ -1532,6 +1669,8 @@ The **Replay** button (or the `R` key) replays the stroke *as it was written*. T
 
 Touch screens work as in the editor: one finger scrolls, two fingers zoom.
 
+![Replay: the bar with Play, the timeline, the Speed and Remove dead time, above the page being rewritten; the Sound tab offers Record a narration](images/en/relecture.webp)
+
 ### Narration
 
 A note has *a single narration*, a sound stored *in the note*. The **Sound** tab of the side panel says what the note holds
@@ -1608,6 +1747,8 @@ the length and the *estimated export time* are shown before you start; **Export�
 bar shows progress and **Cancel the export** stops it. The file only appears once it is complete. WebM (AV1
 compression) is much slower: reduce the size or the number of frames per second if the estimate is long.
 
+![The Export as video window: the four formats MP4, Animated GIF, Animated WebP and WebM, the settings for size, frames per second and length, and the export estimate](images/en/export-video.webp)
+
 *MP4 on a Windows "N" edition.* Ardoise writes MP4 with the encoder built into Windows. It is missing on "N" editions
 installed without the *Media Feature Pack*. In **Settings**, the **Backup video encoder (OpenH264)** section then lets
 you **Download from Cisco** the OpenH264 encoder (the file comes from Cisco's server and its fingerprint is checked; the
@@ -1632,6 +1773,8 @@ question **Which format should I choose?**:
 | Best for | Word, OneNote, slide | A site or form that requires a JPG | Web page, messaging | Retouching the drawing | Printing, sending, archiving |
 
 When in doubt: the **PDF** to print or send a note, the **PNG** to insert it in a document.
+
+![The Export window: the five formats PNG, JPG, WebP, SVG and PDF, the resolution, Include the background, and at the bottom the recognised text to save as .txt, Markdown or Word](images/en/exporter-note.webp)
 
 Settings: **Resolution** (**96 dpi (screen)**, **150 dpi (usual)**, **300 dpi (print)**), **JPG quality**, **PDF page**
 (**The page's actual size** or **A4 (note fitted and centred)**), **Include the background** (unticked, only the stroke
@@ -1684,13 +1827,19 @@ could not analyse the layout, Ardoise says so: the structure is then guessed fro
 ### Copying, printing, dragging
 
 - **Copy image**: puts the note on Windows' clipboard; paste it into Word or OneNote.
-- **Print…** (editor, or the selection bar; `Ctrl + P` does the same, see below): Windows' print window opens so that you can choose the printer. Each note is
-  printed on a page, in its orientation. You set **Print the background**, the **Size on the sheet** (**Real size** or
+- **Print…** (editor, or the selection bar; `Ctrl + P` does the same, see chapter 17): Ardoise's print window opens,
+  then Windows' to choose the printer. Each note is printed on a page, in its orientation. You set **Print the background**, the **Size on the sheet** (**Real size** or
   **Fitted to the sheet**) and the **Notes per sheet**: **1**, **2 per sheet** or **4 per sheet**. With 2 or 4, Ardoise lays
   the notes out in order on the sheet, each in its own cell and undistorted (two portrait notes side by side on a landscape
   sheet, two landscape notes one above the other; four notes two by two); this setting is Ardoise's own, not the printer
   driver's (which would only act on sheets that are already made). In the Windows window the *pages* are then the sheets: five
   notes at two per sheet make three pages.
+
+  ![Ardoise's Print window: Print the background, Size on the sheet (Real size or Fitted to the sheet) and Notes per sheet (1, 2 per sheet or 4 per sheet)](images/en/imprimer.webp)
+
+- *Dragging out of Ardoise*: the handle of a library card drops a *PNG image* of the note into Explorer, onto the
+  desktop, into Word, OneNote or an email (one image per note if several are selected). Keep the button pressed while
+  the image is prepared.
 
 ### Exporting or printing a binder
 
@@ -1700,23 +1849,28 @@ window reduced to PDF, with the **Include the sub-binders** box (unchecked at fi
 sub-binders); their notes come after the binder's, each sub-binder in its own order. **A binder with no notes of its own**, only
 in its sub-binders, has the box ticked from the start, and the window says so; unticked, there is nothing to export: the
 **Export…** button waits and a sentence says what to tick. A binder with no note at all shows "This binder has no notes." and the
-button stays greyed. The PDF has **bookmarks** that the **In the summary** group sets (the same three choices as the binder's
+button stays greyed.
+
+The PDF has **bookmarks** that the **In the summary** group sets (the same three choices as the binder's
 summary, see **The summary of a binder**): the name of the sub-binders, a line per note (its title, or **Untitled note**, or its
 date), and the **bookmarks put in the notes** (**Bookmark** tool), which lead to their spot on the page; open your PDF reader's
 bookmarks panel to see them. Without the notes, the page bookmarks come right under the name of their sub-binder. If the choices
 leave nothing, the PDF has no bookmarks (the sentence "the summary would be empty" says so).
+
 The **Add a summary page at the start** box (unchecked at first, and remembered) puts a **summary page** at the head of the PDF:
 the binder's name, then what you chose in **In the summary**, with the **page numbers** and dot leaders, like a book's; a long list
 takes several pages, and the numbers count them. Each line is a **link** to its page (or to the bookmark's spot), and the PDF has a
 **Summary** bookmark first. The page is A4 portrait if you chose the A4 page, else the size of the first note. If the choices leave
 nothing, the box is greyed. To have it on paper, print that PDF (**Print the binder…** adds no summary page: the page numbers would mean nothing with several
 notes to a sheet).
+
+![Exporting a binder as a PDF: the Include the sub-binders box, the In the summary group, the Add a summary page at the start box and the settings for the PDF page](images/en/export-classeur.webp)
+
+![The summary page at the start of the PDF of the binder Classe: the sub-binder 3e B, the notes and their bookmarks, with dot leaders and page numbers](images/en/page-sommaire.webp)
+
 **Print the binder…** opens the print window with the same notes in the same order, the same **Include the sub-binders** box
 (ticked from the start for a binder with no notes of its own) and the same sentences; the printed page carries no date or bookmark,
 so there is no choice for the summary.
-- *Dragging out of Ardoise*: the handle of a library card drops a *PNG image* of the note into Explorer, onto the
-  desktop, into Word, OneNote or an email (one image per note if several are selected). Keep the button pressed while
-  the image is prepared.
 
 ### Showing the live sheet
 
@@ -1800,8 +1954,8 @@ presentation can be used with the pen or a finger.
   **Finger** box of the zoom bar): the finger then draws like the mouse, and two-finger zoom still works. This setting
   is specific to each PC. With the **Move the page** tool, or in a replay, a finger always scrolls.
 
-*The back of the pen and the button cannot be simulated by the automated tests; they have to be tried on the touch
-PC.*
+*The back of the pen and the button cannot be simulated by the automated tests; the author has tried them by hand on a
+Surface.*
 
 ## 13. Diagnostics and trials with the tablet
 
@@ -1812,10 +1966,12 @@ keep a trace of what it exchanges with the tablet.
 
 Click **Test the tablet** (at the bottom of the sidebar, or in **Settings**). The **Tablet test** goes through eight
 steps: **Bluetooth adapter**, **Reference pages**, **Finding the tablet**, **Connection**, **Information**, **Page
-download**, **Live mode**, **Reconnection**. It takes about 5 minutes; follow the on-screen instructions, click **Done,
+download**, **Live mode**, **Reconnection**. It takes about 5 minutes; click **Start the test**, follow the on-screen instructions, click **Done,
 continue** after each action, **Skip this step** if a step is stuck, **Stop the test** to finish. For the reference
 pages, draw: a square and a circle as large as possible; "Ardoise 2026" in normal handwriting; three horizontal
 lines, very light, normal, very heavy.
+
+![Tablet test panel: the two boxes, the Start the test button and the eight steps to do](images/en/tester-tablette.webp)
 
 Two boxes to know about: **Delete pages from the tablet once added to the library as notes** (ticked by default) and
 **Simulation (no tablet)**. The test may register the tablet if it is not yet registered, with the same consequences as in chapter 4.
@@ -1936,9 +2092,10 @@ These shortcuts do nothing while you are typing in a text field, except those of
 
 ### Browser keys
 
-Ardoise is an application, not a web page: a browser's keys do nothing in it. `F5` and `Ctrl + R` (reload the page, which would
-lose an unsaved note), `Ctrl + F` outside the library, `F3`, `Ctrl + G` (the browser's find bar), `Ctrl + U`, `Ctrl + J`,
-`Ctrl + H`, `Ctrl + O`, `F7` and `F12` have no effect; `Ctrl + P` and `Ctrl + Shift + P` open Ardoise's own printing (never
+Ardoise is an application, not a web page: a browser's keys do nothing in it. `F5`, `Ctrl + R` and `Ctrl + Shift + R`
+(reload the page, which would lose an unsaved note), `Ctrl + F` outside the library, `F3`, `Ctrl + G` (the browser's find
+bar), `Ctrl + U`, `Ctrl + J`, `Ctrl + H`, `Ctrl + O`, `Ctrl + S` outside the editor, `F7`, `F12` and the developer tools'
+shortcuts have no effect; `Ctrl + P` and `Ctrl + Shift + P` open Ardoise's own printing (never
 the printing of the window as a web page). The editing keys (`Ctrl + A`, `C`, `V`, `X`, `Z`, `Y`) and all of Ardoise's own
 keys stay as described in this chapter.
 
@@ -2021,7 +2178,7 @@ window has no other key.
 | `P` | **Pen** tool (control window): write with the computer's pen or mouse on the chosen layer |
 | `Ctrl + Z` | Undo a stroke or an erasing of the computer, a deletion, a change of colour or **Clear the page** (control window) |
 | `Ctrl + Y` or `Ctrl + Shift + Z` | Redo (control window) |
-| `Esc` | Drop the pen gesture under way; close the **Computer's ink** panel if it is open; clear the selection if there is one; otherwise close the projection if it is shown; otherwise ask whether to end live mode |
+| `Esc` | Drop the pen gesture under way; close the **Computer's ink** panel if it is open; clear the selection if there is one; otherwise close the projection if it is shown; otherwise ask whether to **Finish** live mode |
 
 ### In windows
 

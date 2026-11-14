@@ -7,7 +7,9 @@
 //! * `LISEZMOI.txt`, French then English: what each file is and how to start;
 //! * `guide/*.html`: every `docs/guide/*.md` as a standalone page (`pulldown-cmark`, tables on,
 //!   links between guide pages rewritten from `.md` to `.html`, headings given GitHub-style
-//!   anchors, one small embedded stylesheet that also reads well on paper).
+//!   anchors, one small embedded stylesheet that also reads well on paper);
+//! * `guide/images/**`: the pictures of the guides (`docs/guide/images/**`), copied as they are; a guide
+//!   that shows a picture the folder lacks stops the build.
 //!
 //! The archive is deterministic: entries sorted by path, fixed timestamps, fixed permissions, so
 //! the same inputs give the same bytes (and the same SHA-256, which is printed with the size).
@@ -46,7 +48,7 @@ pre code { padding: 0; background: none; }
 blockquote { margin: 1em 0; padding: 0.1em 1em; border-left: 4px solid rgb(127 127 127 / 50%); }
 table { border-collapse: collapse; margin: 1em 0; }
 th, td { padding: 0.35em 0.7em; border: 1px solid rgb(127 127 127 / 55%); text-align: left; vertical-align: top; }
-img { max-width: 100%; }
+img { max-width: 100%; height: auto; border: 1px solid rgb(127 127 127 / 40%); border-radius: 4px; }
 @media (prefers-color-scheme: dark) { a { color: #8ab4f8; } }
 @media print {
   body { max-width: none; margin: 0; color: #000; background: #fff; font-size: 11pt; }
@@ -116,8 +118,15 @@ fn rewrite_link(dest: &str, pages: &BTreeSet<String>) -> (String, bool) {
 }
 
 /// A guide page as a standalone HTML document. `pages` are the file names of all the guide's
-/// Markdown pages (for the links); the second result lists the links that point outside them.
-fn render_page(markdown: &str, file_name: &str, pages: &BTreeSet<String>) -> (String, Vec<String>) {
+/// Markdown pages (for the links) and `images` the paths of its pictures, relative to the guide's
+/// folder (`images/fr/editeur.webp`); the second result lists the links that point outside the
+/// pages, the third the pictures the page shows that `images` does not hold.
+fn render_page(
+    markdown: &str,
+    file_name: &str,
+    pages: &BTreeSet<String>,
+    images: &BTreeSet<String>,
+) -> (String, Vec<String>, Vec<String>) {
     let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH;
     // The guides are text, not markup: a `<title>` or a `<b>` written in a page is shown as what
     // was typed. Raw HTML would otherwise reach the page and, for a `<title>`, swallow the rest.
@@ -130,6 +139,7 @@ fn render_page(markdown: &str, file_name: &str, pages: &BTreeSet<String>) -> (St
     let mut used = BTreeSet::new();
     let mut title = None;
     let mut dangling = Vec::new();
+    let mut missing = Vec::new();
 
     let mut i = 0;
     while i < events.len() {
@@ -165,6 +175,9 @@ fn render_page(markdown: &str, file_name: &str, pages: &BTreeSet<String>) -> (St
                     *dest_url = CowStr::from(rewritten);
                 }
             }
+            Event::Start(Tag::Image { dest_url, .. }) if !images.contains(dest_url.as_ref()) => {
+                missing.push(dest_url.to_string());
+            }
             _ => {}
         }
         i += 1;
@@ -184,7 +197,7 @@ fn render_page(markdown: &str, file_name: &str, pages: &BTreeSet<String>) -> (St
          <title>{}</title>\n<style>\n{GUIDE_CSS}</style>\n</head>\n<body>\n{body}</body>\n</html>\n",
         escape(&title)
     );
-    (page, dangling)
+    (page, dangling, missing)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -269,6 +282,28 @@ fn workspace_version(manifest: &str) -> Option<String> {
     })
 }
 
+/// The pictures under `dir/relative` (a folder of the guide), as paths relative to `dir` with `/` as
+/// the separator: `images/fr/editeur.webp`. A missing folder holds none.
+fn collect_images(dir: &Path, relative: &str, found: &mut BTreeSet<String>) -> Result<(), String> {
+    let folder = dir.join(relative);
+    let Ok(listing) = fs::read_dir(&folder) else {
+        return Ok(());
+    };
+    for entry in listing.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = format!("{relative}/{name}");
+        if entry.path().is_dir() {
+            collect_images(dir, &path, found)?;
+        } else if ["webp", "png", "jpg", "jpeg", "gif", "svg"]
+            .iter()
+            .any(|ext| name.to_lowercase().ends_with(&format!(".{ext}")))
+        {
+            found.insert(path);
+        }
+    }
+    Ok(())
+}
+
 /// Everything that goes into the archive, sorted by path. `exe` is the program to ship; `root`
 /// holds `LICENSE`, `THIRD-PARTY-NOTICES` and `docs/guide`. Problems that do not stop the build
 /// (a link to a file the archive lacks) are returned as warnings.
@@ -313,10 +348,26 @@ fn collect(root: &Path, exe: &Path, version: &str) -> Result<(Vec<Entry>, Vec<St
         return Err(format!("no guide page (*.md) in {}", guide_dir.display()));
     }
     let pages: BTreeSet<String> = sources.iter().map(|(n, _)| n.clone()).collect();
+    let mut images = BTreeSet::new();
+    collect_images(&guide_dir, "images", &mut images)?;
+    for image in &images {
+        entries.push(Entry {
+            path: format!("{folder}/guide/{image}"),
+            bytes: read(&guide_dir.join(image))?,
+            executable: false,
+        });
+    }
     let mut warnings = Vec::new();
     let mut html_names = Vec::new();
     for (name, markdown) in &sources {
-        let (page, dangling) = render_page(&markdown.replace("\r\n", "\n"), name, &pages);
+        let (page, dangling, missing) =
+            render_page(&markdown.replace("\r\n", "\n"), name, &pages, &images);
+        if !missing.is_empty() {
+            return Err(format!(
+                "{name}: the pictures {} are not in docs/guide/images",
+                missing.join(", ")
+            ));
+        }
         warnings.extend(
             dangling
                 .into_iter()
@@ -578,6 +629,47 @@ mod tests {
     }
 
     #[test]
+    fn a_guide_picture_is_copied_with_its_alt_text_and_a_missing_one_stops_the_build() {
+        let tree = Tree::new("images");
+        fs::create_dir_all(tree.0.join("docs/guide/images/fr")).unwrap();
+        fs::write(
+            tree.0.join("docs/guide/images/fr/a.webp"),
+            b"RIFF fake picture",
+        )
+        .unwrap();
+        fs::write(
+            tree.0.join("docs/guide/images/fr/notes.txt"),
+            "not a picture",
+        )
+        .unwrap();
+        fs::write(
+            tree.0.join("docs/guide/guide.en.md"),
+            "# Ardoise guide\n\n![The editor](images/fr/a.webp)\n",
+        )
+        .unwrap();
+        let (entries, _) = tree.collect();
+        let paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
+        assert!(paths.contains(&"ardoise-1.2.3/guide/images/fr/a.webp"));
+        assert!(!paths.iter().any(|p| p.ends_with("notes.txt")));
+        let page = entries
+            .iter()
+            .find(|e| e.path.ends_with("guide/guide.en.html"))
+            .unwrap();
+        let html = String::from_utf8(page.bytes.clone()).unwrap();
+        assert!(html.contains("<img src=\"images/fr/a.webp\" alt=\"The editor\" />"));
+        assert!(html.contains("max-width: 100%") && html.contains("border: 1px solid"));
+
+        // A picture the folder lacks is an error, not a warning.
+        fs::write(
+            tree.0.join("docs/guide/guide.en.md"),
+            "# Ardoise guide\n\n![gone](images/fr/gone.webp)\n",
+        )
+        .unwrap();
+        let error = collect(&tree.0, &tree.0.join("fake-ardoise.exe"), "1.2.3").unwrap_err();
+        assert!(error.contains("guide.en.md") && error.contains("images/fr/gone.webp"));
+    }
+
+    #[test]
     fn raw_html_in_a_guide_is_shown_as_text_and_cannot_swallow_the_page() {
         let markdown = "# Guide
 
@@ -589,7 +681,7 @@ A title like <title> (clean) and <b>bold</b>.
 
 Last words.
 ";
-        let (html, _) = render_page(markdown, "x.en.md", &BTreeSet::new());
+        let (html, _, _) = render_page(markdown, "x.en.md", &BTreeSet::new(), &BTreeSet::new());
         assert_eq!(html.matches("<title>").count(), 1);
         assert_eq!(html.matches("</title>").count(), 1);
         assert!(html.contains("&lt;title&gt; (clean)") && html.contains("&lt;b&gt;bold&lt;/b&gt;"));
@@ -638,9 +730,13 @@ Last words.
         names.sort();
         assert!(names.len() >= 4, "{names:?}");
         let pages: BTreeSet<String> = names.iter().cloned().collect();
+        let mut images = BTreeSet::new();
+        collect_images(&guide, "images", &mut images).unwrap();
         for name in &names {
             let markdown = fs::read_to_string(guide.join(name)).unwrap();
-            let (html, _) = render_page(&markdown, name, &pages);
+            let (html, _, missing) = render_page(&markdown, name, &pages, &images);
+            // Every picture a guide shows is in docs/guide/images, and so is in the archive.
+            assert!(missing.is_empty(), "{name}: pictures missing: {missing:?}");
             assert_eq!(html.matches("<title>").count(), 1, "{name}: <title>");
             assert_eq!(html.matches("</title>").count(), 1, "{name}: </title>");
             let found = headings(&markdown);
