@@ -1,8 +1,8 @@
 /** "Revenir à l'original" in the editor: the original's ink in the note being edited. */
 import { currentFit, displayedSize, fitRect, type PixelSize } from '../background';
-import type { BackgroundImage, PageSize } from '../note';
+import { isBookmarkObject, type BackgroundImage, type PageSize } from '../note';
 import type { NoteOriginal } from '../original';
-import { withObjects } from './objects';
+import { objectsOf, withObjects } from './objects';
 import { nearestVisibleLayer, type Doc } from './state';
 
 /**
@@ -15,8 +15,14 @@ import { nearestVisibleLayer, type Doc } from './state';
  */
 export function revertToOriginal(doc: Doc, original: NoteOriginal): Doc {
   if (original.source === 'none' || original.layers.length === 0) return doc;
+  // Bookmarks are marks on the page, not ink: the note keeps the ones it has (on a layer the original has).
+  const last = original.layers.length - 1;
+  const bookmarks = objectsOf(doc.note)
+    .filter(isBookmarkObject)
+    .map((b) => (b.layer > last ? { ...b, layer: last } : b));
   const note = withObjects({ ...doc.note, page: original.page, layers: original.layers, strokes: original.strokes }, [
-    ...(original.objects ?? []),
+    ...(original.objects ?? []).filter((o) => !isBookmarkObject(o)),
+    ...bookmarks,
   ]);
   const image = doc.note.backgroundImage;
   if (image) note.backgroundImage = imageForOriginal(image, doc.note.page, original, doc.backgroundPixels);

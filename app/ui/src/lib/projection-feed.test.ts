@@ -101,6 +101,15 @@ describe('projectionDiff', () => {
     expect(projectionDiff(sent, { ...shown, title: 'Autre titre' }, null, VIEW)).toBeNull();
   });
 
+  it('does not send the page again for a bookmark: it is the editor only', () => {
+    const mark = { kind: 'bookmark', id: 'b', layer: 0, t: 0, x: 100, y: 100, scale: 1, quarterTurns: 0, width: 3000, height: 925, label: 'Début' };
+    const marked = { ...shown, objects: [mark] };
+    expect(projectionDiff(sent, marked, null, VIEW)).toBeNull();
+    expect(projectionDiff(sentPageOf(marked, null), { ...shown, objects: [{ ...mark, label: 'Fin', x: 900 }] }, null, VIEW)).toBeNull();
+    // A stroke appended still goes alone.
+    expect(projectionDiff(sentPageOf(marked, null), { ...marked, strokes: [a, b, c, stroke()] }, null, VIEW)?.kind).toBe('strokes');
+  });
+
   it('sends a stroke appended alone, and an undo as nothing to add', () => {
     const d = stroke();
     expect(projectionDiff(sent, note([a, b, c, d]), null, VIEW)).toEqual({ kind: 'strokes', keep: 3, tail: [d], ended: null });

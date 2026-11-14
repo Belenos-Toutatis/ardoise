@@ -17,7 +17,7 @@ import { objectsInLasso, objectsOf, withObjects } from './objects';
 
 export type SplitMode = 'time' | 'zone';
 
-/** First and last time of the whole note (samples and page objects), milliseconds; null while it has neither. */
+/** First and last time of the whole note (samples and page objects, bookmarks apart), milliseconds; null while it has neither. */
 export function timeRange(note: Note): { min: number; max: number } | null {
   let min = Infinity;
   let max = -Infinity;
@@ -28,6 +28,7 @@ export function timeRange(note: Note): { min: number; max: number } | null {
     }
   }
   for (const object of objectsOf(note)) {
+    if (object.kind === 'bookmark') continue;
     if (object.t < min) min = object.t;
     if (object.t > max) max = object.t;
   }

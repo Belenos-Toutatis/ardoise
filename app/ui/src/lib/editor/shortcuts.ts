@@ -38,6 +38,7 @@ export const EDITOR_SHORTCUTS: readonly Shortcut<EditorKeyContext>[] = [
   tool('pen', 'p', 'pen'),
   tool('eraser', 'e', 'eraser'),
   tool('text', 't', 'text'),
+  tool('bookmark', 'b', 'bookmark'),
   tool('pan', 'h', 'pan'),
   {
     id: 'panHold',

@@ -301,6 +301,30 @@ describe('replay timeline: what is drawn', () => {
   });
 });
 
+describe('replay timeline: bookmarks', () => {
+  it('neither draws nor waits for a bookmark (the editor is the only one)', () => {
+    const plain = threeStrokes();
+    const mark = {
+      kind: 'bookmark',
+      id: 'b',
+      layer: 0,
+      t: 60_000,
+      x: 1000,
+      y: 1000,
+      scale: 1,
+      quarterTurns: 0,
+      width: 3000,
+      height: 925,
+      label: 'Fin',
+    };
+    const marked: Note = { ...plain, objects: [mark] };
+    expect(timeline(marked).duration).toBe(timeline(plain).duration);
+    expect(timeline(marked).noteEnd).toBe(timeline(plain).noteEnd);
+    // The page shown at the end is the note's strokes.
+    expect(timeline(marked).noteAt(timeline(marked).duration).strokes).toEqual(plain.strokes);
+  });
+});
+
 describe('replay timeline: big notes', () => {
   // Generous bounds: they catch accidental quadratic work, not small regressions.
   it('builds quickly and draws a frame in a millisecond or so (300 strokes, 20 000 samples)', () => {

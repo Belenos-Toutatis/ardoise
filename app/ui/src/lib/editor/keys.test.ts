@@ -175,7 +175,7 @@ describe('editorKeyAction: the plain keys', () => {
   });
 
   it('V, P, E, H pick the tool, R replays, F straightens, in either case', () => {
-    const tools: Record<string, string> = { v: 'select', p: 'pen', e: 'eraser', h: 'pan', r: 'replay', f: 'straighten' };
+    const tools: Record<string, string> = { v: 'select', p: 'pen', e: 'eraser', t: 'text', b: 'bookmark', h: 'pan', r: 'replay', f: 'straighten' };
     for (const [letter, expected] of Object.entries(tools)) {
       expect(kind(letter), letter).toBe(expected);
       expect(kind(letter, { shift: true }), `Shift + ${letter}`).toBe(expected);
@@ -188,7 +188,7 @@ describe('editorKeyAction: the plain keys', () => {
   });
 
   it('other keys do nothing, nor does the old name of Space', () => {
-    for (const k of ['a', 'z', 'b', 's', 'w', 'q', '0', '2', '+', '-', '=', 'Enter', 'Tab', 'F1', 'ArrowUp', 'Home', 'Spacebar']) {
+    for (const k of ['a', 'z', 'g', 's', 'w', 'q', '0', '2', '+', '-', '=', 'Enter', 'Tab', 'F1', 'ArrowUp', 'Home', 'Spacebar']) {
       expect(kind(k), k).toBeNull();
     }
   });

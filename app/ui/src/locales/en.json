@@ -56,7 +56,7 @@
     "tabletNone": "No tablet registered",
     "tabletState": "Open or close the tablet panel",
     "search": "Search notes",
-    "searchPlaceholder": "Search (title, tag, handwriting)…",
+    "searchPlaceholder": "Search (title, tag, bookmark, handwriting)…",
     "sort": "Sort notes",
     "sortOptions": {
       "date-desc": "Date: newest first",
@@ -114,6 +114,22 @@
       "assemble": "Assemble…",
       "duplicate": "Duplicate",
       "assembleNeeds": "Select at least two notes to assemble them."
+    },
+    "summary": {
+      "button": "Summary",
+      "hint": "Binder summary: its bookmarks, note by note, in the binder's order",
+      "title": "Summary of the binder \"{name}\"",
+      "intro": {
+        "one": "1 bookmark in this binder. Choose it to open the note at that spot.",
+        "other": "{count} bookmarks in this binder, in the binder's order. Choose one to open the note at that spot."
+      },
+      "empty": "This binder has no bookmark. In the editor, the Bookmark tool puts a word or a short phrase at a spot of the page.",
+      "filter": "Filter the bookmarks",
+      "filterPlaceholder": "Filter the bookmarks…",
+      "list": "Bookmarks of the binder",
+      "noMatch": "No bookmark matches “{query}”.",
+      "open": "Open the note \"{note}\" at the bookmark \"{label}\"",
+      "close": "Close"
     },
     "empty": {
       "favorites": "No favourites yet. Click a note's star to find it here.",
@@ -281,6 +297,7 @@
     "binder": {
       "menu": "Actions on the binder \"{name}\"",
       "rename": "Rename…",
+      "summary": "Binder summary…",
       "exportPdf": "Export the binder as a PDF…",
       "print": "Print the binder…",
       "emptyHint": "This binder holds no notes.",
@@ -968,6 +985,7 @@
       "rectangle": "Rectangle",
       "ellipse": "Ellipse",
       "text": "Text",
+      "bookmark": "Bookmark",
       "eraser": "Eraser",
       "pan": "Move the page"
     },
@@ -1001,6 +1019,12 @@
       "bold": "Bold",
       "help": "Tap the page to type a text, or a text to change it · Enter: new line · Esc: finish",
       "field": "Text of the frame"
+    },
+    "bookmark": {
+      "help": "Tap the page to put a bookmark, or a bookmark to rename it · Enter: confirm · Esc: finish",
+      "field": "Text of the bookmark",
+      "placeholder": "A word or a short phrase",
+      "gone": "This bookmark no longer exists in the note."
     },
     "eraser": {
       "label": "Eraser mode",
@@ -1283,6 +1307,7 @@
         "pen": "Pen tool",
         "eraser": "Eraser tool",
         "text": "Text tool",
+        "bookmark": "Bookmark tool",
         "pan": "Move-the-page tool",
         "panHold": "Move the page while the key is held (unless a button has the focus)",
         "straighten": "Straighten the shapes of the selection",
@@ -1292,7 +1317,7 @@
         "selectAll": "Select all (the strokes and texts of the chosen layer)",
         "clipboard": "Copy, cut, paste strokes and texts",
         "delete": "Delete the selection",
-        "escape": "Esc, in steps: cancels the gesture under way or finishes typing a text (the text stays); else closes the open split, replay, crop or “Straighten shapes” setting; else deselects; else saves the note and goes back to the library (not while a sound is being recorded)",
+        "escape": "Esc, in steps: cancels the gesture under way or finishes typing a text or a bookmark (the text stays); else closes the open split, replay, crop or “Straighten shapes” setting; else deselects; else saves the note and goes back to the library (not while a sound is being recorded)",
         "fit": "Fit: the whole page",
         "fitWidth": "Width: the page across the window",
         "pages": "Previous page, next page (the note before, the note after)",

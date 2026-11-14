@@ -8,7 +8,7 @@
  */
 import type { PixelsRef } from '../background';
 import type { Tool } from '../ink';
-import { INKSPACE_COLORS, type Background, type FontFamily, type Note, type PageObject, type PageSize, type Rgba, type Stroke } from '../note';
+import { INKSPACE_COLORS, isBookmarkObject, type Background, type FontFamily, type Note, type PageObject, type PageSize, type Rgba, type Stroke } from '../note';
 import type { TextEngine } from '../text';
 import { type Affine, type Rect, type Vec } from './geometry';
 import { layerVisible, onLayer } from './hit';
@@ -28,8 +28,8 @@ import * as ops from './ops';
 import type { Orientation } from './page-size';
 import type { ShapeKind } from './shape-tools';
 
-/** What a drag (or a tap) on the page does: select, write, draw a line, a rectangle or an ellipse (`ShapeKind`), erase, type text, move the page, crop. */
-export type Mode = 'select' | 'pen' | ShapeKind | 'eraser' | 'text' | 'pan' | 'crop';
+/** What a drag (or a tap) on the page does: select, write, draw a line, a rectangle or an ellipse (`ShapeKind`), erase, type text, put a bookmark, move the page, crop. */
+export type Mode = 'select' | 'pen' | ShapeKind | 'eraser' | 'text' | 'bookmark' | 'pan' | 'crop';
 
 /** The modes whose drag puts new ink on the active layer (they need it visible). */
 export function inksNewStrokes(mode: Mode): boolean {
@@ -324,9 +324,14 @@ export function addLayer(doc: Doc, name: string): Doc {
 export function setLayerVisible(doc: Doc, index: number, visible: boolean): Doc {
   const note = ops.setLayerVisible(doc.note, index, visible);
   if (note === doc.note) return doc;
-  // Hidden strokes and objects cannot stay selected.
+  // Hidden strokes and objects cannot stay selected (a bookmark is not hidden with its layer).
   const selection = visible ? doc.selection : doc.selection.filter((i) => doc.note.strokes[i]?.layer !== index);
-  const objects = visible ? objectSelection(doc) : objectSelection(doc).filter((i) => objectsOf(doc.note)[i]?.layer !== index);
+  const objects = visible
+    ? objectSelection(doc)
+    : objectSelection(doc).filter((i) => {
+        const object = objectsOf(doc.note)[i];
+        return object?.layer !== index || (object !== undefined && isBookmarkObject(object));
+      });
   // The chosen layer stays chosen even hidden (the zone warns, the pen refuses, the eraser and the selection find nothing).
   return withNote(doc, note, selection, objects);
 }

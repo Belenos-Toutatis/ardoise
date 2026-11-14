@@ -135,6 +135,7 @@
     { mode: 'rectangle' },
     { mode: 'ellipse' },
     { mode: 'text', icon: 'T' },
+    { mode: 'bookmark', icon: '⚑' },
     { mode: 'eraser', icon: '⌫' },
     { mode: 'pan', icon: '✋' },
   ];
@@ -277,6 +278,12 @@
       {#if tools.mode === 'text'}
         <span class="label text-help" data-slot="text-help">{t('editor.text.help')}</span>
       {/if}
+    </div>
+  {/if}
+
+  {#if tools.mode === 'bookmark'}
+    <div class="group" data-slot="bookmark-options">
+      <span class="label" data-slot="bookmark-help">{t('editor.bookmark.help')}</span>
     </div>
   {/if}
 

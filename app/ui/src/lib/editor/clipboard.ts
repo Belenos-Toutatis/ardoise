@@ -5,10 +5,11 @@
  * Colour, tool, width and samples travel; the layer does not (pasted strokes go to the active
  * layer of the destination). Text frames travel with the strokes (`objects`, an optional list of the same
  * version: an older reader ignores it): their placement, text, family, bold, size and colour; their id and layer do not
- * (a paste gives new ones).
+ * (a paste gives new ones). Bookmarks travel the same way (their label and place): a cut must not lose one.
  */
 import { TOOLS, type InkPoint } from '../ink';
-import { FONT_FAMILIES, type PageObject, type Stroke, type TextObject } from '../note';
+import { FONT_FAMILIES, isBookmarkObject, type BookmarkObject, type PageObject, type Stroke, type TextObject } from '../note';
+import { cleanBookmarkLabel } from './objects';
 import { MAX_PAGE_SIDE } from './ops';
 
 /** The marker that makes a text ours. */
@@ -36,7 +37,9 @@ const MAX_TEXT_LENGTH = 100_000;
 const MAX_TEXT_SIZE = 100_000;
 const MAX_OBJECT_SCALE = 1_000;
 
-type ClipboardObject = Pick<TextObject, 'kind' | 't' | 'x' | 'y' | 'scale' | 'quarterTurns' | 'text' | 'font' | 'bold' | 'size' | 'color'>;
+type ClipboardFrame = Pick<TextObject, 'kind' | 't' | 'x' | 'y' | 'scale' | 'quarterTurns' | 'text' | 'font' | 'bold' | 'size' | 'color'>;
+type ClipboardBookmark = Pick<BookmarkObject, 'kind' | 't' | 'x' | 'y' | 'scale' | 'quarterTurns' | 'label'>;
+type ClipboardObject = ClipboardFrame | ClipboardBookmark;
 
 interface ClipboardDocument {
   ardoise: typeof CLIPBOARD_MARKER;
@@ -50,7 +53,7 @@ export function encodeStrokes(strokes: readonly Stroke[]): string {
   return encodeClipboard(strokes, []);
 }
 
-/** The clipboard text for `strokes` and the text frames among `objects` (other kinds stay behind). */
+/** The clipboard text for `strokes` and the text frames and bookmarks among `objects` (other kinds stay behind). */
 export function encodeClipboard(strokes: readonly Stroke[], objects: readonly PageObject[]): string {
   const document: ClipboardDocument = {
     ardoise: CLIPBOARD_MARKER,
@@ -58,8 +61,9 @@ export function encodeClipboard(strokes: readonly Stroke[], objects: readonly Pa
     strokes: strokes.map(({ tool, color, width, points }) => ({ tool, color, width, points })),
   };
   const frames = objects.filter((o): o is TextObject => o.kind === 'text');
-  if (frames.length > 0) {
-    document.objects = frames.map(({ kind, t, x, y, scale, quarterTurns, text, font, bold, size, color }) => ({
+  const marks = objects.filter(isBookmarkObject);
+  if (frames.length + marks.length > 0) {
+    const shown: ClipboardObject[] = frames.map(({ kind, t, x, y, scale, quarterTurns, text, font, bold, size, color }) => ({
       kind,
       t,
       x,
@@ -72,6 +76,8 @@ export function encodeClipboard(strokes: readonly Stroke[], objects: readonly Pa
       size,
       color,
     }));
+    for (const { kind, t, x, y, scale, quarterTurns, label } of marks) shown.push({ kind, t, x, y, scale, quarterTurns, label });
+    document.objects = shown;
   }
   return JSON.stringify(document);
 }
@@ -134,11 +140,25 @@ function textObject(value: unknown): TextObject | null {
   };
 }
 
+/** A bookmark of the clipboard, or null when it is damaged (its box is measured again by the paste's note). */
+function bookmarkObject(value: unknown): BookmarkObject | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const o = value as Record<string, unknown>;
+  if (o.kind !== 'bookmark' || typeof o.label !== 'string' || o.label.length > MAX_TEXT_LENGTH) return null;
+  if (!within(o.x, MAX_PAGE_SIDE) || !within(o.y, MAX_PAGE_SIDE) || !within(o.scale, MAX_OBJECT_SCALE) || o.scale <= 0) return null;
+  const turns = o.quarterTurns ?? 0;
+  if (!finite(turns) || !Number.isInteger(turns) || turns < 0 || turns > 3) return null;
+  if (!finite(o.t) || !Number.isInteger(o.t) || o.t < 0 || o.t > MAX_T) return null;
+  const label = cleanBookmarkLabel(o.label);
+  if (label === '') return null;
+  return { kind: 'bookmark', id: '', layer: 0, t: o.t, x: o.x, y: o.y, scale: o.scale, quarterTurns: turns, width: 0, height: 0, label };
+}
+
 /**
  * The strokes and text frames (on layer 0, to be placed by the paste) in a clipboard text, or null when the text is
  * not ours, is damaged, or holds nothing: nothing foreign is ever pasted. The frames' boxes are 0 until measured.
  */
-export function decodeClipboard(text: string): { strokes: Stroke[]; objects: TextObject[] } | null {
+export function decodeClipboard(text: string): { strokes: Stroke[]; objects: (TextObject | BookmarkObject)[] } | null {
   if (text.length > MAX_TEXT || !text.trimStart().startsWith('{') || !text.includes(CLIPBOARD_MARKER)) return null;
   let parsed: unknown;
   try {
@@ -151,9 +171,9 @@ export function decodeClipboard(text: string): { strokes: Stroke[]; objects: Tex
   if (ardoise !== CLIPBOARD_MARKER || version !== CLIPBOARD_VERSION) return null;
   if (!Array.isArray(strokes) || strokes.length > MAX_STROKES) return null;
   if (objects !== undefined && (!Array.isArray(objects) || objects.length > MAX_OBJECTS)) return null;
-  const frames: TextObject[] = [];
+  const frames: (TextObject | BookmarkObject)[] = [];
   for (const raw of objects ?? []) {
-    const frame = textObject(raw);
+    const frame = (raw as { kind?: unknown } | null)?.kind === 'bookmark' ? bookmarkObject(raw) : textObject(raw);
     if (!frame) return null;
     frames.push(frame);
   }

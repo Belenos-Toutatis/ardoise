@@ -4,7 +4,7 @@
  */
 import { mapImage, rotateImage, shiftImage, turnImageAlone } from '../background';
 import type { InkPoint, Tool } from '../ink';
-import type { Background, Layer, Note, PageObject, PageSize, Rgba, Stroke } from '../note';
+import { isBookmarkObject, type Background, type Layer, type Note, type PageObject, type PageSize, type Rgba, type Stroke } from '../note';
 import {
   affineScale,
   applyAffine,
@@ -159,11 +159,11 @@ export const PASTE_GAP_MS = 500;
 /** Shift between a paste and an identical copy already lying there, device units (4 mm). */
 export const PASTE_STEP = 400;
 
-/** Time of the last sample (or object) of the note, milliseconds since it was created (0 without content). */
+/** Time of the last sample (or object, a bookmark apart: no replay shows it) of the note, milliseconds since it was created (0 without content). */
 function noteEnd(note: Note): number {
   let end = 0;
   for (const stroke of note.strokes) for (const p of stroke.points) if (p.t > end) end = p.t;
-  for (const object of objectsOf(note)) if (object.t > end) end = object.t;
+  for (const object of objectsOf(note)) if (!isBookmarkObject(object) && object.t > end) end = object.t;
   return end;
 }
 
@@ -518,10 +518,10 @@ export function cropTo(note: Note, rect: Rect): Note {
   }
   const cropped: Note = { ...note, page: { width, height }, strokes };
   if (note.backgroundImage) cropped.backgroundImage = shiftImage(note.backgroundImage, x, y);
-  // Objects follow the strokes' rule: a visible one wholly outside goes, the others move with the page.
+  // Objects follow the strokes' rule: a visible one wholly outside goes, the others move with the page (a bookmark counts as visible).
   if (!note.objects) return cropped;
   const objects = note.objects
-    .filter((o) => !(layerVisible(note, o.layer) && !overlaps(objectBounds(o), area)))
+    .filter((o) => !((layerVisible(note, o.layer) || isBookmarkObject(o)) && !overlaps(objectBounds(o), area)))
     .map((o) => ({ ...o, x: o.x - x, y: o.y - y }));
   return withObjects(cropped, objects);
 }
