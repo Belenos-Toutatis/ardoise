@@ -49,6 +49,15 @@ Application portable pour Windows (Rust + Tauri 2) qui remplace Wacom Inkspace p
 - Demander avant tout téléchargement d'outil (ex. `nasm`) ou installation globale.
 - Git : un commit par tâche cochée ou par groupe cohérent de changements, message en anglais. Le dépôt GitHub `origin` (Belenos-Toutatis/ardoise) est **public** avec l'accord de l'utilisateur (recréé le 2026-11-12 avec un historique sans donnée personnelle) : y pousser des branches de travail est autorisé, et `main` seulement après la vérification Windows (`cargo xtask check` et `cargo xtask e2e` réussis sur le PC). Tout ce qui est poussé est public. Les commits sont signés avec l'adresse no-reply de GitHub (`user.email` du dépôt), jamais avec une adresse personnelle ; pas de nom ni de chemin personnel dans le code, les tests ou la documentation (exemples : `C:\Users\prof\…`). L'ancien dépôt `ardoise-archive` reste privé et ne doit jamais être publié. **Jamais** créer une release ou publier quoi que ce soit d'autre sans accord explicite de l'utilisateur.
 
+## Ménage du disque
+
+Demande de l'utilisateur (2026-11-14) : ne pas garder de données qui ne servent plus, et faire le ménage au fur et à mesure, sans attendre qu'on le demande. Dire à l'utilisateur la place libérée.
+
+- Copies de travail (`.claude/worktrees/`) : une fois la branche fusionnée ou abandonnée, et sans changement non commité, `git worktree remove` (son `target` part avec). Vérifier que le dossier a bien disparu.
+- `target` du dépôt : quand aucune compilation ni aucun test ne tourne et qu'il dépasse une vingtaine de Go, `cargo clean --profile dev`. Garder la compilation release tant qu'elle correspond à la version en cours de vérification ou copiée chez l'utilisateur.
+- Dossiers temporaires (`%TEMP%\ardoise-*` : parcours, tests MCP, simulateur, captures, vidéos) : les tests et les outils effacent les leurs à la fin, même en cas d'échec ; supprimer ceux qui restent.
+- Ne jamais toucher à ce qu'un autre agent ou une compilation en cours utilise.
+
 ## Sessions cloud (Linux)
 
 Une session Claude Code dans le cloud tourne sous Ubuntu, pas sous Windows.
