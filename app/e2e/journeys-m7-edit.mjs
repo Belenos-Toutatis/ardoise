@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { chooseSelect } from './select-way.mjs';
 import { openTab } from './side-panel.mjs';
 
 const locales = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'src', 'locales');
@@ -47,7 +48,7 @@ export const editJourneys = [
       });
 
       await check(`« ${l('editor.straighten.button')} » est grisé sans sélection, puis redresse le cercle`, async () => {
-        await app.click(`.toolbar button[title="${l('editor.modes.select')}"]`);
+        await chooseSelect(app, 'rectangle');
         await app.waitFor(`document.querySelector('[data-action="straighten"]')?.disabled === true`, 'the disabled action');
         await app.key('a', { ctrl: true });
         await app.waitFor(`document.querySelector('[data-action="straighten"]')?.disabled === false`, 'the enabled action');

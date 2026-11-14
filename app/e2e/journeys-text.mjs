@@ -20,6 +20,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
 import { noteOnDisk } from './m17-helpers.mjs';
+import { chooseSelect } from './select-way.mjs';
 
 const locales = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'src', 'locales');
 const catalogs = {
@@ -225,7 +226,7 @@ export const textJourneys = [
         await openNote(app, NOTE);
         await app.waitFor(`document.querySelectorAll(${j(FRAMES)}).length === ${DEMO_FRAMES}`, 'the demo frames');
         before = (await onDisk(app)).note.objects;
-        await app.click('.toolbar .tool', l('editor.modes.select'));
+        await chooseSelect(app, 'rectangle');
         // The focus on the page, not on the tool's button (Ctrl + A selects in a field).
         await app.evaluate(`document.activeElement?.blur(), true`);
         await app.key('a', { ctrl: true });

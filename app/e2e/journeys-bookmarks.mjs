@@ -15,6 +15,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { noteOnDisk } from './m17-helpers.mjs';
+import { chooseSelect } from './select-way.mjs';
 
 const locales = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'src', 'locales');
 const catalogs = {
@@ -238,7 +239,7 @@ export const bookmarkJourneys = [
       });
 
       await check('un double-clic avec l’outil de sélection rouvre le libellé : le renommer, Échap, un seul pas', async () => {
-        await app.click('.toolbar .tool', l('editor.modes.select'));
+        await chooseSelect(app, 'rectangle');
         await app.evaluate(`document.activeElement?.blur(), true`);
         const mark = (await onDiskBookmarks(app))[0] ?? { x: 20_000, y: 3_000 - 462, width: 3000, height: 925 };
         await clickPage(app, mark.x + 200, mark.y + mark.height / 2, 2);

@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { freePort, sleep, startApp } from './harness.mjs';
 import { penStroke } from './journeys-m8-input.mjs';
 import { attach, STATUS } from './journeys-m12-resume.mjs';
+import { chooseSelect } from './select-way.mjs';
 import { openTab } from './side-panel.mjs';
 import { lineTo, widthOf, writeText } from './shots-handwriting.mjs';
 import { removeStaleTemps, removeTemp, removeTemps } from './temp-dirs.mjs';
@@ -168,7 +169,8 @@ async function dragPage(app, from, to, steps = 14) {
   await app.drag(Array.from({ length: steps + 1 }, (_, i) => ({ x: a.x + ((b.x - a.x) * i) / steps, y: a.y + ((b.y - a.y) * i) / steps })));
 }
 
-const tool = (app, key) => app.click('.toolbar .tool', l(`editor.modes.${key}`));
+/** The selection tool in its rectangle way (its button turns to the lasso at a second click: `select-way.mjs`). */
+const tool = (app, key) => (key === 'select' ? chooseSelect(app, 'rectangle') : app.click('.toolbar .tool', l(`editor.modes.${key}`)));
 
 const swatch = (app, colour) => app.click(`.toolbar button.swatch[aria-label=${j(l(`editor.colors.${colour}`))}]`);
 

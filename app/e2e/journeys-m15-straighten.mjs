@@ -12,6 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { chooseSelect, rectangleDrag } from './select-way.mjs';
 
 const locales = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'src', 'locales');
 const catalogs = {
@@ -119,9 +120,9 @@ export const straightenSettingJourneys = [
         hand = await app.evaluate(paths);
       });
 
-      await check('un lasso autour de tout : trois traits sélectionnés', async () => {
-        await app.click(tool('select'));
-        await app.drag([at(0.08, 0.08), at(0.92, 0.08), at(0.92, 0.92), at(0.08, 0.92), at(0.08, 0.1)]);
+      await check('un rectangle autour de tout : trois traits sélectionnés', async () => {
+        await chooseSelect(app, 'rectangle');
+        await app.drag(rectangleDrag(at(0.08, 0.08), at(0.92, 0.92)));
         await app.waitFor(`${selectedCount(l)} === 3`, 'the selection of the three strokes');
       });
 
@@ -287,7 +288,7 @@ export const straightenSettingJourneys = [
         await app.waitFor(`document.querySelectorAll('.note-card').length > 0`, 'the library cards');
         await app.click('.note-card .card-open');
         await app.waitFor(`document.querySelector('.editor svg.canvas rect.sheet') !== null`, 'the editor');
-        await app.click(tool('select'));
+        await chooseSelect(app, 'rectangle');
         await openPanel();
         if ((await app.evaluate(value('size'))) !== '5') throw new Error(`the minimum is ${await app.evaluate(value('size'))} mm, not 5`);
         await app.key('Escape');
@@ -401,8 +402,8 @@ export const straightenSettingJourneys = [
       });
 
       await check('Échap par étapes : désélectionne, puis pose la question de la bibliothèque, enregistre et revient', async () => {
-        await app.click(tool('select'));
-        // Ctrl+A rather than a lasso: the landscape sheet is taller than the window.
+        await chooseSelect(app, 'rectangle');
+        // Ctrl+A rather than a rectangle: the landscape sheet is taller than the window.
         await app.key('a', { ctrl: true });
         await app.waitFor(`${selectedCount(l)} === 3`, 'the three shapes selected');
         await app.key('Escape');
@@ -434,7 +435,7 @@ export const straightenSettingJourneys = [
         await app.waitFor(`document.querySelectorAll('.note-card').length > 0`, 'the demo notes');
         await app.click('.note-card .card-open');
         await app.waitFor(`document.querySelector('.editor svg.canvas rect.sheet') !== null`, 'the editor');
-        await app.click(`.toolbar button[title="${l('editor.modes.select')}"]`);
+        await chooseSelect(app, 'rectangle');
         await app.click(MORE);
         await app.waitFor(`document.querySelector(${JSON.stringify(PANEL)}) !== null`, 'the panel');
       });
