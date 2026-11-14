@@ -370,6 +370,21 @@ notes go one after the other (a rule between two notes in Markdown, a new page i
   positions; without the analysis either, nothing tells its handwriting from drawings, so it has none). Limit: lines are
   matched by their number only; a correction that merges two lines and splits another keeps the right text, but some
   of its words may land in the neighbouring block or take a neighbour's underline.
+- **Typed text** (text frames and equations of the page, `ardoise_hwr::typed`). Windows never reads them, but the
+  `.txt`, the clipboard, the preview, Markdown, Word, MCP `get_note_text` and `export_note` (same code path:
+  `reading_of`, `structure_for`, `document_of`) hold them. `typed_blocks(note)`: frames and equations of the visible
+  layers that are not blank, by rows (a block joins the row above when it overlaps its band by `BESIDE_OVERLAP`),
+  left to right in a row. They are put among the handwriting by the drawings' rule (`comes_after`: after the last item
+  or line they come after, before everything when none): `Structure::with_typed` for Markdown and Word (the structure
+  holds the rectangle of each item; the typed insertion is done after the structure cache, which depends on the ink
+  and the recognition only), `interleaved_text` for the plain text (against each recognised line's rectangle, or a
+  placed correction's; an unplaced correction is one block; with no rectangle at all the typed text follows). A frame
+  gives one block per hard line (wrapping is display only): a line starting with a dash, bullet or number is a list
+  item. An equation is `$source$` in Markdown (what Obsidian, Typora and GitHub read as maths; the source on one
+  line, not escaped) and a plain paragraph of the source in Word (no LaTeX there: readable and copyable). Where
+  nothing can be recognised (no recognizer) a note with typed text gives that text alone (no drawing: nothing tells
+  the ink from drawings; `analyzed: false`; `get_note_text` says `recognition.available: false`); a note with none
+  still fails with the recognizer's error. Bookmarks are never exported as text.
 - **Underlines** (`structure::decoration_of`). A thin, wide group of strokes (the analyzer's drawing or unclassified ink,
   or a group of the fallback's uncovered ink) right under a line or through it is no drawing: at most half the line's
   height tall (a line tall when six times wider than tall: a sloping underline), three times wider than tall and wider

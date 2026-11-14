@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use ardoise_core::format::NoteFile;
 use ardoise_core::library::{self, Library};
 use ardoise_core::note::{A4_LANDSCAPE, Background, Layer, Note, Origin, PageSize, Timing};
-use ardoise_hwr::structure::{Structure, from_recognition, ink_boxes};
+use ardoise_hwr::structure::{Structure, ink_boxes};
 use ardoise_hwr::{Bounds, HwrError, Language, Line, Recognition, Word};
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
 use ardoise_mcp::{
@@ -109,10 +109,7 @@ impl Handwriting for Fake {
     }
 
     fn structure_of(&self, note: &Note, recognition: &Recognition) -> Structure {
-        Structure {
-            items: from_recognition(recognition, &ink_boxes(note)),
-            analyzed: false,
-        }
+        Structure::from_recognition(recognition, &ink_boxes(note))
     }
 
     fn search(&self, query: &str) -> TextSearch {

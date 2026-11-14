@@ -23,6 +23,9 @@
 //! emphasises or strikes them). Drawings go between the blocks of text they sit between; one
 //! beside a block of text comes after it when it is on its right, before it on its left
 //! ([`reading_order`]).
+//!
+//! Text typed on the page (frames, equations) is not part of this structure, which depends on the
+//! ink and the recognition only: [`Structure::with_typed`] puts it in afterwards, by the same rule.
 
 use ardoise_core::note::Note;
 use ardoise_ink::Tool;
@@ -32,6 +35,7 @@ use ardoise_ink::Stroke;
 use crate::Recognizer;
 use crate::document::{Mark, Text};
 use crate::model::{Bounds, Line, Recognition, Word};
+use crate::typed::TypedBlock;
 
 /// A vertical gap larger than this many line heights separates two paragraphs.
 const PARAGRAPH_GAP: f32 = 1.0;
@@ -87,7 +91,7 @@ const OWN_READING: f32 = 0.5;
 const WORD_IN_DRAWINGS: f32 = 0.5;
 /// A drawing is beside a block of text when they overlap vertically by at least this share
 /// of the smaller height...
-const BESIDE_OVERLAP: f32 = 0.3;
+pub(crate) const BESIDE_OVERLAP: f32 = 0.3;
 /// ... and horizontally by at most this share of the narrower width.
 const BESIDE_SEPARATION: f32 = 0.2;
 
@@ -222,6 +226,10 @@ fn corrected_word(text: &str, bounds: Bounds) -> Word {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Structure {
     pub items: Vec<Item>,
+    /// The rectangle of each item on the page, in page units, in the order of `items` (a
+    /// paragraph's or list item's block of lines, a drawing's own): what the typed text is put
+    /// in reading order with ([`Structure::with_typed`]).
+    pub bounds: Vec<Bounds>,
     /// True when Windows' ink analysis gave the layout; false when it was guessed from the
     /// recognised lines ([`from_recognition`]) because the analysis was not available.
     pub analyzed: bool,
@@ -238,10 +246,81 @@ impl Structure {
 
     /// The structure without its drawings (the export's "Inclure les dessins" off).
     pub fn without_drawings(mut self) -> Structure {
+        let mut keep = self
+            .items
+            .iter()
+            .map(|item| !matches!(item, Item::Drawing(_)));
+        self.bounds.retain(|_| keep.next().unwrap_or(true));
         self.items.retain(|item| !matches!(item, Item::Drawing(_)));
         self
     }
+
+    /// The structure guessed from the recognised lines alone ([`from_recognition`]), with the
+    /// rectangle of each item; `analyzed` is false.
+    pub fn from_recognition(recognition: &Recognition, ink: &[InkBox]) -> Structure {
+        Structure::of(
+            recognition_layout(&Source::recognised(recognition), ink),
+            false,
+        )
+    }
+
+    /// The structure of the blocks `located` (an item and its rectangle each).
+    fn of(located: Vec<Located>, analyzed: bool) -> Structure {
+        let (items, bounds) = located.into_iter().unzip();
+        Structure {
+            items,
+            bounds,
+            analyzed,
+        }
+    }
+
+    /// The structure with the typed text (`typed`: the page's text frames and equations in their
+    /// own order, [`crate::typed::typed_blocks`]) put in reading order among its items: each
+    /// block goes after the last item it comes after ([`comes_after`], the rule of the drawings:
+    /// beside an item it comes after it when it is on its right, else when the item is higher),
+    /// before everything when it comes after none; blocks that fall in the same place keep their
+    /// order. The handwriting's own order is untouched. Typed text is not part of the cached
+    /// structure of the handwriting: the objects of the page can change without the ink doing so.
+    pub fn with_typed(self, typed: &[TypedBlock]) -> Structure {
+        if typed.is_empty() {
+            return self;
+        }
+        let mut slots: Vec<Vec<&TypedBlock>> = vec![Vec::new(); self.items.len() + 1];
+        for block in typed {
+            let slot = (0..self.items.len())
+                .filter(|&index| match self.bounds.get(index) {
+                    Some(item) if item.width > 0.0 || item.height > 0.0 => {
+                        comes_after(&block.bounds, item)
+                    }
+                    // An item without a place (a correction of ink nothing could recognise)
+                    // comes first: the typed text follows it.
+                    _ => true,
+                })
+                .map(|index| index + 1)
+                .max()
+                .unwrap_or(0);
+            slots[slot].push(block);
+        }
+        let analyzed = self.analyzed;
+        let typed_items = |blocks: Vec<&TypedBlock>| {
+            blocks
+                .into_iter()
+                .map(|block| (Item::Typed(block.clone()), block.bounds))
+                .collect::<Vec<Located>>()
+        };
+        let mut slots = slots.into_iter();
+        let mut located: Vec<Located> = typed_items(slots.next().unwrap_or_default());
+        for (index, item) in self.items.into_iter().enumerate() {
+            let bounds = self.bounds.get(index).copied().unwrap_or_default();
+            located.push((item, bounds));
+            located.extend(typed_items(slots.next().unwrap_or_default()));
+        }
+        Structure::of(located, analyzed)
+    }
 }
+
+/// A block and the rectangle it covers.
+type Located = (Item, Bounds);
 
 /// The structure of `note`, whose handwriting `recognition` read (the whole note at once):
 /// through the ink analysis of `recognizer` when it works, else from the recognised lines.
@@ -270,20 +349,14 @@ pub fn structure_of(
                     Source::recognised(&read)
                 }
             };
-            Structure {
-                items: regions_layout(&regions, &analyzed, &source, &ink),
-                analyzed: true,
-            }
+            Structure::of(regions_layout(&regions, &analyzed, &source, &ink), true)
         }
         Err(_) => {
             let source = match &laid {
                 Some(laid) => Source::corrected(recognition, laid),
                 None => Source::recognised(recognition),
             };
-            Structure {
-                items: recognition_layout(&source, &ink),
-                analyzed: false,
-            }
+            Structure::of(recognition_layout(&source, &ink), false)
         }
     }
 }
@@ -350,6 +423,9 @@ pub enum Item {
     /// A list item, without its bullet or number.
     ListItem(Text),
     Drawing(DrawingArea),
+    /// Text typed on the page (a text frame, an equation): not recognised, exact; put among the
+    /// handwriting by [`Structure::with_typed`] only.
+    Typed(TypedBlock),
 }
 
 /// Blocks and the rectangle they cover (to put them in reading order).
@@ -364,6 +440,12 @@ impl Placed {
             bounds,
             items: vec![item],
         }
+    }
+
+    /// Its items, each with the rectangle of the whole.
+    fn located(self) -> impl Iterator<Item = Located> {
+        let bounds = self.bounds;
+        self.items.into_iter().map(move |item| (item, bounds))
     }
 }
 
@@ -382,7 +464,7 @@ fn contains(bounds: &Bounds, x: f32, y: f32, tolerance: f32) -> bool {
 }
 
 /// Length of the overlap of `[a, a_end]` and `[b, b_end]` (negative when apart).
-fn overlap(a: f32, a_end: f32, b: f32, b_end: f32) -> f32 {
+pub(crate) fn overlap(a: f32, a_end: f32, b: f32, b_end: f32) -> f32 {
     a_end.min(b_end) - a.max(b)
 }
 
@@ -768,7 +850,7 @@ fn decoration_of(bounds: &Bounds, lines: &[Line]) -> Option<Decoration> {
 
 /// Whether `drawing` comes after the block of text `block` in reading order: when it is beside
 /// the block, after it when on its right; otherwise when it is lower.
-fn comes_after(drawing: &Bounds, block: &Bounds) -> bool {
+pub(crate) fn comes_after(drawing: &Bounds, block: &Bounds) -> bool {
     let vertical = overlap(drawing.y, drawing.bottom(), block.y, block.bottom());
     let horizontal = overlap(drawing.x, drawing.right(), block.x, block.right());
     let beside = vertical >= BESIDE_OVERLAP * drawing.height.min(block.height)
@@ -785,7 +867,7 @@ fn comes_after(drawing: &Bounds, block: &Bounds) -> bool {
 /// The blocks of text top to bottom (then left to right), each drawing between them: after the
 /// last block it comes after ([`comes_after`]). Markdown and Word have one column: a drawing
 /// beside a paragraph can only come before or after it.
-fn reading_order(mut blocks: Vec<Placed>, mut drawings: Vec<Placed>) -> Vec<Item> {
+fn reading_order(mut blocks: Vec<Placed>, mut drawings: Vec<Placed>) -> Vec<Located> {
     let by_position = |a: &Placed, b: &Placed| {
         a.bounds
             .y
@@ -794,7 +876,7 @@ fn reading_order(mut blocks: Vec<Placed>, mut drawings: Vec<Placed>) -> Vec<Item
     };
     blocks.sort_by(by_position);
     drawings.sort_by(by_position);
-    let mut slots: Vec<Vec<Item>> = (0..=blocks.len()).map(|_| Vec::new()).collect();
+    let mut slots: Vec<Vec<Located>> = (0..=blocks.len()).map(|_| Vec::new()).collect();
     for drawing in drawings {
         let slot = blocks
             .iter()
@@ -803,12 +885,12 @@ fn reading_order(mut blocks: Vec<Placed>, mut drawings: Vec<Placed>) -> Vec<Item
             .map(|(index, _)| index + 1)
             .max()
             .unwrap_or(0);
-        slots[slot].extend(drawing.items);
+        slots[slot].extend(drawing.located());
     }
     let mut slots = slots.into_iter();
-    let mut items: Vec<Item> = slots.next().unwrap_or_default();
+    let mut items: Vec<Located> = slots.next().unwrap_or_default();
     for (block, slot) in blocks.into_iter().zip(slots) {
-        items.extend(block.items);
+        items.extend(block.located());
         items.extend(slot);
     }
     items
@@ -816,7 +898,7 @@ fn reading_order(mut blocks: Vec<Placed>, mut drawings: Vec<Placed>) -> Vec<Item
 
 /// The text blocks replaced by a correction that could not be laid over the lines (its plain
 /// paragraphs, where the text was), then everything in reading order.
-fn finish(blocks: Vec<Placed>, drawings: Vec<Placed>, source: &Source) -> Vec<Item> {
+fn finish(blocks: Vec<Placed>, drawings: Vec<Placed>, source: &Source) -> Vec<Located> {
     let Some(text) = source.unplaced else {
         return reading_order(blocks, drawings);
     };
@@ -876,7 +958,17 @@ pub fn from_regions(
     recognition: &Recognition,
     ink: &[InkBox],
 ) -> Vec<Item> {
-    regions_layout(regions, analyzed, &Source::recognised(recognition), ink)
+    items_of(regions_layout(
+        regions,
+        analyzed,
+        &Source::recognised(recognition),
+        ink,
+    ))
+}
+
+/// The items of `located`, without their rectangles.
+fn items_of(located: Vec<Located>) -> Vec<Item> {
+    located.into_iter().map(|(item, _)| item).collect()
 }
 
 fn regions_layout(
@@ -884,7 +976,7 @@ fn regions_layout(
     analyzed: &[usize],
     source: &Source,
     ink: &[InkBox],
-) -> Vec<Item> {
+) -> Vec<Located> {
     let texts = text_regions(regions);
     let mut marked = Marked::new(source.lines);
     let mut drawings = Vec::new();
@@ -1085,10 +1177,10 @@ fn text_items(lines: &[MarkedLine], bullets: &[Bounds], height: f32) -> Vec<Plac
 /// The structure from the recognised lines alone (see the module documentation). `ink` is
 /// every visible stroke of the note.
 pub fn from_recognition(recognition: &Recognition, ink: &[InkBox]) -> Vec<Item> {
-    recognition_layout(&Source::recognised(recognition), ink)
+    items_of(recognition_layout(&Source::recognised(recognition), ink))
 }
 
-fn recognition_layout(source: &Source, ink: &[InkBox]) -> Vec<Item> {
+fn recognition_layout(source: &Source, ink: &[InkBox]) -> Vec<Located> {
     let recognition = source.recognition;
     let height = line_height(recognition);
     let words: Vec<&Word> = recognition.words().collect();
@@ -1265,6 +1357,7 @@ mod tests {
                 Item::Paragraph(t) => format!("P:{}", shown(t)),
                 Item::ListItem(t) => format!("L:{}", shown(t)),
                 Item::Drawing(d) => format!("D:{:?}", d.strokes),
+                Item::Typed(b) => format!("T:{}", b.text),
             })
             .collect()
     }
@@ -1766,7 +1859,7 @@ mod tests {
             mark(1, 0.0, 600.0, 900.0, 300.0),
         ];
         assert_eq!(
-            texts(&recognition_layout(&source, &ink)),
+            texts(&items_of(recognition_layout(&source, &ink))),
             ["P:le texte corrigé"]
         );
         // Without a correction, ink the recognition read nothing in is a drawing, as before.
@@ -1908,7 +2001,7 @@ mod tests {
         // word, and the user's word in the drawing kept (the user wrote it).
         let laid = lay_correction(&r, "le chien dort\nO\n- poires");
         let source = Source::corrected(&r, &laid);
-        let items = regions_layout(&regions, &analyzed, &source, &[]);
+        let items = items_of(regions_layout(&regions, &analyzed, &source, &[]));
         assert_eq!(
             texts(&items),
             ["P:le _chien_ dort", "P:O", "D:[7]", "L:poires"]
@@ -1917,7 +2010,7 @@ mod tests {
         // the drawing after it.
         let laid = lay_correction(&r, "Le chien dort.\n\nDeux courses :\n- poires\n- pain");
         let source = Source::corrected(&r, &laid);
-        let items = regions_layout(&regions, &analyzed, &source, &[]);
+        let items = items_of(regions_layout(&regions, &analyzed, &source, &[]));
         assert_eq!(
             texts(&items),
             [
@@ -1930,12 +2023,12 @@ mod tests {
         );
         // The same without the analysis (a drawing under no recognised word).
         let ink = [mark(9, 5000.0, 900.0, 600.0, 600.0)];
-        let items = recognition_layout(&source, &ink);
+        let items = items_of(recognition_layout(&source, &ink));
         assert_eq!(items.len(), 5);
         assert!(matches!(items[4], Item::Drawing(_)));
         // And a drawing above the text comes before it.
         let high = [mark(9, 0.0, -3000.0, 600.0, 600.0)];
-        let items = recognition_layout(&source, &high);
+        let items = items_of(recognition_layout(&source, &high));
         assert!(matches!(items[0], Item::Drawing(_)));
     }
 

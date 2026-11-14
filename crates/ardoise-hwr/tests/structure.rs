@@ -155,6 +155,7 @@ fn describe(items: &[Item]) -> Vec<String> {
             Item::Paragraph(t) => format!("paragraph: {}", shown(t)),
             Item::ListItem(t) => format!("list item: {}", shown(t)),
             Item::Drawing(d) => format!("drawing: {} strokes", d.strokes.len()),
+            Item::Typed(b) => format!("typed: {}", b.text),
         })
         .collect()
 }
@@ -242,7 +243,7 @@ fn windows_ink_analysis_finds_paragraphs_list_items_and_drawings() {
         .iter()
         .filter_map(|item| match item {
             Item::Paragraph(t) | Item::ListItem(t) => Some(t),
-            Item::Drawing(_) => None,
+            Item::Drawing(_) | Item::Typed(_) => None,
         })
         .flat_map(|t| t.spans.iter())
         .filter(|span| span.mark == Mark::Underline)

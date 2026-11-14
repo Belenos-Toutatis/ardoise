@@ -53,11 +53,11 @@ pub enum ExportFormat {
     Webp,
     Svg,
     Pdf,
-    /// The recognised text.
+    /// The note's text: the recognised handwriting (or its correction) and the text typed on the page (text frames; an equation as its LaTeX source), line after line in reading order.
     Txt,
-    /// The recognised text with its structure (titles, lists), the drawings as PNG files in a folder next to it.
+    /// The same text with its structure (titles, lists; an equation between dollar signs, `$…$`), the drawings as PNG files in a folder next to it.
     Md,
-    /// The recognised text with its structure, the drawings embedded.
+    /// The same text with its structure (an equation as a paragraph of its LaTeX source, Word having no LaTeX), the drawings embedded.
     Docx,
     /// Animated replay of the writing (one note).
     Gif,

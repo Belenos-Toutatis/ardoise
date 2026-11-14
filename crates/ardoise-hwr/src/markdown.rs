@@ -1,7 +1,8 @@
 //! A note (or several) as Markdown: the title as a heading, the date and the tags, then the
-//! paragraphs, the list items and the drawings as images saved in a folder next to the `.md` file.
+//! paragraphs, the list items, the equations (`$source$`) and the drawings as images saved in a
+//! folder next to the `.md` file.
 
-use crate::document::{Block, Document, Labels, Mark, Text};
+use crate::document::{Block, Document, Labels, Mark, Text, equation_line};
 
 /// A drawing's PNG file, to be written next to the Markdown file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,6 +142,10 @@ pub fn to_markdown(
                     text.push_str(&format!("{}\n\n", inline(paragraph)));
                 }
                 Block::ListItem(line) => text.push_str(&format!("- {}\n", inline(line))),
+                // Not escaped: inside `$…$` a backslash or an underscore is TeX's.
+                Block::Equation(source) => {
+                    text.push_str(&format!("${}$\n\n", equation_line(source)));
+                }
                 Block::Drawing(drawing) => {
                     let number = images.len() + 1;
                     let name = format!("{prefix}-{number}.png");
@@ -242,6 +247,22 @@ Premier paragraphe avec\\_des \\[signes\\] \\<spéciaux\\>.
         assert_eq!(markdown.images.len(), 1);
         assert_eq!(markdown.images[0].name, "notes-1.png");
         assert_eq!(&markdown.images[0].png[1..4], b"PNG");
+    }
+
+    #[test]
+    fn an_equation_is_its_source_between_dollars_unescaped() {
+        let mut document = sample();
+        document.blocks = vec![
+            Block::ListItem("pommes".into()),
+            Block::Equation("  \\ce{2H2 + O2 -> 2H2O}\n".into()),
+            Block::Equation("a_1 =\n  b^*".into()),
+            Block::Paragraph("fin".into()),
+        ];
+        let text = to_markdown(&[document], &labels(), "x", "").text;
+        assert!(
+            text.ends_with("- pommes\n\n$\\ce{2H2 + O2 -> 2H2O}$\n\n$a_1 = b^*$\n\nfin\n"),
+            "{text}"
+        );
     }
 
     #[test]

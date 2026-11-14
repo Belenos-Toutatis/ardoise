@@ -21,6 +21,7 @@ use ardoise_core::note::Note;
 use ardoise_hwr::Language;
 use ardoise_hwr::document::{Document, Labels};
 use ardoise_hwr::docx::to_docx;
+use ardoise_hwr::typed::typed_blocks;
 use ardoise_mcp::ToolError;
 use ardoise_mcp::write::{
     ExportFormat, ExportKind, ExportOutcome, ExportRequest, ExportTarget, MergeLayout, PdfPage,
@@ -289,7 +290,9 @@ impl AppWrite {
         })
     }
 
-    /// The recognised text, with or without its structure, of the notes in one file.
+    /// The text of the notes in one file, with or without its structure: the recognised
+    /// handwriting (or its correction) and the text typed on the page (frames, equations), read
+    /// as in the app's own exports.
     fn export_text(
         &self,
         library: &Library,
@@ -318,7 +321,7 @@ impl AppWrite {
                         "" => source.stem.clone(),
                         title => title.to_owned(),
                     },
-                    text: reading.text(),
+                    text: reading.text_with(&typed_blocks(&source.note)),
                 })
                 .collect();
             let file = write_target(target, text_document(&notes).as_bytes())?;

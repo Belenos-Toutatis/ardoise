@@ -97,7 +97,7 @@ export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold,
   try {
     await session.initialize();
 
-    await check('tools/list : les douze outils d’écriture, destructeurs ceux qui changent ou retirent', async () => {
+    await check('tools/list : les treize outils d’écriture, destructeurs ceux qui changent ou retirent', async () => {
       const tools = await session.tools();
       for (const name of WRITE_ONLY_TOOLS) {
         const tool = tools.find((t) => t.name === name);
