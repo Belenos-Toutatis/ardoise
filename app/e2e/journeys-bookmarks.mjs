@@ -185,6 +185,11 @@ export const bookmarkJourneys = [
       });
 
       await check('le classeur : son bouton « Sommaire » ouvre la liste de ses signets, note par note', async () => {
+        // The sub-binder shows once its parent is unfolded.
+        if ((await app.evaluate(`document.querySelector('.sidebar [data-binder=${j(BINDER)}]') !== null`)) !== true) {
+          await app.click('.sidebar .twisty[aria-expanded="false"]');
+          await app.waitFor(`document.querySelector('.sidebar [data-binder=${j(BINDER)}]') !== null`, 'the sub-binder');
+        }
         await app.click(`.sidebar [data-binder=${j(BINDER)}]`);
         await app.click('[data-action="binder-summary"]');
         await app.waitFor(`document.querySelector('[data-dialog="binder-summary"]') !== null`, 'the summary');
