@@ -6,6 +6,10 @@ permet d'écrire en direct à l'écran et au vidéoprojecteur, range les notes d
 synchronisé par Nextcloud) et permet de les modifier, de les rejouer, de les exporter et de les imprimer. Tout fonctionne
 hors connexion, sans compte, avec un seul fichier : `ardoise.exe`.
 
+**Ardoise sert aussi sans aucune tablette** : sur un ordinateur à stylet ou à écran tactile (Surface Pro, Yoga et
+autres PC « 2 en 1 »), c'est un logiciel de prise de notes manuscrites à part entière. On écrit directement sur l'écran,
+et tout le reste est là : bibliothèque, texte tapé, équations, PDF à annoter, relecture, exports.
+
 ![L'éditeur d'Ardoise : une note à la main avec un texte tapé, une équation, des formes et un signet, sur papier quadrillé](docs/guide/images/fr/editeur.webp)
 
 *English summary at the end of this file.*
@@ -17,9 +21,7 @@ des **tablettes simulées** (voir [Reproduire les captures](#reproduire-les-capt
 
 ### Deux tablettes
 
-<table>
-<tr>
-<td valign="top">
+<img src="docs/guide/images/fr/tablettes.webp" alt="Le panneau Tablette : la Bamboo Slate connectée, avec sa batterie et son firmware, et la tablette Xiaomi enregistrée" width="320" align="right">
 
 - **Wacom Bamboo Slate** (le modèle A4 est celui qui a servi aux essais) : enregistrement en Bluetooth LE, une seule fois
   pour tous vos PC, connexion automatique, synchronisation (chaque page devient une note, effacée de la tablette
@@ -32,14 +34,23 @@ des **tablettes simulées** (voir [Reproduire les captures](#reproduire-les-capt
 - Un **test guidé** de la tablette et des journaux détaillés, rangés dans la bibliothèque, permettent de comprendre un
   problème à distance.
 
-</td>
-<td valign="top">
+<br clear="right">
 
-<img src="docs/guide/images/fr/tablettes.webp" alt="Le panneau Tablette : la Bamboo Slate connectée, avec sa batterie et son firmware, et la tablette Xiaomi enregistrée" width="310">
+### Sans tablette : un PC à stylet ou à écran tactile
 
-</td>
-</tr>
-</table>
+Sur une Surface Pro, un Yoga ou tout PC Windows à stylet, **Nouvelle note** ouvre une page où l'on écrit directement à
+l'écran, sans tablette ni Bluetooth.
+
+- Le **stylet** écrit avec la pression, son autre bout **gomme**, son bouton lance une sélection au lasso ; la paume posée
+  sur l'écran est ignorée.
+- Le **doigt** déplace et zoome la page (deux doigts pour pincer) ; le bouton **Doigt** le fait écrire à son tour.
+- Tout l'éditeur est disponible : encres, calques, formes, texte tapé, équations, signets, image ou PDF de fond à
+  annoter (une fiche d'exercices, un sujet à corriger), puis relecture, vidéo, exports et impression.
+- En classe, le stylet de l'ordinateur sert aussi **pendant le mode direct** : l'enseignant corrige à l'écran, sur son
+  propre calque, ce qu'un élève écrit sur la tablette.
+
+Essayé à la main sur une Surface et son stylet ; les autres PC à stylet ou tactiles suivent les mêmes règles de Windows
+mais n'ont pas été essayés. Une souris suffit aussi pour retoucher, annoter ou tracer des formes.
 
 ### Le mode direct et la projection
 
@@ -174,8 +185,8 @@ Voir [les notes de version](docs/notes-de-version.md), [le journal des modificat
 
 - Windows 11 (Windows 10 est visé mais n'a pas été essayé), **sans droits d'administrateur**.
 - Le moteur d'affichage **WebView2** de Microsoft (présent dans Windows 11).
-- Pour une tablette : le **Bluetooth à basse consommation** (Bluetooth 4.0 ou plus), intégré ou par une clé USB. Ardoise
-  sert sans tablette : on peut y écrire à la souris, au stylet ou au doigt, annoter un PDF, rejouer et exporter.
+- Pour une tablette : le **Bluetooth à basse consommation** (Bluetooth 4.0 ou plus), intégré ou par une clé USB.
+- Sans tablette : rien de plus. Un stylet ou un écran tactile permet d'écrire à l'écran ; à défaut, la souris.
 
 ## Installation
 
@@ -290,7 +301,9 @@ node app/e2e/screenshots.mjs target\release\ardoise.exe docs/guide/images/fr --l
 ## English summary
 
 **Ardoise** is a portable Windows application (Rust + Tauri 2) that replaces Wacom Inkspace for the **Bamboo Slate**
-tablet, and also reads the Xiaomi Mijia LCD blackboard (13.5", the model with memory). It receives the pages written on
+tablet, and also reads the Xiaomi Mijia LCD blackboard (13.5", the model with memory). **It needs no tablet at all**: on
+a pen or touch-screen PC (Surface Pro, Yoga and other 2-in-1s) it is a handwritten note-taking application in its own
+right, where you write straight on the screen (tried by hand on a Surface with its pen). It receives the pages written on
 the tablet over Bluetooth LE, lets you write live on screen and on a projector, keeps your notes as plain files in a
 folder of your choice (typically synced by Nextcloud), and lets you edit, replay, export and print them. The interface
 is in French and English. The pictures below show the demo library and simulated tablets.

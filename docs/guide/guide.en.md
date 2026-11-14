@@ -124,6 +124,9 @@ To go further: put a lesson on video (chapter [9](#9-replay-narration-and-video)
 
 ## 1. What Ardoise is
 
+- *With or without a tablet*: Ardoise receives the pages of a Bamboo Slate or of a Xiaomi tablet, but it also works on
+  its own. On a pen or touch-screen computer (Surface Pro, Yoga, 2-in-1 PCs) it is a note-taking application: **New
+  note**, and you write straight on the screen (chapter 12). A mouse is enough to annotate a PDF or draw shapes.
 - *Portable*: a single file, `ardoise.exe`, that you copy wherever you like, a Nextcloud folder included. No installer,
   no administrator rights, nothing in `Program Files`.
 - *No account, no cloud*: your notes are files in a folder you choose. Ardoise connects to no server (its only

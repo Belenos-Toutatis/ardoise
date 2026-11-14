@@ -133,6 +133,10 @@ Pour aller plus loin : mettre le cours en vidéo (chapitre [9](#9-relecture-narr
 
 ## 1. Ce qu'est Ardoise
 
+- *Avec ou sans tablette* : Ardoise récupère les pages d'une Bamboo Slate ou d'une tablette Xiaomi, mais elle sert aussi
+  seule. Sur un ordinateur à stylet ou à écran tactile (Surface Pro, Yoga, PC « 2 en 1 »), c'est un logiciel de prise
+  de notes : **Nouvelle note**, et vous écrivez directement sur l'écran (chapitre 12). Une souris suffit pour annoter
+  un PDF ou tracer des formes.
 - *Portable* : un seul fichier, `ardoise.exe`, à copier où vous voulez, y compris dans un dossier Nextcloud. Pas
   d'installateur, pas de droits d'administrateur, rien dans `Program Files`.
 - *Sans compte et sans nuage* : vos notes sont des fichiers dans un dossier de votre choix. Ardoise ne se connecte

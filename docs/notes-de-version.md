@@ -7,6 +7,7 @@
 
 **Ce que fait cette première version**
 
+- **Sans tablette aussi** : sur un PC à stylet ou à écran tactile (Surface Pro, Yoga, « 2 en 1 »), Ardoise est un logiciel de prise de notes manuscrites ; on écrit directement sur l'écran (essayé à la main sur une Surface).
 - **Les deux tablettes** : enregistrement et synchronisation de la Bamboo Slate, ajout et import de la Xiaomi, quatre positions pour chacune.
 - **Le mode direct, pensé pour la classe** : tracé en temps réel, projection plein écran, tableau noir, pointeur laser, correction au stylet de l'ordinateur sur un calque à part, papier et fiche PDF changés pendant que la tablette écrit, partage de la feuille dans un navigateur du réseau local.
 - **La bibliothèque** : classeurs à ordre libre, étiquettes en couleur, favoris, recherche dans l'écriture manuscrite (reconnaissance de Windows, hors connexion), import des notes d'Inkspace.
@@ -30,6 +31,7 @@
 <!-- DÉBUT RELEASE-EN -->
 **Ardoise** is a portable Windows application that replaces Wacom Inkspace for the **Bamboo Slate** tablet and also reads the **Xiaomi Mijia LCD blackboard** (13.5", the model with memory). It receives the pages written on the tablet, lets you write live on screen and on a projector, keeps your notes in a folder of your choice (for example synced by Nextcloud), and lets you edit, replay, export and print them, offline, with no account, from a single file: `ardoise.exe`.
 
+- **No tablet needed**: on a pen or touch-screen PC (Surface Pro, Yoga, 2-in-1s) Ardoise is a handwritten note-taking application; you write straight on the screen (tried by hand on a Surface).
 - **Highlights**: live mode for the classroom (projection, blackboard, laser pointer, a layer of your own to correct on, paper and a PDF worksheet changed under the page, sharing the sheet with a browser on the local network); a library with binders in a free order, coloured tags and handwriting search; an editor with pressure-sensitive inks, shapes, typed text, LaTeX equations (chemistry included), bookmarks, replay and narration; exports to PNG, JPG, WebP, SVG, PDF, text, Markdown, Word and video, a whole binder in one PDF, printing; Inkspace import; an assistant (Claude Code, Claude Desktop…) can read and tidy your notes.
 - **Tested how**: by hand with a real Bamboo Slate A4 (sync, live mode, projector, network sharing, correcting with a Surface pen, sound while writing); only first trials with the real Xiaomi tablet (13 November 2026), its test procedure is not finished; everything else by automated tests on Windows, on the real executable, in French and English, with simulated tablets. Never tried by hand: printing on a real printer, a Word export opened in Word, a PDF's outline and links in a PDF reader, an Inkspace import with Inkspace open, a Windows logoff with unsaved work. Windows 10 not tried.
 - **Start**: Windows 11, no administrator rights. Unzip `ardoise-0.1.0-windows-x64.zip` anywhere and run `ardoise.exe`. **It is not signed**: Windows may show "Windows protected your PC"; click *More info*, then *Run anyway*. A managed PC may refuse to run it.
