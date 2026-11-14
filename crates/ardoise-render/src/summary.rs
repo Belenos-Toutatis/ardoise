@@ -344,7 +344,10 @@ mod tests {
         // Every frame stays inside the page.
         for object in &pages.notes[0].objects {
             let [x0, y0, x1, y1] = object.page_bounds();
-            assert!(x0 >= 0.0 && y0 >= 0.0 && x1 <= 21_000.0 && y1 <= 29_700.0, "{object:?}");
+            assert!(
+                x0 >= 0.0 && y0 >= 0.0 && x1 <= 21_000.0 && y1 <= 29_700.0,
+                "{object:?}"
+            );
         }
     }
 

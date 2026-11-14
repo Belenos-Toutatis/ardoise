@@ -1032,6 +1032,9 @@ un mot ou une courte phrase à l'endroit voulu de la page (« Chapitre 3 », « 
 affiché, le bouton **Sommaire** de la barre du haut (ou **Sommaire du classeur…**, dans le menu **⋯** du classeur) ouvre la liste de
 ses signets, **note par note, dans l'ordre du classeur** (**Ordre du classeur**, ci-dessus : celui que vous avez rangé, sinon par
 date, la plus ancienne d'abord), les notes de ses sous-classeurs après les siennes. Seules les notes qui ont des signets y figurent.
+La case **Afficher les dates** (décochée au départ) décide du nom d'une note sans titre : sa date, ou **Note sans titre** (suivi
+d'un numéro s'il y en a plusieurs : « Note sans titre (2) »). Décochée, le sommaire se lit comme celui d'un livre, sans horodatage ;
+ce choix est gardé, et c'est le même pour les signets du PDF du classeur (voir **Exporter ou imprimer un classeur**).
 Un clic sur un signet (ou `Entrée`, après avoir parcouru la liste avec `Tab` ou les flèches) ouvre la note **à cet endroit** : le
 signet est sélectionné et au milieu de l'éditeur. Le champ **Filtrer les signets** ne garde que ceux dont le texte (ou le titre de la
 note) contient les mots tapés. Ce sommaire n'est pas affiché quand on revient de la note ; rouvrez-le avec le même bouton.
@@ -1093,7 +1096,12 @@ de la première note est gardée.
 
 - **Nouvelle note** : une page blanche A4 en paysage, dans le classeur affiché.
 - **Depuis un PDF ou une image…** : une note par page du PDF choisie (**Toutes les pages** ou **Certaines pages**,
-  par exemple `1-3, 5`), à la taille et dans l'orientation de la page, avec la page en fond pour écrire par-dessus. Une
+  par exemple `1-3, 5`), à la taille et dans l'orientation de la page, avec la page en fond pour écrire par-dessus. Pour un
+  PDF de plusieurs pages, la fenêtre montre **une miniature de chaque page**, dessinée au fur et à mesure qu'on la fait défiler
+  (même un PDF de plusieurs centaines de pages s'ouvre vite) : un clic choisit ou retire une page, **Maj + clic** choisit toute
+  une suite de pages depuis la dernière cliquée, **Toutes** et **Aucune** les prennent ou les retirent toutes ; le champ des
+  numéros reste là et suit les miniatures (et inversement). Au clavier : les flèches déplacent le curseur sur les pages,
+  `Espace` choisit la page, `Maj + flèche` étend la suite, `Ctrl + A` les choisit toutes. Une
   image donne une note de la taille d'une feuille A4, dans l'orientation de l'image. Les PDF protégés par un mot de
   passe ne sont pas lus : enregistrez-en une copie sans mot de passe. Pour un long PDF, une barre indique
   l'avancement (« Création des notes : 3 sur 12… ») et **Annuler** arrête la création : aucune note n'est alors gardée
@@ -1764,10 +1772,22 @@ moins juste. *Relisez toujours le texte* : la reconnaissance peut se tromper.
 seul PDF, une page par note, **dans l'ordre du classeur** (**Ordre du classeur**, ci-dessus), quel que soit le tri affiché. La
 fenêtre est celle de l'export, réduite au PDF, avec la case **Inclure les sous-classeurs** (décochée au départ : elle n'apparaît
 que si le classeur a des sous-classeurs) ; leurs notes viennent après celles du classeur, chaque sous-classeur dans son ordre.
-Le PDF a des **signets** : un par note (son titre, ou sa date), et, avec les sous-classeurs, un par sous-classeur qui regroupe les
+**Un classeur qui n'a pas de note à lui**, seulement dans ses sous-classeurs, a la case cochée dès l'ouverture, et la fenêtre
+le dit ; décochée, il n'y a plus rien à exporter : le bouton **Exporter…** attend et une phrase dit quoi cocher. Un classeur
+sans aucune note affiche « Ce classeur ne contient aucune note. » et le bouton reste grisé.
+Le PDF a des **signets** : un par note (son titre, ou son nom de sommaire : sa date, ou **Note sans titre**, selon la case
+**Afficher les dates**, décochée au départ), et, avec les sous-classeurs, un par sous-classeur qui regroupe les
 signets de ses notes ; sous celui d'une note viennent les **signets posés dans cette note** (outil **Signet**), qui mènent à leur
-endroit de la page ; ouvrez le panneau des signets de votre lecteur PDF pour les voir. **Imprimer le classeur…** ouvre la
-fenêtre d'impression avec les mêmes notes, dans le même ordre, et la même case **Inclure les sous-classeurs**.
+endroit de la page ; ouvrez le panneau des signets de votre lecteur PDF pour les voir.
+La case **Ajouter une page de sommaire au début** (décochée au départ, et gardée) met en tête du PDF une **page de sommaire** :
+le nom du classeur, puis les sous-classeurs, les notes et leurs signets, avec leur **numéro de page** et des points de conduite,
+comme dans un livre ; une liste longue prend plusieurs pages, et les numéros les comptent. Chaque ligne est un **lien** vers sa
+page, et le PDF a un signet **Sommaire** en premier. La page est en A4 portrait si vous avez choisi la page A4, sinon à la taille
+de la première note ; elle suit la case **Afficher les dates**. Pour l'avoir sur papier, imprimez ce PDF (**Imprimer le
+classeur…** n'ajoute pas de page de sommaire : les numéros de page n'auraient pas de sens avec plusieurs notes par feuille).
+**Imprimer le classeur…** ouvre la fenêtre d'impression avec les mêmes notes, dans le même ordre, la même case
+**Inclure les sous-classeurs** (cochée d'emblée pour un classeur sans note à lui) et les mêmes phrases ; la page imprimée ne
+porte ni date ni signet, il n'y a donc pas de case pour les dates.
 - *Glisser hors d'Ardoise* : la poignée d'une carte de la bibliothèque dépose une *image PNG* de la note dans
   l'Explorateur, sur le bureau, dans Word, OneNote ou un courriel (une image par note si plusieurs sont sélectionnées).
   Gardez le bouton enfoncé pendant la préparation de l'image.

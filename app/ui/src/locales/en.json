@@ -1554,10 +1554,10 @@
     "binderOnlySub": "This binder has no notes of its own, only in its sub-binders: tick \"Include the sub-binders\" to export those.",
     "binderOnlySubIncluded": "This binder has no notes of its own: its notes are in its sub-binders, which are therefore included.",
     "summaryPage": "Add a summary page at the start",
-    "summaryPageHint": "The summary is a page at the start of the PDF: the binder's name, then its notes and their bookmarks with their page numbers, like a book's; several pages when the list is long. Each line is a link to its page. It follows the \"Show dates\" choice. The page is A4 if you chose A4, else the size of the first note. To print it, print the PDF.",
+    "summaryPageHint": "At the start of the PDF: the binder's name, then its notes and their bookmarks with their page numbers, like a book's. Each line is a link. To have it on paper, print the PDF.",
     "summaryOutline": "Summary",
     "showDates": "Show dates",
-    "showDatesHint": "An untitled note is named by its date. Without the dates it is called \"Untitled note\" (followed by a number when there are several): the summary and the bookmarks of the PDF read like a book's. The choice is the same for the binder's summary.",
+    "showDatesHint": "Without the dates, an untitled note is called \"Untitled note\": the summary and the bookmarks of the PDF read like a book's. The same choice applies to the binder's summary.",
     "binderPdfHint": "A single PDF, one page per note ({count} in all), in the binder's order. Each note is a bookmark of the PDF, filed under the name of its sub-binder.",
     "format": "Format",
     "formats": {

@@ -170,6 +170,7 @@ pub fn outline_entries(specs: &[OutlineSpec]) -> Vec<OutlineEntry> {
 /// (`notes[i]` is the note of `specs[i]`; a shorter list, or none, leaves those notes without):
 /// one level deeper than the note, in reading order, each going to its spot on the page
 /// (SPEC §4.6 « Exporter un classeur en PDF »).
+#[cfg(test)]
 pub fn outline_with_bookmarks(specs: &[OutlineSpec], notes: &[&Note]) -> Vec<OutlineEntry> {
     outline_with_kinds(specs, notes)
         .into_iter()
@@ -570,6 +571,7 @@ pub fn export_sources(
 }
 
 /// [`export_sources`] with the outline of a PDF ([`export_with_outline`]).
+#[allow(clippy::too_many_arguments)]
 pub fn export_sources_with_outline(
     library: Option<&Library>,
     sources: Vec<ExportSource>,
@@ -622,6 +624,7 @@ pub fn cancel_export(cancel: State<'_, ExportCancel>) {
 /// Exports `sources` to `destination` (a file, or a folder for several notes in an image
 /// format); returns the paths written.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn export_notes(
     context: State<'_, AppContext>,
     cancel: State<'_, ExportCancel>,
@@ -1258,14 +1261,33 @@ mod tests {
         // The rows: the binder, the notes, their bookmarks, as the outline has them; the page numbers count the
         // summary page, so the first note is on page 2.
         let text = document.extract_text(&[1]).unwrap();
-        for word in ["Classe", "Cours", "Introduction", "3e B", "Note sans titre", "Bilan"] {
+        for word in [
+            "Classe",
+            "Cours",
+            "Introduction",
+            "3e B",
+            "Note sans titre",
+            "Bilan",
+        ] {
             assert!(text.contains(word), "{word} in {text:?}");
         }
         // No summary asked, or no binder's outline: the PDF of before.
         let without = export(None, &specs);
-        assert_eq!(lopdf::Document::load_mem(&without).unwrap().get_pages().len(), 2);
+        assert_eq!(
+            lopdf::Document::load_mem(&without)
+                .unwrap()
+                .get_pages()
+                .len(),
+            2
+        );
         let no_outline = export(Some(&request), &[]);
-        assert_eq!(lopdf::Document::load_mem(&no_outline).unwrap().get_pages().len(), 2);
+        assert_eq!(
+            lopdf::Document::load_mem(&no_outline)
+                .unwrap()
+                .get_pages()
+                .len(),
+            2
+        );
     }
 
     /// The sample note with a second layer holding a stroke of its own, and a hidden one.
@@ -1641,7 +1663,10 @@ mod tests {
         write_sample(&library, "oral du dnb/2026", "Candidat 2");
         write_sample(&library, "Autre", "Hors classeur");
         let listing = crate::library::list(&library);
-        assert_eq!(listing.binders, ["Autre", "oral du dnb", "oral du dnb/2026"]);
+        assert_eq!(
+            listing.binders,
+            ["Autre", "oral du dnb", "oral du dnb/2026"]
+        );
         let of = |binder: &str| -> Vec<&str> {
             listing
                 .notes

@@ -1554,10 +1554,10 @@
     "binderOnlySub": "Ce classeur n'a pas de note à lui, seulement dans ses sous-classeurs : cochez « Inclure les sous-classeurs » pour exporter celles-ci.",
     "binderOnlySubIncluded": "Ce classeur n'a pas de note à lui : ses notes sont dans ses sous-classeurs, qui sont donc inclus.",
     "summaryPage": "Ajouter une page de sommaire au début",
-    "summaryPageHint": "Le sommaire est une page en tête du PDF : le nom du classeur, puis ses notes et leurs signets avec leur numéro de page, comme dans un livre ; plusieurs pages si la liste est longue. Chaque ligne est un lien vers sa page. Il suit le choix « Afficher les dates ». La page est en A4 si vous avez choisi A4, sinon à la taille de la première note. Pour l'imprimer, imprimez le PDF.",
+    "summaryPageHint": "En tête du PDF : le nom du classeur, puis ses notes et leurs signets avec leur numéro de page, comme dans un livre. Chaque ligne est un lien. Pour l'avoir sur papier, imprimez le PDF.",
     "summaryOutline": "Sommaire",
     "showDates": "Afficher les dates",
-    "showDatesHint": "Une note sans titre porte sa date pour nom. Sans les dates, elle s'appelle « Note sans titre » (suivie d'un numéro s'il y en a plusieurs) : le sommaire et les signets du PDF se lisent comme ceux d'un livre. Ce choix est le même pour le sommaire du classeur.",
+    "showDatesHint": "Sans les dates, une note sans titre s'appelle « Note sans titre » : le sommaire et les signets du PDF se lisent comme ceux d'un livre. Même choix pour le sommaire du classeur.",
     "binderPdfHint": "Un seul PDF, une page par note ({count} au total), dans l'ordre du classeur. Chaque note est un signet du PDF, rangé sous le nom de son sous-classeur.",
     "format": "Format",
     "formats": {

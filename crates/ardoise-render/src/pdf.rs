@@ -153,6 +153,13 @@ struct Link {
     spot: Option<[f32; 2]>,
 }
 
+/// The links of a page, and the page objects they go to (by the numbers of the document's pages).
+#[derive(Clone, Copy)]
+struct Links<'a> {
+    items: &'a [Link],
+    pages: &'a [Ref],
+}
+
 /// [`notes_to_pdf_with_outline`] with the pages of a summary first, when `summary` is given with the title of
 /// its outline entry. `outline` stays the one of the notes (its pages count from the first note): the pages of
 /// the summary are put in front of it, and the entry of the summary before its entries. The summary's pages are
@@ -267,10 +274,11 @@ where
             page,
             next: &mut next,
         };
-        let page_links = links.get(index).map_or(&[][..], Vec::as_slice);
-        write_page(
-            &mut pdf, ids, view, options, groups, &mut fonts, page_links, &pages,
-        )?;
+        let page_links = Links {
+            items: links.get(index).map_or(&[][..], Vec::as_slice),
+            pages: &pages,
+        };
+        write_page(&mut pdf, ids, view, options, groups, &mut fonts, page_links)?;
     }
     write_fonts(&mut pdf, &fonts);
     if separate {
@@ -887,8 +895,7 @@ fn write_page(
     options: &PdfOptions,
     mut groups: Option<&mut Groups>,
     fonts: &mut TextFonts,
-    links: &[Link],
-    pages: &[Ref],
+    links: Links<'_>,
 ) -> Result<(), RenderError> {
     let Ids {
         tree,
@@ -1024,8 +1031,9 @@ fn write_page(
     };
 
     // The links of a summary page: a GoTo to the page of a note, at its spot when it has one.
-    let mut annotations = Vec::with_capacity(links.len());
-    for link in links {
+    let Links { items, pages } = links;
+    let mut annotations = Vec::with_capacity(items.len());
+    for link in items {
         let id = next.bump();
         let mut annotation = pdf.annotation(id);
         annotation

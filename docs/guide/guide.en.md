@@ -973,7 +973,10 @@ To find a passage across a whole binder, put **bookmarks** in your notes (see **
 short phrase at the right spot of the page ("Chapter 3", "Answer to exercise 2"). When a binder is shown, the **Summary** button of
 the top bar (or **Binder summary…**, in the binder's **⋯** menu) opens the list of its bookmarks, **note by note, in the binder's
 order** (**Binder order**, above: the one you arranged, otherwise by date, oldest first), the notes of its sub-binders after its
-own. Only the notes that have bookmarks are listed. A click on a bookmark (or `Enter`, after walking through the list with `Tab` or
+own. Only the notes that have bookmarks are listed. The **Show dates** box (unchecked at first) decides what an untitled note
+is called: its date, or **Untitled note** (followed by a number when there are several: "Untitled note (2)"). Unchecked, the
+summary reads like a book's, with no time stamp; the choice is remembered, and it is the same for the bookmarks of the binder's
+PDF (see **Exporting or printing a binder**). A click on a bookmark (or `Enter`, after walking through the list with `Tab` or
 the arrows) opens the note **at that spot**: the bookmark is selected and in the middle of the editor. The **Filter the
 bookmarks** field keeps the bookmarks whose text (or whose note's title) holds the words typed. The summary is not shown again when
 you come back from the note; open it again with the same button.
@@ -1029,7 +1032,12 @@ Give the **Title of the new note** and click **Assemble**. Only the first note's
 
 - **New note**: a blank A4 page in landscape, in the binder on display.
 - **From a PDF or an image…**: one note per chosen page of the PDF (**All pages** or **Some pages**, for example
-  `1-3, 5`), at the size and in the orientation of the page, with the page in the background so you can write over it.
+  `1-3, 5`), at the size and in the orientation of the page, with the page in the background so you can write over it. For a
+  PDF of several pages, the window shows **a thumbnail of each page**, drawn as you scroll (even a PDF of several hundred pages
+  opens quickly): a click chooses or removes a page, **Shift + click** chooses a whole run of pages from the last one clicked,
+  **All** and **None** take or remove them all; the field of page numbers is still there and follows the thumbnails (and the
+  other way round). With the keyboard: the arrows move the cursor over the pages, `Space` chooses the page, `Shift + arrow`
+  extends the run, `Ctrl + A` chooses them all.
   An image gives a note the size of an A4 sheet, in the image's orientation. PDFs protected by a password are not read:
   save a copy without a password. For a long PDF, a bar shows progress ("Creating the notes: 3 of 12…") and **Cancel**
   stops the creation: no note is then kept ("Cancelled: no note was kept").
@@ -1660,11 +1668,22 @@ could not analyse the layout, Ardoise says so: the structure is then guessed fro
 **Export the binder as a PDF…** (the **⋯** menu or a right click on a binder of the sidebar) puts all its notes in a single
 PDF, one page per note, **in the binder's order** (**Binder order**, above), whatever sort is shown. The window is the export
 window reduced to PDF, with the **Include the sub-binders** box (unchecked at first; it only appears if the binder has
-sub-binders); their notes come after the binder's, each sub-binder in its own order. The PDF has **bookmarks**: one per note (its
-title, or its date), and, with the sub-binders, one per sub-binder that groups the bookmarks of its notes; under a note's come the
-**bookmarks put in that note** (**Bookmark** tool), which lead to their spot on the page; open your PDF reader's bookmarks panel to
-see them. **Print the binder…** opens the print window with the same notes in the same order, and the same
-**Include the sub-binders** box.
+sub-binders); their notes come after the binder's, each sub-binder in its own order. **A binder with no notes of its own**, only
+in its sub-binders, has the box ticked from the start, and the window says so; unticked, there is nothing to export: the
+**Export…** button waits and a sentence says what to tick. A binder with no note at all shows "This binder has no notes." and the
+button stays greyed. The PDF has **bookmarks**: one per note (its title, or its summary name: its date, or **Untitled note**,
+according to the **Show dates** box, unchecked at first), and, with the sub-binders, one per sub-binder that groups the bookmarks of
+its notes; under a note's come the **bookmarks put in that note** (**Bookmark** tool), which lead to their spot on the page; open
+your PDF reader's bookmarks panel to see them.
+The **Add a summary page at the start** box (unchecked at first, and remembered) puts a **summary page** at the head of the PDF:
+the binder's name, then the sub-binders, the notes and their bookmarks, with their **page number** and dot leaders, like a book's;
+a long list takes several pages, and the numbers count them. Each line is a **link** to its page, and the PDF has a **Summary**
+bookmark first. The page is A4 portrait if you chose the A4 page, else the size of the first note; it follows the **Show dates** box.
+To have it on paper, print that PDF (**Print the binder…** adds no summary page: the page numbers would mean nothing with several
+notes to a sheet).
+**Print the binder…** opens the print window with the same notes in the same order, the same **Include the sub-binders** box
+(ticked from the start for a binder with no notes of its own) and the same sentences; the printed page carries no date or bookmark,
+so there is no box for the dates.
 - *Dragging out of Ardoise*: the handle of a library card drops a *PNG image* of the note into Explorer, onto the
   desktop, into Word, OneNote or an email (one image per note if several are selected). Keep the button pressed while
   the image is prepared.

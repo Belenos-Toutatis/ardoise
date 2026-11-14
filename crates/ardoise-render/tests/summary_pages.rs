@@ -6,8 +6,8 @@
 
 use ardoise_core::note::{Background, Layer, Note, Origin, PageSize, Paper, Template, Timing};
 use ardoise_render::{
-    OutlineEntry, PdfOptions, PdfPage, Summary, SummaryEntry, SummaryKind, notes_to_pdf_with_outline,
-    notes_to_pdf_with_summary,
+    OutlineEntry, PdfOptions, PdfPage, Summary, SummaryEntry, SummaryKind,
+    notes_to_pdf_with_outline, notes_to_pdf_with_summary,
 };
 use lopdf::{Document, Object, ObjectId};
 
@@ -111,13 +111,15 @@ fn outline_pages(document: &Document) -> Vec<(String, usize)> {
         .as_reference()
         .unwrap();
     let mut out = Vec::new();
-    let mut stack = vec![document
-        .get_dictionary(root)
-        .unwrap()
-        .get(b"First")
-        .unwrap()
-        .as_reference()
-        .unwrap()];
+    let mut stack = vec![
+        document
+            .get_dictionary(root)
+            .unwrap()
+            .get(b"First")
+            .unwrap()
+            .as_reference()
+            .unwrap(),
+    ];
     // Depth first: an entry, then its children, then its next sibling.
     fn visit(
         document: &Document,
@@ -208,7 +210,10 @@ fn the_summary_pages_come_first_and_every_row_links_to_its_page() {
     assert_eq!(document.get_pages().len(), 3);
     // A4 portrait for the summary (the notes are fitted on A4 landscape).
     let [w, h] = media_box(&document, 0);
-    assert!((w - 595.28).abs() < 0.01 && (h - 841.89).abs() < 0.01, "{w} {h}");
+    assert!(
+        (w - 595.28).abs() < 0.01 && (h - 841.89).abs() < 0.01,
+        "{w} {h}"
+    );
     // The links: the row of each entry goes to the page of its note, a bookmark to its spot.
     let links = links_of(&document);
     assert_eq!(links[0].len(), 4);
@@ -264,7 +269,12 @@ fn a_long_summary_takes_several_pages_and_the_links_count_them() {
     assert_eq!(links.iter().take(front).map(Vec::len).sum::<usize>(), 120);
     assert!(links.iter().skip(front).all(Vec::is_empty));
     // Row i goes to note i % 5, which is page front + i % 5; the rows are in order over the pages.
-    let flat: Vec<usize> = links.iter().take(front).flatten().map(|(page, _)| *page).collect();
+    let flat: Vec<usize> = links
+        .iter()
+        .take(front)
+        .flatten()
+        .map(|(page, _)| *page)
+        .collect();
     assert_eq!(flat, (0..120).map(|i| front + i % 5).collect::<Vec<_>>());
     // The numbers shown count the summary's pages: the last page's first row says `front + 1 + ...`.
     let text = document.extract_text(&[front as u32]).unwrap();
@@ -293,7 +303,10 @@ fn the_pages_of_the_notes_size_follow_the_first_note_without_a4() {
     let document = Document::load_mem(&pdf).unwrap();
     let [w, h] = media_box(&document, 0);
     let [nw, nh] = media_box(&document, 1);
-    assert!((w - nw).abs() < 0.01 && (h - nh).abs() < 0.01, "{w}x{h} {nw}x{nh}");
+    assert!(
+        (w - nw).abs() < 0.01 && (h - nh).abs() < 0.01,
+        "{w}x{h} {nw}x{nh}"
+    );
 }
 
 #[test]
@@ -317,7 +330,9 @@ fn without_a_summary_the_document_is_the_one_of_the_outline_alone() {
     )
     .unwrap();
     assert_eq!(Document::load_mem(&still).unwrap().get_pages().len(), 2);
-    assert!(outline_pages(&Document::load_mem(&still).unwrap())
-        .iter()
-        .all(|(title, _)| title != "Sommaire"));
+    assert!(
+        outline_pages(&Document::load_mem(&still).unwrap())
+            .iter()
+            .all(|(title, _)| title != "Sommaire")
+    );
 }

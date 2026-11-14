@@ -124,7 +124,10 @@ The copies are not notes and never appear among the library's conflict cards (`L
 
 Right-click (or the ⋯ menu) on a binder of the sidebar: « Exporter le classeur en PDF… ». It is the usual export dialog
 (`ExportDialog.svelte`) with the format fixed to PDF, no text export, and a checkbox « Inclure les sous-classeurs » (**off by
-default**: the user said the sub-binders are an option; the box is only there for a binder that has some). The notes are
+default**: the user said the sub-binders are an option; the box is only there for a binder that has some; **on from the start for a
+binder that has no note of its own but whose sub-binders do**, 2026-11-14: unticked it would export nothing, which is what failed
+with « 0 au total »; `binderContent` in `lib/binder-options.ts`. With no note at all the button is disabled and a sentence says
+so; an empty list that still reaches Rust is the code `nothingToExport`, for the print job too). The notes are
 `LibraryState.binderNotes(binder, includeSub)`: the binder's own in its order, then each sub-binder's, **whatever sort is on
 screen**.
 
@@ -138,6 +141,24 @@ goes to its page at its spot (a `/XYZ` destination a little above the bookmark, 
 included). An export without the outline, or with one that is not one entry per note, is the PDF of before, byte for byte, unless
 it is one note's: **a PDF of one note** (the editor's export, the automatic export, the assistant's) takes that note's bookmarks as
 its outline, and has none (the PDF of before) when the note has no bookmark.
+
+**Dates in the names (2026-11-14).** The names of the notes come from the interface (`outline.title`), so the choice « Afficher les
+dates » (`ardoise.binderDates` in the browser's storage, **off by default**, one choice for the summary dialog and the PDF) is made
+there: `listedTitles` names an untitled note by its date, or « Note sans titre » (`editor.untitled`), numbered from the second
+(`(2)`…) over the notes of the list. Rust is unchanged by it. Printing draws no date (`render_note` only), so its dialog has no box.
+
+**Summary page (2026-11-14, `ardoise.binderSummaryPage`, off by default).** `export_notes` takes a `summary` (`{ title, outlineTitle }`)
+beside the outline; with a binder's outline the PDF starts with the pages of `crates/ardoise-render/src/summary.rs`
+(`notes_to_pdf_with_summary`): the rows are the outline's entries (`export::outline_with_kinds`: sub-binder, note, bookmark, with
+their level, page and spot), laid out as **notes of their own** (a text frame per piece of a row, Andika, black on white; the title
+at the top of the first page; a row is 1.7 body sizes high, the body being a fiftieth of the page's short side, i.e. 12 pt on A4;
+dot leaders on a grid shared by the rows; a title too long is cut with « … »). The pages then go through the usual page writer, so
+the glyphs are vector paths and the invisible text layer is there for free; the writer adds a `Link` annotation per row (`GoTo`, `/Fit`
+or `/XYZ` at the bookmark's spot) and moves the notes' outline pages back by the summary's pages, with a first entry for the summary.
+The number of pages depends on the number of rows only (a row never wraps), so the numbers are known before the rows are laid out.
+**Page size:** A4 portrait with the A4 page choice; with « taille réelle » the first note's page (a summary is read next to it, and an
+A4 page among slate-sized ones would look odd), the text size following the short side. **Print: not offered** (with 2 or 4 notes to a
+sheet the numbers would not be those of the pages): print the PDF.
 
 ## 4. Printing, pages per sheet
 

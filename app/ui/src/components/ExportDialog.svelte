@@ -160,13 +160,12 @@
       // shown layers holding ink): an image has none, and a one-layer note must not get a layer of its own in the
       // PDF (an optional content group, the reader's layers panel opened) because « Separate » was remembered.
       const request: ExportOptions = layerFormat && several ? { ...options, layers: layers[layerFormat] } : { ...options };
-      written = await api.exportNotes(
-        sources.map((source) => ({ ...source })),
-        format,
-        request,
-        chosen,
-        binder && summaryPage ? { title: binder.name, outlineTitle: t('export.summaryOutline') } : undefined,
-      );
+      const files = sources.map((source) => ({ ...source }));
+      // The summary pages only for a binder's PDF that asks for them (the other exports keep their four arguments).
+      written =
+        binder && summaryPage
+          ? await api.exportNotes(files, format, request, chosen, { title: binder.name, outlineTitle: t('export.summaryOutline') })
+          : await api.exportNotes(files, format, request, chosen);
       // A binder's PDF keeps what the dialog remembers of the formats (it is not a choice of format).
       if (!binder) saveChoice({ format, options: { ...options }, layers: { ...layers } });
       phase = 'done';
