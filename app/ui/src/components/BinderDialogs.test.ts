@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 // « Exporter le classeur en PDF » and « Imprimer le classeur » of a binder whose notes are all in its sub-binders (a binder
 // « oral du dnb » with the notes in « oral du dnb/2026 »): the dialogs start with the sub-binders included and never offer
-// to export nothing; the dates of the summary and of the bookmarks are one remembered choice.
+// to export nothing; what the summary holds (« Dans le sommaire ») is one remembered choice for the outline and the summary page.
 import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setLocale } from '../lib/i18n.svelte';
 import { mockExportRequest, mockPrint } from '../lib/mock-export';
 import { mockLibrary, resetMockLibrary } from '../lib/mock-data';
-import { loadShowDates } from '../lib/binder-options';
+import { loadSummaryChoices } from '../lib/binder-options';
+import type { SummaryChoices, SummaryRow } from '../lib/library-logic';
 import type { ExportSource } from '../lib/note';
 import ExportDialog from './ExportDialog.svelte';
 import PrintDialog from './PrintDialog.svelte';
@@ -39,8 +40,11 @@ async function settle() {
   }
 }
 
-/** A binder of `own` notes and `below` notes in its sub-binder; an untitled note's name follows `withDates`. */
-function fakeBinder(own: number, below: number) {
+/**
+ * A binder of `own` notes and `below` notes in its sub-binder; an untitled note's name follows `withDates`; with `marks`
+ * each note has a bookmark, and the summary has a line per note and per bookmark, as the choices say.
+ */
+function fakeBinder(own: number, below: number, marks = false) {
   const paths = [...mockLibrary().notes.keys()];
   const source = (index: number, path: string[]): ExportSource => ({
     path: paths[index % paths.length],
@@ -54,6 +58,15 @@ function fakeBinder(own: number, below: number) {
       ...(includeSub ? Array.from({ length: below }, (_, i) => source(own + i, ['2026'])) : []),
     ].map((s) => ({ ...s, outline: { ...s.outline!, title: `${s.outline!.title}${withDates ? ' (dates)' : ''}` } })),
     ),
+    summaryRows: vi.fn((includeSub: boolean, choices: SummaryChoices): SummaryRow[] => {
+      const notes = own + (includeSub ? below : 0);
+      const row = (kind: SummaryRow['kind']): SummaryRow => ({ kind, level: 0, label: kind });
+      return Array.from({ length: notes }, () => [
+        ...(choices.notes !== 'none' ? [row('note')] : []),
+        ...(choices.bookmarks && marks ? [row('bookmark')] : []),
+      ]).flat();
+    }),
+    hasBookmarks: vi.fn(() => marks),
   };
 }
 
@@ -122,34 +135,88 @@ describe.each(['export', 'print'] as const)('the %s dialog of a binder', (kind) 
   });
 });
 
-describe('the dates of a binder\'s PDF', () => {
-  it('are off at first, asked of the binder (the bookmarks\' names) and remembered', async () => {
-    const binder = fakeBinder(2, 0);
+describe('what the summary of a binder\'s PDF holds (« Dans le sommaire »)', () => {
+  const option = (view: { target: HTMLElement }, name: string) => view.target.querySelector<HTMLInputElement>(`input[data-option="${name}"]`)!;
+
+  it('is the bookmarks and the sub-binders at first, no line per note, and says so in what it sends', async () => {
+    const binder = fakeBinder(1, 2, true);
     const view = await mountDialog('export', binder);
-    const box = view.target.querySelector<HTMLInputElement>('input[data-option="show-dates"]')!;
-    expect(box.checked).toBe(false);
+    // The sub-binders are included from the start only with no note of its own: here a note of its own, so the choice of the
+    // sub-binders is not offered until they are included.
+    expect(option(view, 'summary-binders')).toBeNull();
+    await view.click(view.include());
+    expect(option(view, 'summary-binders').checked).toBe(true);
+    expect(option(view, 'summary-notes-none').checked).toBe(true);
+    expect(option(view, 'summary-bookmarks').checked).toBe(true);
+    expect(view.target.querySelector('[data-slot="summary-fallback"]')).toBeNull();
+    view.run.click();
+    await vi.waitFor(() => expect(mockExportRequest.last).not.toBeNull());
+    expect(mockExportRequest.last!.shape).toEqual({ binders: true, notes: false, bookmarks: true });
+    expect(binder.sourcesFor).toHaveBeenLastCalledWith(true, false);
+  });
+
+  it('lists the notes by title, and says why, while the binder has no bookmark and nothing was chosen', async () => {
+    const view = await mountDialog('export', fakeBinder(2, 0));
+    expect(option(view, 'summary-notes-title').checked).toBe(true);
+    expect(view.target.querySelector('[data-slot="summary-fallback"]')?.textContent).toContain("n'a pas de signet");
+    view.run.click();
+    await vi.waitFor(() => expect(mockExportRequest.last).not.toBeNull());
+    expect(mockExportRequest.last!.shape).toEqual({ binders: true, notes: true, bookmarks: true });
+    // Nothing is remembered by just looking: the user did not choose.
+    expect(loadSummaryChoices()).toBeNull();
+  });
+
+  it('names the untitled notes by their date when asked (title or date), and remembers every choice', async () => {
+    const binder = fakeBinder(2, 0, true);
+    const view = await mountDialog('export', binder);
     expect(binder.sourcesFor).toHaveBeenLastCalledWith(false, false);
-    await view.click(box);
+    await view.click(option(view, 'summary-notes-titleOrDate'));
     expect(binder.sourcesFor).toHaveBeenLastCalledWith(false, true);
-    expect(loadShowDates()).toBe(true);
+    expect(loadSummaryChoices()).toEqual({ binders: true, notes: 'titleOrDate', bookmarks: true });
     view.run.click();
     await vi.waitFor(() => expect(mockExportRequest.last).not.toBeNull());
     expect(mockExportRequest.last!.outline!.map((o) => o.title)).toEqual(['note 0 (dates)', 'note 1 (dates)']);
+    expect(mockExportRequest.last!.shape).toEqual({ binders: true, notes: true, bookmarks: true });
+    await view.click(option(view, 'summary-bookmarks'));
     cleanup?.();
     // The next dialog starts as the user left it.
-    const again = await mountDialog('export', fakeBinder(1, 0));
-    expect(again.target.querySelector<HTMLInputElement>('input[data-option="show-dates"]')!.checked).toBe(true);
+    const again = await mountDialog('export', fakeBinder(1, 0, true));
+    expect(option(again, 'summary-notes-titleOrDate').checked).toBe(true);
+    expect(option(again, 'summary-bookmarks').checked).toBe(false);
   });
 
-  it('are not a choice of the print dialog (the page draws none)', async () => {
-    const view = await mountDialog('print', fakeBinder(2, 0));
-    expect(view.target.querySelector('input[data-option="show-dates"]')).toBeNull();
+  it('starts from the first version\'s « dates » box: the notes by title or date', async () => {
+    localStorage.setItem('ardoise.binderDates', 'true');
+    const view = await mountDialog('export', fakeBinder(1, 0, true));
+    expect(option(view, 'summary-notes-titleOrDate').checked).toBe(true);
+  });
+
+  it('with the notes and the bookmarks both left out, the summary is empty: no summary page, no outline, said in a sentence', async () => {
+    const view = await mountDialog('export', fakeBinder(2, 0, true));
+    await view.click(option(view, 'summary-notes-none'));
+    await view.click(option(view, 'summary-bookmarks'));
+    expect(view.target.querySelector('[data-slot="summary-empty"]')?.textContent).toContain('le sommaire serait vide');
+    const page = option(view, 'summary-page');
+    expect(page.disabled).toBe(true);
+    expect(page.checked).toBe(false);
+    // A summary page asked for earlier is not sent, and the PDF keeps its pages.
+    localStorage.setItem('ardoise.binderSummaryPage', 'true');
+    view.run.click();
+    await vi.waitFor(() => expect(mockExportRequest.last).not.toBeNull());
+    expect(mockExportRequest.last!.summary).toBeUndefined();
+    expect(mockExportRequest.last!.shape).toEqual({ binders: true, notes: false, bookmarks: false });
+    expect(mockExportRequest.last!.sources).toHaveLength(2);
+  });
+
+  it('is not a choice of the print dialog (the page draws no summary)', async () => {
+    const view = await mountDialog('print', fakeBinder(2, 0, true));
+    expect(option(view, 'summary-notes-none')).toBeNull();
   });
 });
 
 describe('the summary page of a binder\'s PDF', () => {
   it('is off at first, asked for with its titles, and remembered', async () => {
-    const view = await mountDialog('export', fakeBinder(2, 0));
+    const view = await mountDialog('export', fakeBinder(2, 0, true));
     const box = view.target.querySelector<HTMLInputElement>('input[data-option="summary-page"]')!;
     expect(box.checked).toBe(false);
     expect(view.text()).toContain('Ajouter une page de sommaire au début');

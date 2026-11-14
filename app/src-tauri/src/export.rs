@@ -156,6 +156,54 @@ pub struct SummaryRequest {
     pub outline_title: String,
 }
 
+/// What the outline of a binder's PDF, and the summary page made of it, hold (« Dans le sommaire » of the export dialog,
+/// SPEC §4.6): the names of the sub-binders as headings, a line per note, the bookmarks of the notes. All three is the
+/// outline of before. A note's name is the one its `OutlineSpec` gives (the interface chooses a date or « Note sans titre »).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutlineShape {
+    pub binders: bool,
+    pub notes: bool,
+    pub bookmarks: bool,
+}
+
+impl OutlineShape {
+    /// Everything: sub-binders, notes and bookmarks.
+    pub const ALL: OutlineShape = OutlineShape {
+        binders: true,
+        notes: true,
+        bookmarks: true,
+    };
+}
+
+/// What a binder's PDF takes besides its pages: the outline (one spec per source; none, or a number that is not the
+/// sources', gives a PDF without outline), what it holds, and the summary page(s) in front of the notes.
+#[derive(Debug, Clone, Copy)]
+pub struct BinderPdf<'a> {
+    pub outline: &'a [OutlineSpec],
+    pub shape: OutlineShape,
+    pub summary: Option<&'a SummaryRequest>,
+}
+
+impl<'a> BinderPdf<'a> {
+    /// No outline, no summary: the PDF of notes.
+    pub const NONE: BinderPdf<'static> = BinderPdf {
+        outline: &[],
+        shape: OutlineShape::ALL,
+        summary: None,
+    };
+
+    /// The outline of before (sub-binders, notes and bookmarks), no summary page.
+    #[cfg(test)]
+    pub fn outline(outline: &'a [OutlineSpec]) -> Self {
+        BinderPdf {
+            outline,
+            shape: OutlineShape::ALL,
+            summary: None,
+        }
+    }
+}
+
 /// The outline of a PDF whose pages are the notes `specs` describe, in order: a bookmark per note,
 /// and, for a note below the exported binder, bookmarks for each binder it is in (a binder's
 /// bookmark goes to its first note, and holds those of the notes and sub-binders it contains).
@@ -172,25 +220,41 @@ pub fn outline_entries(specs: &[OutlineSpec]) -> Vec<OutlineEntry> {
 /// (SPEC §4.6 « Exporter un classeur en PDF »).
 #[cfg(test)]
 pub fn outline_with_bookmarks(specs: &[OutlineSpec], notes: &[&Note]) -> Vec<OutlineEntry> {
-    outline_with_kinds(specs, notes)
+    outline_with_kinds(specs, notes, OutlineShape::ALL)
         .into_iter()
         .map(|(entry, _)| entry)
         .collect()
 }
 
 /// [`outline_with_bookmarks`], each entry with what it is (a sub-binder, a note, a bookmark): the rows of the
-/// summary page are these entries.
-fn outline_with_kinds(specs: &[OutlineSpec], notes: &[&Note]) -> Vec<(OutlineEntry, SummaryKind)> {
+/// summary page are these entries. `shape` leaves out what the user did not ask for: without the notes, the bookmarks
+/// stand directly under their sub-binder (or at the top level), each still going to its page and spot; without the
+/// sub-binders there are no headings and no level for them; a note with nothing to show gives no line, and a sub-binder
+/// with nothing under it no heading. Levels count only the entries shown above, so there is never an empty level.
+fn outline_with_kinds(
+    specs: &[OutlineSpec],
+    notes: &[&Note],
+    shape: OutlineShape,
+) -> Vec<(OutlineEntry, SummaryKind)> {
     let mut entries = Vec::new();
     let mut open: Vec<&str> = Vec::new();
     for (page, spec) in specs.iter().enumerate() {
+        let marks = match notes.get(page) {
+            Some(note) if shape.bookmarks => bookmark_outline(note, page, 0),
+            _ => Vec::new(),
+        };
+        // Nothing of this note is shown: no line, and no heading for a sub-binder only it was in.
+        if !shape.notes && marks.is_empty() {
+            continue;
+        }
+        let path: &[String] = if shape.binders { &spec.path } else { &[] };
         let common = open
             .iter()
-            .zip(&spec.path)
+            .zip(path)
             .take_while(|(open, wanted)| **open == wanted.as_str())
             .count();
         open.truncate(common);
-        for (level, name) in spec.path.iter().enumerate().skip(common) {
+        for (level, name) in path.iter().enumerate().skip(common) {
             entries.push((
                 OutlineEntry {
                     title: name.clone(),
@@ -202,22 +266,24 @@ fn outline_with_kinds(specs: &[OutlineSpec], notes: &[&Note]) -> Vec<(OutlineEnt
             ));
             open.push(name);
         }
-        entries.push((
-            OutlineEntry {
-                title: spec.title.clone(),
-                level: spec.path.len(),
-                page,
-                at: None,
-            },
-            SummaryKind::Note,
-        ));
-        if let Some(note) = notes.get(page) {
-            entries.extend(
-                bookmark_outline(note, page, spec.path.len() + 1)
-                    .into_iter()
-                    .map(|entry| (entry, SummaryKind::Bookmark)),
-            );
+        let mut level = path.len();
+        if shape.notes {
+            entries.push((
+                OutlineEntry {
+                    title: spec.title.clone(),
+                    level,
+                    page,
+                    at: None,
+                },
+                SummaryKind::Note,
+            ));
+            level += 1;
         }
+        entries.extend(
+            marks
+                .into_iter()
+                .map(|entry| (OutlineEntry { level, ..entry }, SummaryKind::Bookmark)),
+        );
     }
     entries
 }
@@ -475,20 +541,26 @@ pub fn export(
     destination: &Path,
     cancel: &AtomicBool,
 ) -> CommandResult<Vec<PathBuf>> {
-    export_with_outline(sources, format, options, destination, cancel, &[], None)
+    export_with_outline(
+        sources,
+        format,
+        options,
+        destination,
+        cancel,
+        &BinderPdf::NONE,
+    )
 }
 
-/// [`export`], a PDF carrying the outline `outline` describes (one spec per source; none, or a
-/// number that is not the sources', gives a PDF without outline), and, with `summary`, the summary page(s) of a
-/// binder's PDF in front of the notes (only when the outline is the sources'). Images ignore both.
+/// [`export`], a PDF carrying what `binder` describes: the outline of a binder's PDF (one spec per source; none, or a
+/// number that is not the sources', gives a PDF without outline) with what it holds, and the summary page(s) in front
+/// of the notes (only when the outline is the sources'). Images ignore it.
 pub fn export_with_outline(
     sources: &[LoadedSource],
     format: ExportFormat,
     options: &ExportOptions,
     destination: &Path,
     cancel: &AtomicBool,
-    outline: &[OutlineSpec],
-    summary: Option<&SummaryRequest>,
+    binder: &BinderPdf<'_>,
 ) -> CommandResult<Vec<PathBuf>> {
     check_options(format, options)?;
     check_cancelled(cancel)?;
@@ -498,9 +570,9 @@ pub fn export_with_outline(
             let notes: Vec<NoteView<'_>> = sources.iter().map(LoadedSource::view).collect();
             // A binder's PDF: a bookmark per note with its own bookmarks under it. A PDF of one note
             // gets that note's bookmarks as its outline.
-            let kinds = if outline.len() == sources.len() {
+            let kinds = if binder.outline.len() == sources.len() {
                 let notes: Vec<&Note> = sources.iter().map(|source| &source.note).collect();
-                outline_with_kinds(outline, &notes)
+                outline_with_kinds(binder.outline, &notes, binder.shape)
             } else if let [single] = sources {
                 bookmark_outline(&single.note, 0, 0)
                     .into_iter()
@@ -510,8 +582,9 @@ pub fn export_with_outline(
                 Vec::new()
             };
             // The summary page(s) go with a binder's PDF only: its rows are the outline's entries.
-            let front = summary
-                .filter(|_| outline.len() == sources.len())
+            let front = binder
+                .summary
+                .filter(|_| binder.outline.len() == sources.len())
                 .map(|request| (summary_of(request, &kinds), request.outline_title.as_str()));
             let entries: Vec<OutlineEntry> = kinds.into_iter().map(|(entry, _)| entry).collect();
             let pdf = notes_to_pdf_with_summary(
@@ -565,13 +638,11 @@ pub fn export_sources(
         options,
         destination,
         cancel,
-        &[],
-        None,
+        &BinderPdf::NONE,
     )
 }
 
-/// [`export_sources`] with the outline of a PDF ([`export_with_outline`]).
-#[allow(clippy::too_many_arguments)]
+/// [`export_sources`] with the outline and summary of a binder's PDF ([`export_with_outline`]).
 pub fn export_sources_with_outline(
     library: Option<&Library>,
     sources: Vec<ExportSource>,
@@ -579,22 +650,13 @@ pub fn export_sources_with_outline(
     options: &ExportOptions,
     destination: &Path,
     cancel: &AtomicBool,
-    outline: &[OutlineSpec],
-    summary: Option<&SummaryRequest>,
+    binder: &BinderPdf<'_>,
 ) -> CommandResult<Vec<PathBuf>> {
     // Refuse bad options before reading any note.
     check_options(format, options)?;
     check_cancelled(cancel)?;
     let loaded = load_sources(library, sources)?;
-    export_with_outline(
-        &loaded,
-        format,
-        options,
-        destination,
-        cancel,
-        outline,
-        summary,
-    )
+    export_with_outline(&loaded, format, options, destination, cancel, binder)
 }
 
 /// The library, if one of `sources` must be read from it (a note not given, or the pixels of a
@@ -634,6 +696,7 @@ pub async fn export_notes(
     destination: String,
     outline: Option<Vec<OutlineSpec>>,
     summary: Option<SummaryRequest>,
+    shape: Option<OutlineShape>,
 ) -> CommandResult<Vec<String>> {
     let library = library_for(&context, &sources)?;
     let flag = Arc::clone(&cancel.0);
@@ -647,8 +710,11 @@ pub async fn export_notes(
             &options,
             Path::new(&destination),
             &flag,
-            &outline.unwrap_or_default(),
-            summary.as_ref(),
+            &BinderPdf {
+                outline: &outline.unwrap_or_default(),
+                shape: shape.unwrap_or(OutlineShape::ALL),
+                summary: summary.as_ref(),
+            },
         )
     })
     .await
@@ -1005,8 +1071,7 @@ mod tests {
                 &options(150, true),
                 &destination,
                 &NOT_CANCELLED,
-                outline,
-                None,
+                &BinderPdf::outline(outline),
             )
             .unwrap();
             let bytes = fs::read(&destination).unwrap();
@@ -1046,8 +1111,7 @@ mod tests {
             &options(72, true),
             &folder,
             &NOT_CANCELLED,
-            &[spec(&[], "Cours"), spec(&["3e B"], "TP")],
-            None,
+            &BinderPdf::outline(&[spec(&[], "Cours"), spec(&["3e B"], "TP")]),
         )
         .unwrap();
         assert_eq!(written.len(), 2);
@@ -1175,8 +1239,7 @@ mod tests {
                 &options(150, true),
                 &destination,
                 &NOT_CANCELLED,
-                outline,
-                None,
+                &BinderPdf::outline(outline),
             )
             .unwrap();
             fs::read(&destination).unwrap()
@@ -1237,8 +1300,11 @@ mod tests {
                 &options(150, true),
                 &destination,
                 &NOT_CANCELLED,
-                specs,
-                summary,
+                &BinderPdf {
+                    outline: specs,
+                    shape: OutlineShape::ALL,
+                    summary,
+                },
             )
             .unwrap();
             fs::read(&destination).unwrap()
@@ -1288,6 +1354,277 @@ mod tests {
                 .len(),
             2
         );
+    }
+
+    /// The notes of the « Dans le sommaire » cases: a note with two bookmarks, one with one in a sub-binder, a note of a
+    /// sub-sub-binder and one of another sub-binder with nothing to show, and a last one with a bookmark.
+    fn sections() -> (Vec<OutlineSpec>, Vec<Note>) {
+        (
+            vec![
+                spec(&[], "Cours"),
+                spec(&["3e B"], "TP"),
+                spec(&["3e B", "Devoirs"], "Rien"),
+                spec(&["3e C"], "Vide"),
+                spec(&["3e C"], "Dernier"),
+            ],
+            vec![
+                marked("Cours", &[("Introduction", 1500.0), ("Fin", 3000.0)]),
+                marked("TP", &[("Bilan", 800.0)]),
+                sample_note("Rien"),
+                sample_note("Vide"),
+                marked("Dernier", &[("Zéro", 900.0)]),
+            ],
+        )
+    }
+
+    /// `(level, title, page, kind)` of the entries the shape leaves.
+    fn shaped(shape: OutlineShape) -> Vec<(usize, String, usize, SummaryKind)> {
+        let (specs, notes) = sections();
+        let refs: Vec<&Note> = notes.iter().collect();
+        outline_with_kinds(&specs, &refs, shape)
+            .into_iter()
+            .map(|(entry, kind)| (entry.level, entry.title, entry.page, kind))
+            .collect()
+    }
+
+    fn row(
+        level: usize,
+        title: &str,
+        page: usize,
+        kind: SummaryKind,
+    ) -> (usize, String, usize, SummaryKind) {
+        (level, title.to_owned(), page, kind)
+    }
+
+    /// « Dans le sommaire » (SPEC §4.6): sub-binders, notes and bookmarks are three choices, and what is left keeps the
+    /// binder's order, the page and the spot of each bookmark, and never an empty level or an empty heading.
+    #[test]
+    fn the_outline_follows_what_the_summary_holds() {
+        use SummaryKind::{Binder, Bookmark, Note as NoteLine};
+        // All three: the outline of before.
+        assert_eq!(
+            shaped(OutlineShape::ALL),
+            [
+                row(0, "Cours", 0, NoteLine),
+                row(1, "Introduction", 0, Bookmark),
+                row(1, "Fin", 0, Bookmark),
+                row(0, "3e B", 1, Binder),
+                row(1, "TP", 1, NoteLine),
+                row(2, "Bilan", 1, Bookmark),
+                row(1, "Devoirs", 2, Binder),
+                row(2, "Rien", 2, NoteLine),
+                row(0, "3e C", 3, Binder),
+                row(1, "Vide", 3, NoteLine),
+                row(1, "Dernier", 4, NoteLine),
+                row(2, "Zéro", 4, Bookmark),
+            ]
+        );
+        // The main case: the bookmarks and the names of the sub-binders. The bookmarks come right under their heading (or at
+        // the top for the binder's own note), a note without a bookmark gives no line, and « Devoirs » and the first note of
+        // « 3e C » leave no heading nor line.
+        let only = OutlineShape {
+            binders: true,
+            notes: false,
+            bookmarks: true,
+        };
+        assert_eq!(
+            shaped(only),
+            [
+                row(0, "Introduction", 0, Bookmark),
+                row(0, "Fin", 0, Bookmark),
+                row(0, "3e B", 1, Binder),
+                row(1, "Bilan", 1, Bookmark),
+                row(0, "3e C", 4, Binder),
+                row(1, "Zéro", 4, Bookmark),
+            ]
+        );
+        // Without the sub-binders either: a flat list of the bookmarks.
+        assert_eq!(
+            shaped(OutlineShape {
+                binders: false,
+                ..only
+            }),
+            [
+                row(0, "Introduction", 0, Bookmark),
+                row(0, "Fin", 0, Bookmark),
+                row(0, "Bilan", 1, Bookmark),
+                row(0, "Zéro", 4, Bookmark),
+            ]
+        );
+        // The notes and the sub-binders, no bookmark.
+        assert_eq!(
+            shaped(OutlineShape {
+                binders: true,
+                notes: true,
+                bookmarks: false,
+            }),
+            [
+                row(0, "Cours", 0, NoteLine),
+                row(0, "3e B", 1, Binder),
+                row(1, "TP", 1, NoteLine),
+                row(1, "Devoirs", 2, Binder),
+                row(2, "Rien", 2, NoteLine),
+                row(0, "3e C", 3, Binder),
+                row(1, "Vide", 3, NoteLine),
+                row(1, "Dernier", 4, NoteLine),
+            ]
+        );
+        // The notes and their bookmarks, no sub-binder: no level for them.
+        assert_eq!(
+            shaped(OutlineShape {
+                binders: false,
+                notes: true,
+                bookmarks: true,
+            }),
+            [
+                row(0, "Cours", 0, NoteLine),
+                row(1, "Introduction", 0, Bookmark),
+                row(1, "Fin", 0, Bookmark),
+                row(0, "TP", 1, NoteLine),
+                row(1, "Bilan", 1, Bookmark),
+                row(0, "Rien", 2, NoteLine),
+                row(0, "Vide", 3, NoteLine),
+                row(0, "Dernier", 4, NoteLine),
+                row(1, "Zéro", 4, Bookmark),
+            ]
+        );
+        // Nothing asked, or only the headings (which need something under them): nothing.
+        for shape in [
+            OutlineShape {
+                binders: false,
+                notes: false,
+                bookmarks: false,
+            },
+            OutlineShape {
+                binders: true,
+                notes: false,
+                bookmarks: false,
+            },
+        ] {
+            assert!(shaped(shape).is_empty(), "{shape:?}");
+        }
+        // The bookmarks keep their spot.
+        let (specs, notes) = sections();
+        let refs: Vec<&Note> = notes.iter().collect();
+        let spots: Vec<bool> = outline_with_kinds(&specs, &refs, only)
+            .iter()
+            .filter(|(_, kind)| *kind == Bookmark)
+            .map(|(entry, _)| entry.at.is_some())
+            .collect();
+        assert_eq!(spots, [true; 4]);
+    }
+
+    /// The links of the first page of a PDF, as the page (0-based) each goes to and whether it has a spot.
+    fn first_page_links(document: &lopdf::Document) -> Vec<(usize, bool)> {
+        let ids: Vec<lopdf::ObjectId> = document.get_pages().values().copied().collect();
+        let page = document.get_dictionary(ids[0]).unwrap();
+        let Ok(annots) = page.get(b"Annots") else {
+            return Vec::new();
+        };
+        annots
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|annot| {
+                let annot = document
+                    .get_dictionary(annot.as_reference().unwrap())
+                    .unwrap();
+                let action = annot.get(b"A").unwrap().as_dict().unwrap();
+                let dest = action.get(b"D").unwrap().as_array().unwrap();
+                let target = ids
+                    .iter()
+                    .position(|id| *id == dest[0].as_reference().unwrap())
+                    .unwrap();
+                (target, dest[1].as_name().unwrap() == b"XYZ")
+            })
+            .collect()
+    }
+
+    /// The summary page and the outline of a binder's PDF made with a shape: the rows are the bookmarks under their
+    /// sub-binders when the notes are left out, their links still go to the page and the spot of each bookmark, and an
+    /// empty choice gives no summary page and no outline.
+    #[test]
+    fn the_summary_page_and_the_outline_follow_the_shape() {
+        let (specs, notes) = sections();
+        let request = SummaryRequest {
+            title: "Classe".into(),
+            outline_title: "Sommaire".into(),
+        };
+        let out = tempfile::tempdir().unwrap();
+        let export = |shape: OutlineShape, summary: Option<&SummaryRequest>| {
+            let destination = out.path().join("sortie.pdf");
+            let sources: Vec<ExportSource> = notes.iter().cloned().map(in_memory).collect();
+            export_sources_with_outline(
+                None,
+                sources,
+                ExportFormat::Pdf,
+                &options(150, true),
+                &destination,
+                &NOT_CANCELLED,
+                &BinderPdf {
+                    outline: &specs,
+                    shape,
+                    summary,
+                },
+            )
+            .unwrap();
+            fs::read(&destination).unwrap()
+        };
+        let only = OutlineShape {
+            binders: true,
+            notes: false,
+            bookmarks: true,
+        };
+        let bytes = export(only, Some(&request));
+        let document = lopdf::Document::load_mem(&bytes).unwrap();
+        // One summary page, then the five notes: the numbers of the pages follow.
+        assert_eq!(document.get_pages().len(), 6);
+        assert_eq!(
+            pdf_outline(&bytes),
+            [
+                (0, "Sommaire".to_owned(), 0, false),
+                (0, "Introduction".to_owned(), 1, true),
+                (0, "Fin".to_owned(), 1, true),
+                (0, "3e B".to_owned(), 2, false),
+                (1, "Bilan".to_owned(), 2, true),
+                (0, "3e C".to_owned(), 5, false),
+                (1, "Zéro".to_owned(), 5, true),
+            ]
+        );
+        // The rows of the summary page, in the same order: each goes to the page of its note (counted after the summary),
+        // the bookmarks to their spot.
+        assert_eq!(
+            first_page_links(&document),
+            [
+                (1, true),
+                (1, true),
+                (2, false),
+                (2, true),
+                (5, false),
+                (5, true)
+            ]
+        );
+        let text = document.extract_text(&[1]).unwrap();
+        for word in ["Classe", "Introduction", "3e B", "Bilan", "Zéro"] {
+            assert!(text.contains(word), "{word} in {text:?}");
+        }
+        // The notes' names are not in it: they were left out.
+        for word in ["Cours", "Dernier", "Devoirs"] {
+            assert!(!text.contains(word), "{word} in {text:?}");
+        }
+        // Nothing left: no summary page, no outline, the PDF of notes.
+        let nothing = OutlineShape {
+            binders: true,
+            notes: false,
+            bookmarks: false,
+        };
+        let bytes = export(nothing, Some(&request));
+        assert_eq!(
+            lopdf::Document::load_mem(&bytes).unwrap().get_pages().len(),
+            5
+        );
+        assert!(pdf_outline(&bytes).is_empty());
+        assert!(!String::from_utf8_lossy(&bytes).contains("/Outlines"));
     }
 
     /// The sample note with a second layer holding a stroke of its own, and a hidden one.
@@ -1706,8 +2043,7 @@ mod tests {
             &options(72, true),
             &destination,
             &NOT_CANCELLED,
-            &outline,
-            None,
+            &BinderPdf::outline(&outline),
         )
         .unwrap();
         assert_eq!(pdf_pages(&fs::read(&destination).unwrap()).len(), 2);

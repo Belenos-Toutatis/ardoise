@@ -1,28 +1,60 @@
 /**
  * The choices of the binder dialogs that are remembered on this computer (like the other choices of the export
- * dialogs): the dates, and the summary page of the PDF.
- *
- * Whether the dates show in a binder's summary and in the bookmarks of its PDF: the one choice of both dialogs, remembered
- * on this computer (like the other choices of the export dialogs). Off at first: a summary like a book's has no time
- * stamps in it; an untitled note then takes the name « Note sans titre » instead of its date.
+ * dialogs): what the summary holds (« Dans le sommaire »: the same three choices for the summary dialog, the outline of the
+ * binder's PDF and the summary page at its start), and whether the PDF starts with that page.
  */
-const KEY = 'ardoise.binderDates';
+import type { SummaryChoices, SummaryNotes } from './library-logic';
 
-/** The remembered choice (off when nothing valid is stored, or storage is blocked). */
-export function loadShowDates(): boolean {
+const KEY = 'ardoise.binderSummary';
+/** The choice of the first version, a single box: « Afficher les dates ». */
+const OLD_DATES_KEY = 'ardoise.binderDates';
+
+const NOTES: readonly SummaryNotes[] = ['title', 'titleOrDate', 'none'];
+
+/**
+ * What the summary holds when the user has not chosen yet: the names of the sub-binders and the bookmarks, no line per
+ * note (a book's contents, not a list of pages). A binder that has no bookmark at all would then have an empty summary:
+ * for it the notes are listed until the user chooses (`effectiveChoices`).
+ */
+export const DEFAULT_SUMMARY: SummaryChoices = { binders: true, notes: 'none', bookmarks: true };
+
+/**
+ * The remembered choices; null when the user never chose (the defaults then depend on the binder, `effectiveChoices`).
+ * The single box of the first version is read as what it meant: « dates » is the note lines named by their title or
+ * their date, with everything else; « no dates » is no choice.
+ */
+export function loadSummaryChoices(): SummaryChoices | null {
   try {
-    return localStorage.getItem(KEY) === 'true';
+    const stored = localStorage.getItem(KEY);
+    if (stored !== null) {
+      const value = JSON.parse(stored) as Partial<SummaryChoices> | null;
+      if (value && typeof value.binders === 'boolean' && typeof value.bookmarks === 'boolean' && NOTES.includes(value.notes as SummaryNotes)) {
+        return { binders: value.binders, notes: value.notes as SummaryNotes, bookmarks: value.bookmarks };
+      }
+      return null;
+    }
+    if (localStorage.getItem(OLD_DATES_KEY) === 'true') return { binders: true, notes: 'titleOrDate', bookmarks: true };
   } catch {
-    return false;
+    // Storage blocked or damaged: no choice.
+  }
+  return null;
+}
+
+export function saveSummaryChoices(choices: SummaryChoices): void {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(choices));
+  } catch {
+    // Nothing to remember it with: the next dialog starts from the defaults.
   }
 }
 
-export function saveShowDates(show: boolean): void {
-  try {
-    localStorage.setItem(KEY, show ? 'true' : 'false');
-  } catch {
-    // Nothing to remember it with: the next dialog starts with the dates off.
-  }
+/**
+ * What the dialogs use: the user's choices, else the defaults, with the notes listed (by title) when the binder has no
+ * bookmark, so that a first summary is never empty.
+ */
+export function effectiveChoices(stored: SummaryChoices | null, hasBookmarks: boolean): SummaryChoices {
+  if (stored) return stored;
+  return hasBookmarks ? { ...DEFAULT_SUMMARY } : { ...DEFAULT_SUMMARY, notes: 'title' };
 }
 
 const SUMMARY_PAGE_KEY = 'ardoise.binderSummaryPage';

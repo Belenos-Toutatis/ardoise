@@ -79,6 +79,7 @@ import type {
   RevisionSource,
   ShapeSettings,
   SplitResult,
+  OutlineShape,
   SplitSpec,
   SummaryPage,
   TabletInfo,
@@ -315,6 +316,7 @@ export const api = {
     options: ExportOptions,
     destination: string,
     summary?: SummaryPage,
+    shape?: OutlineShape,
   ) => {
     // The outline travels beside the sources, one per source (Rust: `export_notes`, `outline`).
     const outline = sources.length > 0 && sources.every((source) => source.outline) ? sources.map((source) => source.outline) : undefined;
@@ -325,6 +327,7 @@ export const api = {
       destination,
       outline,
       summary,
+      shape,
     });
   },
   /**

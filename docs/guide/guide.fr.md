@@ -1039,15 +1039,27 @@ la plus récente d'abord ; votre choix revient dès que vous rouvrez un classeur
 
 Pour retrouver un passage dans tout un classeur, posez des **signets** dans vos notes (voir **Poser des signets**, au chapitre 8) :
 un mot ou une courte phrase à l'endroit voulu de la page (« Chapitre 3 », « Corrigé de l'exercice 2 »). Quand un classeur est
-affiché, le bouton **Sommaire** de la barre du haut (ou **Sommaire du classeur…**, dans le menu **⋯** du classeur) ouvre la liste de
-ses signets, **note par note, dans l'ordre du classeur** (**Ordre du classeur**, ci-dessus : celui que vous avez rangé, sinon par
-date, la plus ancienne d'abord), les notes de ses sous-classeurs après les siennes. Seules les notes qui ont des signets y figurent.
-La case **Afficher les dates** (décochée au départ) décide du nom d'une note sans titre : sa date, ou **Note sans titre** (suivi
-d'un numéro s'il y en a plusieurs : « Note sans titre (2) »). Décochée, le sommaire se lit comme celui d'un livre, sans horodatage ;
-ce choix est gardé, et c'est le même pour les signets du PDF du classeur (voir **Exporter ou imprimer un classeur**).
-Un clic sur un signet (ou `Entrée`, après avoir parcouru la liste avec `Tab` ou les flèches) ouvre la note **à cet endroit** : le
-signet est sélectionné et au milieu de l'éditeur. Le champ **Filtrer les signets** ne garde que ceux dont le texte (ou le titre de la
-note) contient les mots tapés. Ce sommaire n'est pas affiché quand on revient de la note ; rouvrez-le avec le même bouton.
+affiché, le bouton **Sommaire** de la barre du haut (ou **Sommaire du classeur…**, dans le menu **⋯** du classeur) ouvre le
+sommaire du classeur, **dans l'ordre du classeur** (**Ordre du classeur**, ci-dessus : celui que vous avez rangé, sinon par date, la
+plus ancienne d'abord), les notes de ses sous-classeurs après les siennes. Ce qu'il contient se règle dans le groupe **Dans le
+sommaire**, trois choix indépendants :
+
+- **Les sous-classeurs** (case, proposée quand le classeur en a) : leur nom, en titre au-dessus de ce qu'ils contiennent ;
+- **Les notes** : **Titre** (une ligne par note ; une note sans titre s'appelle **Note sans titre**, suivi d'un numéro s'il y en a
+  plusieurs : « Note sans titre (2) »), **Titre ou date** (une note sans titre porte sa date) ou **Non** (aucune ligne de note) ;
+- **Les signets** (case) : ceux de chaque note, dans l'ordre de la page.
+
+Au départ : les sous-classeurs et les signets, sans ligne par note, c'est-à-dire le sommaire d'un livre. Les signets viennent alors
+directement sous le nom de leur sous-classeur (ou en haut, pour les notes du classeur lui-même) ; une note sans signet ne donne
+aucune ligne, et un sous-classeur dont rien ne reste n'a pas de titre. **Un classeur qui n'a aucun signet** commencerait par un
+sommaire vide : tant que vous n'avez rien choisi, ses notes sont listées (la fenêtre le dit) ; dès que vous choisissez, votre
+choix est pris tel quel, même s'il ne laisse rien (une phrase explique alors pourquoi le sommaire est vide). Vos choix sont gardés
+sur l'ordinateur, et ce sont les mêmes pour les signets et la page de sommaire du PDF du classeur (voir **Exporter ou imprimer un
+classeur**). L'ancienne case « Afficher les dates » est reprise : si vous l'aviez cochée, les notes sont en **Titre ou date**.
+Un clic sur une ligne de note (ou `Entrée`, après avoir parcouru la liste avec `Tab` ou les flèches) ouvre la note ; sur un signet,
+il ouvre la note **à cet endroit** : le signet est sélectionné et au milieu de l'éditeur. Le champ **Filtrer le sommaire** ne garde
+que les lignes dont le texte contient les mots tapés, avec les titres au-dessus et ce qu'elles contiennent. Ce sommaire n'est pas
+affiché quand on revient de la note ; rouvrez-le avec le même bouton.
 
 ### Dupliquer une note, changer sa date
 
@@ -1796,19 +1808,21 @@ que si le classeur a des sous-classeurs) ; leurs notes viennent après celles du
 **Un classeur qui n'a pas de note à lui**, seulement dans ses sous-classeurs, a la case cochée dès l'ouverture, et la fenêtre
 le dit ; décochée, il n'y a plus rien à exporter : le bouton **Exporter…** attend et une phrase dit quoi cocher. Un classeur
 sans aucune note affiche « Ce classeur ne contient aucune note. » et le bouton reste grisé.
-Le PDF a des **signets** : un par note (son titre, ou son nom de sommaire : sa date, ou **Note sans titre**, selon la case
-**Afficher les dates**, décochée au départ), et, avec les sous-classeurs, un par sous-classeur qui regroupe les
-signets de ses notes ; sous celui d'une note viennent les **signets posés dans cette note** (outil **Signet**), qui mènent à leur
-endroit de la page ; ouvrez le panneau des signets de votre lecteur PDF pour les voir.
+Le PDF a des **signets** que règle le groupe **Dans le sommaire** (les mêmes trois choix que le sommaire du classeur, voir **Le
+sommaire d'un classeur**) : le nom des sous-classeurs, une ligne par note (son titre, ou **Note sans titre**, ou sa date), et les
+**signets posés dans les notes** (outil **Signet**), qui mènent à leur endroit de la page ; ouvrez le panneau des signets de votre
+lecteur PDF pour les voir. Sans les notes, les signets de page viennent directement sous le nom de leur sous-classeur. Si les choix
+ne laissent rien, le PDF n'a pas de signets (la phrase « le sommaire serait vide » le dit).
 La case **Ajouter une page de sommaire au début** (décochée au départ, et gardée) met en tête du PDF une **page de sommaire** :
-le nom du classeur, puis les sous-classeurs, les notes et leurs signets, avec leur **numéro de page** et des points de conduite,
-comme dans un livre ; une liste longue prend plusieurs pages, et les numéros les comptent. Chaque ligne est un **lien** vers sa
-page, et le PDF a un signet **Sommaire** en premier. La page est en A4 portrait si vous avez choisi la page A4, sinon à la taille
-de la première note ; elle suit la case **Afficher les dates**. Pour l'avoir sur papier, imprimez ce PDF (**Imprimer le
-classeur…** n'ajoute pas de page de sommaire : les numéros de page n'auraient pas de sens avec plusieurs notes par feuille).
+le nom du classeur, puis ce que vous avez choisi dans **Dans le sommaire**, avec les **numéros de page** et des points de
+conduite, comme dans un livre ; une liste longue prend plusieurs pages, et les numéros les comptent. Chaque ligne est un **lien**
+vers sa page (ou vers l'endroit du signet), et le PDF a un signet **Sommaire** en premier. La page est en A4 portrait si vous avez
+choisi la page A4, sinon à la taille de la première note. Si les choix ne laissent rien, la case est grisée. Pour l'avoir sur
+papier, imprimez ce PDF (**Imprimer le classeur…** n'ajoute pas de page de sommaire : les numéros de page n'auraient pas de sens
+avec plusieurs notes par feuille).
 **Imprimer le classeur…** ouvre la fenêtre d'impression avec les mêmes notes, dans le même ordre, la même case
 **Inclure les sous-classeurs** (cochée d'emblée pour un classeur sans note à lui) et les mêmes phrases ; la page imprimée ne
-porte ni date ni signet, il n'y a donc pas de case pour les dates.
+porte ni date ni signet, il n'y a donc pas de choix pour le sommaire.
 - *Glisser hors d'Ardoise* : la poignée d'une carte de la bibliothèque dépose une *image PNG* de la note dans
   l'Explorateur, sur le bureau, dans Word, OneNote ou un courriel (une image par note si plusieurs sont sélectionnées).
   Gardez le bouton enfoncé pendant la préparation de l'image.

@@ -638,7 +638,7 @@ describe('exporting and printing a binder', () => {
     await view.click(view.button('Exporter…', dialog as HTMLElement));
     await vi.waitFor(() => expect(mockExportRequest.last).not.toBeNull());
     expect(mockExportRequest.last!.outline!.map((o) => o.title)).toEqual(['Note sans titre', 'Note sans titre (2)']);
-    await view.click(dialog.querySelector('input[data-option="show-dates"]'));
+    await view.click(dialog.querySelector('input[data-option="summary-notes-titleOrDate"]'));
     mockExportRequest.last = null;
     await view.click(view.button('Exporter de nouveau…', dialog as HTMLElement));
     await vi.waitFor(() => expect(mockExportRequest.last).not.toBeNull());

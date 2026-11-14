@@ -117,18 +117,20 @@
     },
     "summary": {
       "button": "Summary",
-      "hint": "Binder summary: its bookmarks, note by note, in the binder's order",
+      "hint": "Binder summary: its sub-binders, notes and bookmarks, as you choose, in the binder's order",
       "title": "Summary of the binder \"{name}\"",
       "intro": {
-        "one": "1 bookmark in this binder. Choose it to open the note at that spot.",
-        "other": "{count} bookmarks in this binder, in the binder's order. Choose one to open the note at that spot."
+        "one": "1 line, in the binder's order. Choose it to open the note (at the bookmark's spot, for a bookmark).",
+        "other": "{count} lines, in the binder's order. Choose one to open the note (at the bookmark's spot, for a bookmark)."
       },
-      "empty": "This binder has no bookmark. In the editor, the Bookmark tool puts a word or a short phrase at a spot of the page.",
-      "filter": "Filter the bookmarks",
-      "filterPlaceholder": "Filter the bookmarks…",
-      "list": "Bookmarks of the binder",
-      "noMatch": "No bookmark matches “{query}”.",
+      "empty": "This binder has no bookmark. In the editor, the Bookmark tool puts a word or a short phrase at a spot of the page; or choose to show the notes.",
+      "emptyChoices": "With these choices the summary is empty: choose to show the bookmarks or the notes.",
+      "filter": "Filter the summary",
+      "filterPlaceholder": "Filter the summary…",
+      "list": "Summary of the binder",
+      "noMatch": "No line matches “{query}”.",
       "open": "Open the note \"{note}\" at the bookmark \"{label}\"",
+      "openNote": "Open the note \"{note}\"",
       "close": "Close"
     },
     "empty": {
@@ -1570,6 +1572,19 @@
       "deleteFailed": "The narration could not be deleted: {message}"
     }
   },
+  "summaryChoices": {
+    "legend": "In the summary",
+    "binders": "The sub-binders",
+    "notes": "The notes",
+    "bookmarks": "The bookmarks",
+    "notesChoices": {
+      "title": "Title",
+      "titleOrDate": "Title or date",
+      "none": "No"
+    },
+    "notesHint": "\"Title\": an untitled note is called \"Untitled note\" (followed by a number when there are several). \"Title or date\": it carries its date. \"No\": no line per note.",
+    "noBookmarks": "This binder has no bookmark: its notes are listed until you choose."
+  },
   "export": {
     "title": "Export",
     "subjectNote": "Note: {title}",
@@ -1581,11 +1596,10 @@
     "binderOnlySub": "This binder has no notes of its own, only in its sub-binders: tick \"Include the sub-binders\" to export those.",
     "binderOnlySubIncluded": "This binder has no notes of its own: its notes are in its sub-binders, which are therefore included.",
     "summaryPage": "Add a summary page at the start",
-    "summaryPageHint": "At the start of the PDF: the binder's name, then its notes and their bookmarks with their page numbers, like a book's. Each line is a link. To have it on paper, print the PDF.",
+    "summaryPageHint": "At the start of the PDF: the binder's name, then what you chose for the summary, with the page numbers, like a book's. Each line is a link. To have it on paper, print the PDF.",
     "summaryOutline": "Summary",
-    "showDates": "Show dates",
-    "showDatesHint": "Without the dates, an untitled note is called \"Untitled note\": the summary and the bookmarks of the PDF read like a book's. The same choice applies to the binder's summary.",
-    "binderPdfHint": "A single PDF, one page per note ({count} in all), in the binder's order. Each note is a bookmark of the PDF, filed under the name of its sub-binder.",
+    "binderPdfHint": "A single PDF, one page per note ({count} in all), in the binder's order. Its bookmarks follow \"In the summary\", below.",
+    "summaryEmpty": "With these choices the summary would be empty: the PDF would have no bookmarks and no summary page.",
     "format": "Format",
     "formats": {
       "png": "PNG (image)",

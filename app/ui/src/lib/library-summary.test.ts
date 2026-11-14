@@ -1,7 +1,17 @@
 // The summary of a binder and the search of bookmarks: what the pure functions of `library-logic.ts` decide
 // (SPEC §4.3 « Sommaire du classeur »). The dialog and the screens are in `components/library/Summary.test.ts`.
 import { describe, expect, it } from 'vitest';
-import { arrangeByBinderOrder, binderSummary, buildBinderTree, displayTitle, filterSummary, listedTitles, matchesSearch } from './library-logic';
+import {
+  arrangeByBinderOrder,
+  buildBinderTree,
+  displayTitle,
+  filterRows,
+  listedTitles,
+  matchesSearch,
+  summaryRows,
+  type SummaryChoices,
+  type SummaryRow,
+} from './library-logic';
 import type { BookmarkRef, NoteSummary } from './note';
 
 const STAMP = { modified: { secs_since_epoch: 1, nanos_since_epoch: 0 }, len: 1 };
@@ -9,7 +19,7 @@ const STAMP = { modified: { secs_since_epoch: 1, nanos_since_epoch: 0 }, len: 1 
 function note(id: string, binder: string, created: number, labels: string[] = [], title = id): NoteSummary {
   const bookmarks: BookmarkRef[] = labels.map((label, i) => ({ id: `${id}-${i}`, label, x: 100 * i, y: 100 * i }));
   return {
-    path: `C:\lib\${binder}\${id}.ardoise`,
+    path: `C:/lib/${binder}/${id}.ardoise`,
     binder,
     fileName: `${id}.ardoise`,
     id,
@@ -49,34 +59,88 @@ describe('the names of the notes of a summary or of a PDF outline', () => {
 });
 
 describe('the summary of a binder', () => {
-  it('keeps the notes that have bookmarks, in the order given, and says where each is below the binder', () => {
-    const tree = buildBinderTree(['Classe', 'Classe/3e B'], notes);
-    // Without a free order: by date, the sub-binders after.
-    const byDate = arrangeByBinderOrder(notes, 'Classe', { tree, orders: {} }, 'fr');
-    expect(binderSummary(byDate, 'Classe').map((e) => [e.note.id, e.below, e.bookmarks.length])).toEqual([
-      ['a', [], 2],
-      ['c', [], 1],
-      ['d', ['3e B'], 1],
+  const ids = (rows: SummaryRow[]) => rows.map((r) => `${'.'.repeat(r.level)}${r.kind === 'binder' ? '#' : r.kind === 'note' ? '' : '⚑'}${r.label}`);
+  const NOTES: SummaryChoices = { binders: true, notes: 'title', bookmarks: true };
+  const BOOKMARKS_ONLY: SummaryChoices = { binders: true, notes: 'none', bookmarks: true };
+
+  /** The notes of the binder `Classe` in its order, with these titles. */
+  const book = [
+    note('a', 'Classe', 1, ['Introduction', 'Bilan'], 'Cours'),
+    note('b', 'Classe', 2, [], 'Sans signet'),
+    note('c', 'Classe/3e B', 3, ['Loi d\'Ohm'], 'TP'),
+    note('d', 'Classe/3e B/Devoirs', 4, [], 'DM'),
+    note('e', 'Classe/3e C', 5, [], 'Vide'),
+    note('f', 'Classe/3e C', 6, ['Zéro'], 'Dernier'),
+  ];
+  const titlesOf = (list: NoteSummary[]) => listedTitles(list, 'fr', false, 'Note sans titre');
+  const rows = (choices: SummaryChoices, list = book) => summaryRows(list, 'Classe', choices, titlesOf(list));
+
+  it('lists the notes and their bookmarks under the sub-binders that hold them, in the order given', () => {
+    expect(ids(rows({ binders: true, notes: 'title', bookmarks: true }))).toEqual([
+      'Cours', '.⚑Introduction', '.⚑Bilan', 'Sans signet',
+      '#3e B', '.TP', '..⚑Loi d\'Ohm', '.#Devoirs', '..DM',
+      '#3e C', '.Vide', '.Dernier', '..⚑Zéro',
     ]);
-    // With a free order: its order for the binder's notes, the others after by date, the sub-binder last.
-    const ordered = arrangeByBinderOrder(notes, 'Classe', { tree, orders: { Classe: ['c', 'b', 'a'] } }, 'fr');
-    expect(binderSummary(ordered, 'Classe').map((e) => e.note.id)).toEqual(['c', 'a', 'd']);
-    // And its own order for each sub-binder.
-    const more = [...notes, note('e', 'Classe/3e B', 1, ['Premier'])];
-    const both = arrangeByBinderOrder(more, 'Classe', { tree: buildBinderTree(['Classe', 'Classe/3e B'], more), orders: { 'Classe/3e B': ['d', 'e'] } }, 'fr');
-    expect(binderSummary(both, 'Classe').map((e) => e.note.id)).toEqual(['a', 'c', 'd', 'e']);
-    expect(binderSummary([], 'Classe')).toEqual([]);
   });
 
-  it('is narrowed by the words typed: the labels, or a note\'s title, accents and case ignored', () => {
-    const summary = binderSummary(notes, 'Classe');
-    expect(filterSummary(summary, '  ').length).toBe(3);
-    expect(filterSummary(summary, 'CORRIGE').map((e) => e.note.id)).toEqual(['c']);
-    expect(filterSummary(summary, 'intro bil').map((e) => e.note.id)).toEqual([]);
-    expect(filterSummary(summary, 'bilan').map((e) => e.bookmarks.map((b) => b.label))).toEqual([['Bilan']]);
-    // The words of a note's title keep all of its bookmarks.
-    expect(filterSummary(summary, 'cours')[0].bookmarks).toHaveLength(1);
-    expect(filterSummary(summary, 'a')[0].bookmarks.map((b) => b.label)).toEqual(['Introduction', 'Bilan']);
+  it('with the notes left out, puts each bookmark under its sub-binder, a note without bookmark gives no line and no heading', () => {
+    expect(ids(rows(BOOKMARKS_ONLY))).toEqual([
+      '⚑Introduction', '⚑Bilan',
+      '#3e B', '.⚑Loi d\'Ohm',
+      '#3e C', '.⚑Zéro',
+    ]);
+    // No sub-binder either: a flat list in the binder's order.
+    expect(ids(rows({ ...BOOKMARKS_ONLY, binders: false }))).toEqual(['⚑Introduction', '⚑Bilan', '⚑Loi d\'Ohm', '⚑Zéro']);
+  });
+
+  it('with the bookmarks left out, lists the notes under their sub-binders, and without the sub-binders no level is left for them', () => {
+    expect(ids(rows({ binders: true, notes: 'title', bookmarks: false }))).toEqual([
+      'Cours', 'Sans signet', '#3e B', '.TP', '.#Devoirs', '..DM', '#3e C', '.Vide', '.Dernier',
+    ]);
+    expect(ids(rows({ binders: false, notes: 'title', bookmarks: true }))).toEqual([
+      'Cours', '.⚑Introduction', '.⚑Bilan', 'Sans signet', 'TP', '.⚑Loi d\'Ohm', 'DM', 'Vide', 'Dernier', '.⚑Zéro',
+    ]);
+  });
+
+  it('is empty when the choices leave nothing, the headings alone being nothing', () => {
+    expect(rows({ binders: false, notes: 'none', bookmarks: false })).toEqual([]);
+    expect(rows({ binders: true, notes: 'none', bookmarks: false })).toEqual([]);
+    expect(rows(BOOKMARKS_ONLY, [note('x', 'Classe', 1)])).toEqual([]);
+    expect(summaryRows([], 'Classe', NOTES, new Map())).toEqual([]);
+  });
+
+  it('names an untitled note by its title, « Note sans titre » (numbered), or its date, as asked', () => {
+    const list = [note('u', 'Classe', Date.UTC(2026, 9, 1), ['Un'], ''), note('v', 'Classe', Date.UTC(2026, 9, 2), ['Deux'], '')];
+    const by = (withDates: boolean) => summaryRows(list, 'Classe', NOTES, listedTitles(list, 'fr', withDates, 'Note sans titre'));
+    expect(ids(by(false))).toEqual(['Note sans titre', '.⚑Un', 'Note sans titre (2)', '.⚑Deux']);
+    const dated = ids(by(true));
+    expect(dated[0]).toMatch(/2026/);
+    // The bookmarks say which note they are in (the aria label), whatever the notes mode.
+    expect(summaryRows(list, 'Classe', BOOKMARKS_ONLY, listedTitles(list, 'fr', false, 'Note sans titre'))[1].noteName).toBe('Note sans titre (2)');
+  });
+
+  it('follows the binder\'s order: its free order, the others by date, each sub-binder in its own order', () => {
+    const base = [note('a', 'Classe', 1, ['A1']), note('b', 'Classe', 2, ['B1']), note('c', 'Classe', 3, ['C1']), note('d', 'Classe/3e B', 4, ['D1'])];
+    const t = buildBinderTree(['Classe', 'Classe/3e B'], base);
+    const byDate = arrangeByBinderOrder(base, 'Classe', { tree: t, orders: {} }, 'fr');
+    expect(ids(summaryRows(byDate, 'Classe', BOOKMARKS_ONLY, titlesOf(byDate)))).toEqual(['⚑A1', '⚑B1', '⚑C1', '#3e B', '.⚑D1']);
+    const ordered = arrangeByBinderOrder(base, 'Classe', { tree: t, orders: { Classe: ['c', 'b', 'a'] } }, 'fr');
+    expect(ids(summaryRows(ordered, 'Classe', BOOKMARKS_ONLY, titlesOf(ordered)))).toEqual(['⚑C1', '⚑B1', '⚑A1', '#3e B', '.⚑D1']);
+  });
+
+  it('is narrowed by the words typed: any line, with what is above and below it, accents and case ignored', () => {
+    const all = rows(NOTES);
+    expect(filterRows(all, '  ')).toEqual(all);
+    // A bookmark: itself, its note and its sub-binder.
+    expect(ids(filterRows(all, 'OHM'))).toEqual(['#3e B', '.TP', '..⚑Loi d\'Ohm']);
+    expect(ids(filterRows(all, 'zero'))).toEqual(['#3e C', '.Dernier', '..⚑Zéro']);
+    // A note: its bookmarks too.
+    expect(ids(filterRows(all, 'cours'))).toEqual(['Cours', '.⚑Introduction', '.⚑Bilan']);
+    // A sub-binder: everything under it.
+    expect(ids(filterRows(all, 'devoirs'))).toEqual(['#3e B', '.#Devoirs', '..DM']);
+    // Every word on one line.
+    expect(filterRows(all, 'intro bil')).toEqual([]);
+    expect(filterRows(all, 'zzz')).toEqual([]);
   });
 });
 

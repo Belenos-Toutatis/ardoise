@@ -142,10 +142,23 @@ included). An export without the outline, or with one that is not one entry per 
 it is one note's: **a PDF of one note** (the editor's export, the automatic export, the assistant's) takes that note's bookmarks as
 its outline, and has none (the PDF of before) when the note has no bookmark.
 
-**Dates in the names (2026-11-14).** The names of the notes come from the interface (`outline.title`), so the choice « Afficher les
-dates » (`ardoise.binderDates` in the browser's storage, **off by default**, one choice for the summary dialog and the PDF) is made
-there: `listedTitles` names an untitled note by its date, or « Note sans titre » (`editor.untitled`), numbered from the second
-(`(2)`…) over the notes of the list. Rust is unchanged by it. Printing draws no date (`render_note` only), so its dialog has no box.
+**« Dans le sommaire » (2026-11-14).** What a summary holds is three independent choices (`SummaryChoices`: `binders`, `notes`:
+`'title' | 'titleOrDate' | 'none'`, `bookmarks`), the same for the summary dialog (§6), the outline of the binder's PDF and the summary page
+(below): `SummaryChoicesGroup.svelte` in both dialogs, one remembered value (`ardoise.binderSummary` in the browser's storage; the first
+version's `ardoise.binderDates` = `true` is read as `{ binders, titleOrDate, bookmarks }`, `false` as nothing chosen). **Defaults**: sub-binders
+and bookmarks, no note line (a book's contents). A binder with no bookmark would then have an empty summary, so **until the user has
+chosen** (nothing stored) `effectiveChoices` lists its notes by title instead and the group says so; once stored, the choice is taken as it is
+(an empty summary is then explained, not repaired). The names of the notes come from the interface (`outline.title`): `listedTitles` names an
+untitled note by its date (`'titleOrDate'`), or « Note sans titre » (`editor.untitled`), numbered from the second (`(2)`…) over the notes of the
+list. The **structure** is made twice from one rule, in `summaryRows` (`library-logic.ts`, for the dialog) and in `export::outline_with_kinds`
+(Rust, for the outline and the summary page, with `OutlineShape { binders, notes, bookmarks }` sent beside the outline as `shape` of
+`export_notes`; `BinderPdf` bundles outline, shape and summary for `export_with_outline`): for each note in the binder's order, its lines are the note
+line (if asked) and its bookmarks (if asked); a note with no line gives nothing, not even a heading; the sub-binder headings (if asked) come before
+the first line under them; the levels count only the lines shown (without the note lines the bookmarks are one level below the heading, or at the
+top), so there is never an empty level; every bookmark keeps its page and spot. **Empty**: the dialog says why (no note / no bookmark in the binder /
+the choices leave nothing); the export dialog greys the summary page box with a sentence and the PDF has **no outline** (an outline with nothing in
+it is noise), no summary page, its pages as before. A single note's PDF keeps its bookmarks-only outline. Printing draws no summary, so its dialog
+has no choice.
 
 **Summary page (2026-11-14, `ardoise.binderSummaryPage`, off by default).** `export_notes` takes a `summary` (`{ title, outlineTitle }`)
 beside the outline; with a binder's outline the PDF starts with the pages of `crates/ardoise-render/src/summary.rs`

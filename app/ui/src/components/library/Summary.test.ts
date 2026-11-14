@@ -4,6 +4,7 @@
 // order (its free order when it has one; the sub-binders after), a click opens the note at that bookmark, the library's
 // search finds a note by its bookmarks, in French and in English, and the dialog is usable with the keyboard.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { api } from '../../lib/api';
 import { fileName, freshStamp, mockLibrary, notePath, resetMockLibrary, type StoredNote } from '../../lib/mock-data';
 import type { Note, PageObject } from '../../lib/note';
 import { ROOT, renderHome, type Ui } from './library-test-helpers';
@@ -93,28 +94,52 @@ async function openSummary(view: Ui) {
   return view.q('[data-dialog="binder-summary"]')!;
 }
 
-/** The summary as it reads: one line per note (its title) and per bookmark (« - label »). */
+/** The summary as it reads: one line per row, `#` before a sub-binder's name, `⚑` before a bookmark, a dot per level. */
 function lines(dialog: Element): string[] {
-  return [...dialog.querySelectorAll('.summary-note-title, .summary-item')].map((el) =>
-    el.classList.contains('summary-item')
-      ? `- ${el.querySelector('.summary-label')?.textContent?.trim()}`
-      : (el.childNodes[0].textContent ?? '').trim(),
-  );
+  return [...dialog.querySelectorAll<HTMLElement>('[data-row]')].map((el) => {
+    const mark = el.dataset.row === 'binder' ? '#' : el.dataset.row === 'bookmark' ? '⚑' : '';
+    const label = (el.querySelector('.summary-label') ?? el).textContent?.trim();
+    return `${'.'.repeat(Number(el.style.getPropertyValue('--level')))}${mark}${label}`;
+  });
+}
+
+/** Chooses the notes mode (« Titre », « Titre ou date », « Non ») or toggles a box of « Dans le sommaire ». */
+async function choose(view: Ui, dialog: Element, option: string) {
+  await view.click(dialog.querySelector(`input[data-option="${option}"]`));
 }
 
 describe('the summary of a binder', () => {
-  it('lists the bookmarks of the binder\'s notes by date when it has no free order, its sub-binders after', async () => {
+  it('lists the bookmarks under the names of the sub-binders at first, in the binder\'s order (by date without a free order)', async () => {
     seedClasse();
     const view = await render();
     const dialog = await openSummary(view);
     expect(dialog).not.toBeNull();
     expect(view.q('.modal h2')?.textContent).toBe('Sommaire du classeur « Classe »');
-    // Alpha (oldest), then Gamma; Beta has no bookmark and is not listed; the sub-binder's note last. A note's
-    // bookmarks are in reading order (top to bottom), a bookmark on a hidden layer included.
-    expect(lines(dialog)).toEqual(['Alpha', '- Introduction', '- Bilan du chapitre', 'Gamma', '- Corrigé', 'Cours de physique', '- Loi d\'Ohm']);
-    // The sub-binder's note says where it is.
-    expect(dialog.querySelector('[data-note$="physique.ardoise"] .summary-binder, .summary-binder')?.textContent).toBe('3e B');
-    expect(view.q('.binder-summary .muted')?.textContent).toContain('4 signets');
+    // Alpha's two bookmarks in reading order (top to bottom), then Gamma's (on a hidden layer), then the sub-binder's heading
+    // and its note's bookmark. No line per note: Beta has no bookmark and is nowhere.
+    expect(lines(dialog)).toEqual(['⚑Introduction', '⚑Bilan du chapitre', '⚑Corrigé', '#3e B', '.⚑Loi d\'Ohm']);
+    expect(view.q('[data-slot="summary-intro"]')?.textContent).toContain('4 lignes');
+    // The choices: sub-binders and bookmarks, no line per note.
+    expect(dialog.querySelector<HTMLInputElement>('input[data-option="summary-binders"]')!.checked).toBe(true);
+    expect(dialog.querySelector<HTMLInputElement>('input[data-option="summary-notes-none"]')!.checked).toBe(true);
+    expect(dialog.querySelector<HTMLInputElement>('input[data-option="summary-bookmarks"]')!.checked).toBe(true);
+    expect(dialog.querySelector('[data-slot="summary-fallback"]')).toBeNull();
+  });
+
+  it('lists the notes too (title), and without the sub-binders or the bookmarks, as asked', async () => {
+    seedClasse();
+    const view = await render();
+    const dialog = await openSummary(view);
+    await choose(view, dialog, 'summary-notes-title');
+    expect(lines(dialog)).toEqual(['Alpha', '.⚑Introduction', '.⚑Bilan du chapitre', 'Beta', 'Gamma', '.⚑Corrigé', '#3e B', '.Cours de physique', '..⚑Loi d\'Ohm']);
+    // Without the sub-binders: no level for them.
+    await choose(view, dialog, 'summary-binders');
+    expect(lines(dialog)).toEqual(['Alpha', '.⚑Introduction', '.⚑Bilan du chapitre', 'Beta', 'Gamma', '.⚑Corrigé', 'Cours de physique', '.⚑Loi d\'Ohm']);
+    await choose(view, dialog, 'summary-binders');
+    // Without the bookmarks.
+    await choose(view, dialog, 'summary-bookmarks');
+    expect(lines(dialog)).toEqual(['Alpha', 'Beta', 'Gamma', '#3e B', '.Cours de physique']);
+    expect(view.q('[data-slot="summary-intro"]')?.textContent).toContain('4 lignes');
   });
 
   it('follows the free order of the binder, the unlisted notes after by date', async () => {
@@ -122,7 +147,7 @@ describe('the summary of a binder', () => {
     mockLibrary().orders.set('Classe', ['id-Gamma', 'id-Beta']);
     const view = await render();
     const dialog = await openSummary(view);
-    expect(lines(dialog)).toEqual(['Gamma', '- Corrigé', 'Alpha', '- Introduction', '- Bilan du chapitre', 'Cours de physique', '- Loi d\'Ohm']);
+    expect(lines(dialog)).toEqual(['⚑Corrigé', '⚑Introduction', '⚑Bilan du chapitre', '#3e B', '.⚑Loi d\'Ohm']);
   });
 
   it('is also reached by the binder\'s menu in the sidebar', async () => {
@@ -136,38 +161,72 @@ describe('the summary of a binder', () => {
     expect(view.q('[data-dialog="binder-summary"]')).not.toBeNull();
   });
 
-  it('says so when the binder has no bookmark, and closes with its button', async () => {
+  it('lists the notes, and says why, while the binder has no bookmark and nothing was chosen', async () => {
     addNote('Classe', 'Alpha', T0);
-    const view = await render('fr', 4);
-    await view.click(view.q('[data-binder="Classe"]'));
-    await view.click(view.q('[data-action="binder-summary"]'));
+    addNote('Classe', 'Beta', T0 + DAY);
+    const view = await render('fr', 5);
+    const dialog = await openSummary(view);
+    expect(lines(dialog)).toEqual(['Alpha', 'Beta', '#3e B', '.Cours de physique']);
+    expect(dialog.querySelector('[data-slot="summary-fallback"]')?.textContent).toContain("n'a pas de signet");
+    expect(dialog.querySelector<HTMLInputElement>('input[data-option="summary-notes-title"]')!.checked).toBe(true);
+    // Nothing is remembered by looking.
+    expect(localStorage.getItem('ardoise.binderSummary')).toBeNull();
+    // The user's choice wins, even an empty summary: the sentence says what is missing.
+    await choose(view, dialog, 'summary-notes-none');
     expect(view.q('[data-slot="summary-empty"]')?.textContent).toContain('aucun signet');
-    expect(view.q('.summary-item')).toBeNull();
+    expect(dialog.querySelector('[data-slot="summary-fallback"]')).toBeNull();
+    expect(view.q('[data-row]')).toBeNull();
+    await choose(view, dialog, 'summary-bookmarks');
+    expect(view.q('[data-slot="summary-empty"]')?.textContent).toContain('le sommaire est vide');
+    // Back to something.
+    await choose(view, dialog, 'summary-notes-titleOrDate');
+    expect(lines(dialog).length).toBe(4);
     await view.click(view.button('Fermer'));
     expect(view.q('[data-dialog="binder-summary"]')).toBeNull();
   });
 
-  it('names an untitled note « Note sans titre » (numbered when several), or by its date when asked, and remembers the choice', async () => {
+  it('says that a binder without any note has nothing to summarise', async () => {
+    await api.createBinder('Vide');
+    const view = await render('fr', 3);
+    await view.click(view.q('[data-binder="Vide"]'));
+    await view.click(view.q('[data-action="binder-summary"]'));
+    expect(view.q('[data-slot="summary-empty"]')?.textContent).toBe('Ce classeur ne contient aucune note.');
+  });
+
+  it('names an untitled note « Note sans titre » (numbered when several), or by its date, and remembers the choices', async () => {
     addNote('Classe', '', T0, [mark('u-1', 'Un', 100, 100)]);
     addNote('Classe', '', T0 + DAY, [mark('u-2', 'Deux', 100, 100)]);
     addNote('Classe', 'Titrée', T0 + 2 * DAY, [mark('u-3', 'Trois', 100, 100)]);
     const view = await render('fr', 6);
     const dialog = await openSummary(view);
-    const box = dialog.querySelector<HTMLInputElement>('input[data-option="show-dates"]')!;
-    // Off at first: no date in the summary.
-    expect(box.checked).toBe(false);
-    expect(lines(dialog)).toEqual(['Note sans titre', '- Un', 'Note sans titre (2)', '- Deux', 'Titrée', '- Trois']);
-    expect(dialog.querySelector('.summary-item')!.getAttribute('aria-label')).toBe('Ouvrir la note « Note sans titre » au signet « Un »');
+    await choose(view, dialog, 'summary-notes-title');
+    expect(lines(dialog).slice(0, 6)).toEqual(['Note sans titre', '.⚑Un', 'Note sans titre (2)', '.⚑Deux', 'Titrée', '.⚑Trois']);
+    expect(dialog.querySelector('[data-row="bookmark"]')!.getAttribute('aria-label')).toBe('Ouvrir la note « Note sans titre » au signet « Un »');
     // With the dates: the notes are named by theirs.
-    await view.click(box);
+    await choose(view, dialog, 'summary-notes-titleOrDate');
     const named = lines(dialog);
     expect(named[0]).toMatch(/2026/);
     expect(named[0]).not.toContain('Note sans titre');
     expect(named[4]).toBe('Titrée');
+    // Without the notes the bookmarks still say which note they are in (to a screen reader), by title: dates are for the note lines.
+    await choose(view, dialog, 'summary-notes-none');
+    expect(dialog.querySelector('[data-row="bookmark"]')!.getAttribute('aria-label')).toBe('Ouvrir la note « Note sans titre » au signet « Un »');
     // Remembered for the next time (and by the PDF of the binder).
+    await choose(view, dialog, 'summary-binders');
     await view.click(view.button('Fermer'));
     const again = await openSummary(view);
-    expect(again.querySelector<HTMLInputElement>('input[data-option="show-dates"]')!.checked).toBe(true);
+    expect(again.querySelector<HTMLInputElement>('input[data-option="summary-notes-none"]')!.checked).toBe(true);
+    expect(again.querySelector<HTMLInputElement>('input[data-option="summary-binders"]')!.checked).toBe(false);
+    expect(JSON.parse(localStorage.getItem('ardoise.binderSummary')!)).toEqual({ binders: false, notes: 'none', bookmarks: true });
+  });
+
+  it('starts from the first version\'s « dates » box', async () => {
+    localStorage.setItem('ardoise.binderDates', 'true');
+    addNote('Classe', '', T0, [mark('u-1', 'Un', 100, 100)]);
+    const view = await render('fr', 4);
+    const dialog = await openSummary(view);
+    expect(dialog.querySelector<HTMLInputElement>('input[data-option="summary-notes-titleOrDate"]')!.checked).toBe(true);
+    expect(lines(dialog)[0]).toMatch(/2026/);
   });
 
   it('has no button outside a binder', async () => {
@@ -178,19 +237,22 @@ describe('the summary of a binder', () => {
     expect(view.q('[data-action="binder-summary"]')).not.toBeNull();
   });
 
-  it('filters the bookmarks by their words, accents and case ignored, or by a note\'s title', async () => {
+  it('filters the lines by their words, accents and case ignored, with what is above and below them', async () => {
     seedClasse();
     const view = await render();
     const dialog = await openSummary(view);
+    await choose(view, dialog, 'summary-notes-title');
     await view.type(dialog.querySelector('input[type="search"]'), 'CORRIGE');
-    expect(lines(dialog)).toEqual(['Gamma', '- Corrigé']);
+    expect(lines(dialog)).toEqual(['Gamma', '.⚑Corrigé']);
     await view.type(dialog.querySelector('input[type="search"]'), 'alpha');
-    expect(lines(dialog)).toEqual(['Alpha', '- Introduction', '- Bilan du chapitre']);
+    expect(lines(dialog)).toEqual(['Alpha', '.⚑Introduction', '.⚑Bilan du chapitre']);
+    await view.type(dialog.querySelector('input[type="search"]'), '3e b');
+    expect(lines(dialog)).toEqual(['#3e B', '.Cours de physique', '..⚑Loi d\'Ohm']);
     await view.type(dialog.querySelector('input[type="search"]'), 'zzz');
     expect(view.q('[data-slot="summary-none"]')?.textContent).toContain('« zzz »');
   });
 
-  it('is usable with the keyboard: the arrows walk through the bookmarks, Enter opens the note', async () => {
+  it('is usable with the keyboard: the arrows walk through the lines, Escape closes it', async () => {
     seedClasse();
     const view = await render();
     const dialog = await openSummary(view);
@@ -220,6 +282,17 @@ describe('the summary of a binder', () => {
     await vi.waitFor(() => expect(view.q('section.editor')).not.toBeNull());
     await vi.waitFor(() => expect(view.q('g.bookmark[data-bookmark="Corrigé"]')).not.toBeNull());
     await vi.waitFor(() => expect(view.q('[data-section="selection"] .pane-help')?.textContent?.trim()).toBe('Traits sélectionnés : 0 — textes, équations et signets : 1'));
+  });
+
+  it('opens the note itself from a note line: no bookmark is selected', async () => {
+    seedClasse();
+    const view = await render();
+    const dialog = await openSummary(view);
+    await choose(view, dialog, 'summary-notes-title');
+    await view.click(dialog.querySelector('[data-row="note"][data-note$="Beta.ardoise"]'));
+    expect(view.q('[data-dialog="binder-summary"]')).toBeNull();
+    await vi.waitFor(() => expect(view.q('section.editor')).not.toBeNull());
+    expect(view.q('[data-section="selection"]')).toBeNull();
   });
 });
 
@@ -251,9 +324,14 @@ describe('in English', () => {
     await view.click(button);
     expect(view.q('.modal h2')?.textContent).toBe('Summary of the binder "Classe"');
     const dialog = view.q('[data-dialog="binder-summary"]')!;
-    expect(dialog.querySelector('.summary-item')?.getAttribute('aria-label')).toBe('Open the note "Alpha" at the bookmark "Introduction"');
-    expect(dialog.querySelector('.muted')?.textContent).toContain('4 bookmarks in this binder');
+    expect(dialog.querySelector('legend')?.textContent).toBe('In the summary');
+    expect(dialog.textContent).toContain('The sub-binders');
+    expect(dialog.textContent).toContain('Title or date');
+    expect(dialog.querySelector('[data-row="bookmark"]')?.getAttribute('aria-label')).toBe('Open the note "Alpha" at the bookmark "Introduction"');
+    expect(dialog.querySelector('[data-slot="summary-intro"]')?.textContent).toContain('4 lines');
     await view.type(dialog.querySelector('input[type="search"]'), 'zzz');
-    expect(view.q('[data-slot="summary-none"]')?.textContent).toBe('No bookmark matches “zzz”.');
+    expect(view.q('[data-slot="summary-none"]')?.textContent).toBe('No line matches “zzz”.');
+    await choose(view, dialog, 'summary-bookmarks');
+    expect(view.q('[data-slot="summary-empty"]')?.textContent).toContain('With these choices the summary is empty');
   });
 });

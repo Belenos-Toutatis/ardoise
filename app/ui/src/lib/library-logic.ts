@@ -195,41 +195,97 @@ export function arrangeByBinderOrder(
 
 // --- The summary of a binder (SPEC §4.3 « Sommaire du classeur ») ---------------------------------
 
-/** One note of a binder's summary: the note, where it is below the summarised binder, and its bookmarks in reading order. */
-export interface SummaryNote {
-  note: NoteSummary;
-  /** The binders it is in below the summarised one (none for a note of that binder itself). */
-  below: string[];
-  bookmarks: BookmarkRef[];
+/** What a note line of the summary says: the title (« Note sans titre » for an untitled note), the title or the date, or no note line at all. */
+export type SummaryNotes = 'title' | 'titleOrDate' | 'none';
+
+/** « Dans le sommaire »: the three independent choices of a binder's summary, of its PDF's outline and of the PDF's summary page. */
+export interface SummaryChoices {
+  /** The names of the sub-binders, as headings. */
+  binders: boolean;
+  notes: SummaryNotes;
+  bookmarks: boolean;
+}
+
+/** One line of a binder's summary: a sub-binder heading, a note, or one of the bookmarks of a note. */
+export interface SummaryRow {
+  kind: 'binder' | 'note' | 'bookmark';
+  /** How deep it is (0 = the top): only the lines shown count, so there is never an empty level. */
+  level: number;
+  /** What it says: the binder's name, the note's name (`titles`), the bookmark's label. */
+  label: string;
+  /** The note of a note line or of a bookmark, and the name it goes by (its title, its date or « Note sans titre »). */
+  note?: NoteSummary;
+  noteName?: string;
+  bookmark?: BookmarkRef;
 }
 
 /**
- * The summary of `binder`: the notes of `notes` (the binder's notes in its order, those of its sub-binders after, what
- * `LibraryState.binderNotes` gives) that have bookmarks, each with them. The order of the notes is the one given; the
- * bookmarks of a note are in reading order (the listing's).
+ * The summary of `binder` for `choices`, one row per line in the binder's order: `notes` is what `LibraryState.binderNotes`
+ * gives (the binder's notes in its order, those of its sub-binders after), `titles` the name of each by path
+ * (`listedTitles`). A sub-binder heading (the binders below the summarised one, as nested headings) comes before the first
+ * line under it and only if there is one: a note with nothing to show (no note line asked, no bookmark or none asked)
+ * gives nothing, not even its sub-binder's heading. The bookmarks of a note are in reading order (the listing's), one
+ * level below the note's line, or at the level of the note's line when the notes are not shown, so that they stand right
+ * under their sub-binder heading.
  */
-export function binderSummary(notes: NoteSummary[], binder: string): SummaryNote[] {
-  return notes
-    .filter((note) => (note.bookmarks?.length ?? 0) > 0)
-    .map((note) => ({ note, below: binderPathBelow(binder, note.binder), bookmarks: note.bookmarks ?? [] }));
+export function summaryRows(
+  notes: NoteSummary[],
+  binder: string,
+  choices: SummaryChoices,
+  titles: ReadonlyMap<string, string>,
+): SummaryRow[] {
+  const rows: SummaryRow[] = [];
+  let open: string[] = [];
+  for (const note of notes) {
+    const marks = choices.bookmarks ? (note.bookmarks ?? []) : [];
+    const showNote = choices.notes !== 'none';
+    if (!showNote && marks.length === 0) continue;
+    const path = choices.binders ? binderPathBelow(binder, note.binder) : [];
+    let common = 0;
+    while (common < open.length && common < path.length && open[common] === path[common]) common += 1;
+    open = open.slice(0, common);
+    for (let level = common; level < path.length; level++) {
+      rows.push({ kind: 'binder', level, label: path[level] });
+      open.push(path[level]);
+    }
+    const noteName = titles.get(note.path) ?? note.title;
+    let level = path.length;
+    if (showNote) {
+      rows.push({ kind: 'note', level, label: noteName, note, noteName });
+      level += 1;
+    }
+    for (const bookmark of marks) rows.push({ kind: 'bookmark', level, label: bookmark.label, note, noteName, bookmark });
+  }
+  return rows;
 }
 
 /**
- * `summary` narrowed to the bookmarks whose label has every word of `query` (case and accents ignored); a note whose title
- * has them all keeps every bookmark. A blank query keeps everything.
+ * `rows` narrowed to the lines whose label has every word of `query` (case and accents ignored; a note line also by its
+ * real title, not its date), with the headings and the note lines above them and everything below a line that matches (a
+ * binder or a note that matches keeps its bookmarks). A blank query keeps everything.
  */
-export function filterSummary(summary: SummaryNote[], query: string): SummaryNote[] {
+export function filterRows(rows: SummaryRow[], query: string): SummaryRow[] {
   const words = queryWords(query);
-  if (words.length === 0) return summary;
+  if (words.length === 0) return rows;
   const has = (text: string) => {
     const folded = normalize(text);
     return words.every((word) => folded.includes(word));
   };
-  return summary.flatMap((entry) => {
-    if (has(entry.note.title)) return [entry];
-    const bookmarks = entry.bookmarks.filter((b) => has(b.label));
-    return bookmarks.length > 0 ? [{ ...entry, bookmarks }] : [];
+  const keep = rows.map((row) => has(row.label) || (row.kind === 'note' && !!row.note && has(row.note.title)));
+  const matched = [...keep];
+  matched.forEach((hit, index) => {
+    if (!hit) return;
+    // Everything below it, and the lines above it that it is under.
+    for (let below = index + 1; below < rows.length && rows[below].level > rows[index].level; below++) keep[below] = true;
+    let level = rows[index].level;
+    for (let above = index - 1; above >= 0 && level > 0; above--) {
+      if (rows[above].level < level) {
+        keep[above] = true;
+        level = rows[above].level;
+      }
+    }
   });
+  return rows.filter((_, index) => keep[index]);
 }
 
 /** The binders a note is in below the exported binder `binder` (none for a note of that binder itself). */

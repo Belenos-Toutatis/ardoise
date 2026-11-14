@@ -411,6 +411,16 @@ export interface ExportSource {
 }
 
 /**
+ * What the outline of a binder's PDF, and the summary page made of it, hold (« Dans le sommaire »): the names of the
+ * sub-binders as headings, a line per note, the bookmarks of the notes. A PDF sent without it has everything.
+ */
+export interface OutlineShape {
+  binders: boolean;
+  notes: boolean;
+  bookmarks: boolean;
+}
+
+/**
  * The summary pages in front of a binder's PDF (« Ajouter une page de sommaire au début »): the title of the first
  * (the binder's name) and the name of its entry in the PDF's outline. The rows are the notes' bookmarks (`outline`).
  */

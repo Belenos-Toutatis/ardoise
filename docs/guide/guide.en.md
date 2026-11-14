@@ -980,15 +980,25 @@ comes back as soon as you open a binder again.
 
 To find a passage across a whole binder, put **bookmarks** in your notes (see **Putting bookmarks**, in chapter 8): a word or a
 short phrase at the right spot of the page ("Chapter 3", "Answer to exercise 2"). When a binder is shown, the **Summary** button of
-the top bar (or **Binder summary…**, in the binder's **⋯** menu) opens the list of its bookmarks, **note by note, in the binder's
-order** (**Binder order**, above: the one you arranged, otherwise by date, oldest first), the notes of its sub-binders after its
-own. Only the notes that have bookmarks are listed. The **Show dates** box (unchecked at first) decides what an untitled note
-is called: its date, or **Untitled note** (followed by a number when there are several: "Untitled note (2)"). Unchecked, the
-summary reads like a book's, with no time stamp; the choice is remembered, and it is the same for the bookmarks of the binder's
-PDF (see **Exporting or printing a binder**). A click on a bookmark (or `Enter`, after walking through the list with `Tab` or
-the arrows) opens the note **at that spot**: the bookmark is selected and in the middle of the editor. The **Filter the
-bookmarks** field keeps the bookmarks whose text (or whose note's title) holds the words typed. The summary is not shown again when
-you come back from the note; open it again with the same button.
+the top bar (or **Binder summary…**, in the binder's **⋯** menu) opens the binder's summary, **in the binder's order**
+(**Binder order**, above: the one you arranged, otherwise by date, oldest first), the notes of its sub-binders after its own. What it
+holds is set in the **In the summary** group, three independent choices:
+
+- **The sub-binders** (a box, offered when the binder has some): their name, as a heading above what they hold;
+- **The notes**: **Title** (a line per note; an untitled note is called **Untitled note**, followed by a number when there are
+  several: "Untitled note (2)"), **Title or date** (an untitled note carries its date) or **No** (no note line);
+- **The bookmarks** (a box): those of each note, in the order of the page.
+
+At first: the sub-binders and the bookmarks, no line per note, that is a book's contents. The bookmarks then stand right under the
+name of their sub-binder (or at the top, for the notes of the binder itself); a note without a bookmark gives no line, and a
+sub-binder with nothing left has no heading. **A binder with no bookmark at all** would start with an empty summary: until you have
+chosen something, its notes are listed (the window says so); as soon as you choose, your choice is taken as it is, even if it leaves
+nothing (a sentence then says why the summary is empty). Your choices are remembered on this computer, and are the same for the
+bookmarks and the summary page of the binder's PDF (see **Exporting or printing a binder**). The former "Show dates" box is picked
+up: if you had ticked it, the notes are set to **Title or date**. A click on a note line (or `Enter`, after walking through the
+list with `Tab` or the arrows) opens the note; on a bookmark, it opens the note **at that spot**: the bookmark is selected and in
+the middle of the editor. The **Filter the summary** field keeps the lines whose text holds the words typed, with the headings above
+them and what they hold. The summary is not shown again when you come back from the note; open it again with the same button.
 
 ### Duplicating a note, changing its date
 
@@ -1690,19 +1700,20 @@ window reduced to PDF, with the **Include the sub-binders** box (unchecked at fi
 sub-binders); their notes come after the binder's, each sub-binder in its own order. **A binder with no notes of its own**, only
 in its sub-binders, has the box ticked from the start, and the window says so; unticked, there is nothing to export: the
 **Export…** button waits and a sentence says what to tick. A binder with no note at all shows "This binder has no notes." and the
-button stays greyed. The PDF has **bookmarks**: one per note (its title, or its summary name: its date, or **Untitled note**,
-according to the **Show dates** box, unchecked at first), and, with the sub-binders, one per sub-binder that groups the bookmarks of
-its notes; under a note's come the **bookmarks put in that note** (**Bookmark** tool), which lead to their spot on the page; open
-your PDF reader's bookmarks panel to see them.
+button stays greyed. The PDF has **bookmarks** that the **In the summary** group sets (the same three choices as the binder's
+summary, see **The summary of a binder**): the name of the sub-binders, a line per note (its title, or **Untitled note**, or its
+date), and the **bookmarks put in the notes** (**Bookmark** tool), which lead to their spot on the page; open your PDF reader's
+bookmarks panel to see them. Without the notes, the page bookmarks come right under the name of their sub-binder. If the choices
+leave nothing, the PDF has no bookmarks (the sentence "the summary would be empty" says so).
 The **Add a summary page at the start** box (unchecked at first, and remembered) puts a **summary page** at the head of the PDF:
-the binder's name, then the sub-binders, the notes and their bookmarks, with their **page number** and dot leaders, like a book's;
-a long list takes several pages, and the numbers count them. Each line is a **link** to its page, and the PDF has a **Summary**
-bookmark first. The page is A4 portrait if you chose the A4 page, else the size of the first note; it follows the **Show dates** box.
-To have it on paper, print that PDF (**Print the binder…** adds no summary page: the page numbers would mean nothing with several
+the binder's name, then what you chose in **In the summary**, with the **page numbers** and dot leaders, like a book's; a long list
+takes several pages, and the numbers count them. Each line is a **link** to its page (or to the bookmark's spot), and the PDF has a
+**Summary** bookmark first. The page is A4 portrait if you chose the A4 page, else the size of the first note. If the choices leave
+nothing, the box is greyed. To have it on paper, print that PDF (**Print the binder…** adds no summary page: the page numbers would mean nothing with several
 notes to a sheet).
 **Print the binder…** opens the print window with the same notes in the same order, the same **Include the sub-binders** box
 (ticked from the start for a binder with no notes of its own) and the same sentences; the printed page carries no date or bookmark,
-so there is no box for the dates.
+so there is no choice for the summary.
 - *Dragging out of Ardoise*: the handle of a library card drops a *PNG image* of the note into Explorer, onto the
   desktop, into Word, OneNote or an email (one image per note if several are selected). Keep the button pressed while
   the image is prepared.

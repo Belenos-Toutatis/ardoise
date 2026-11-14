@@ -117,18 +117,20 @@
     },
     "summary": {
       "button": "Sommaire",
-      "hint": "Sommaire du classeur : ses signets, note par note, dans l'ordre du classeur",
+      "hint": "Sommaire du classeur : ses sous-classeurs, ses notes et ses signets, au choix, dans l'ordre du classeur",
       "title": "Sommaire du classeur « {name} »",
       "intro": {
-        "one": "1 signet dans ce classeur. Choisissez-le pour ouvrir la note à cet endroit.",
-        "other": "{count} signets dans ce classeur, dans l'ordre du classeur. Choisissez-en un pour ouvrir la note à cet endroit."
+        "one": "1 ligne, dans l'ordre du classeur. Choisissez-la pour ouvrir la note (à l'endroit du signet, pour un signet).",
+        "other": "{count} lignes, dans l'ordre du classeur. Choisissez-en une pour ouvrir la note (à l'endroit du signet, pour un signet)."
       },
-      "empty": "Ce classeur n'a aucun signet. Dans l'éditeur, l'outil Signet pose un mot ou une courte phrase à un endroit de la page.",
-      "filter": "Filtrer les signets",
-      "filterPlaceholder": "Filtrer les signets…",
-      "list": "Signets du classeur",
-      "noMatch": "Aucun signet ne correspond à « {query} ».",
+      "empty": "Ce classeur n'a aucun signet. Dans l'éditeur, l'outil Signet pose un mot ou une courte phrase à un endroit de la page ; ou choisissez d'afficher les notes.",
+      "emptyChoices": "Avec ces choix, le sommaire est vide : choisissez d'afficher les signets ou les notes.",
+      "filter": "Filtrer le sommaire",
+      "filterPlaceholder": "Filtrer le sommaire…",
+      "list": "Sommaire du classeur",
+      "noMatch": "Aucune ligne ne correspond à « {query} ».",
       "open": "Ouvrir la note « {note} » au signet « {label} »",
+      "openNote": "Ouvrir la note « {note} »",
       "close": "Fermer"
     },
     "empty": {
@@ -1570,6 +1572,19 @@
       "deleteFailed": "La narration n'a pas pu être supprimée : {message}"
     }
   },
+  "summaryChoices": {
+    "legend": "Dans le sommaire",
+    "binders": "Les sous-classeurs",
+    "notes": "Les notes",
+    "bookmarks": "Les signets",
+    "notesChoices": {
+      "title": "Titre",
+      "titleOrDate": "Titre ou date",
+      "none": "Non"
+    },
+    "notesHint": "« Titre » : une note sans titre s'appelle « Note sans titre » (suivi d'un numéro s'il y en a plusieurs). « Titre ou date » : elle porte sa date. « Non » : pas de ligne par note.",
+    "noBookmarks": "Ce classeur n'a pas de signet : ses notes sont listées en attendant votre choix."
+  },
   "export": {
     "title": "Exporter",
     "subjectNote": "Note : {title}",
@@ -1581,11 +1596,10 @@
     "binderOnlySub": "Ce classeur n'a pas de note à lui, seulement dans ses sous-classeurs : cochez « Inclure les sous-classeurs » pour exporter celles-ci.",
     "binderOnlySubIncluded": "Ce classeur n'a pas de note à lui : ses notes sont dans ses sous-classeurs, qui sont donc inclus.",
     "summaryPage": "Ajouter une page de sommaire au début",
-    "summaryPageHint": "En tête du PDF : le nom du classeur, puis ses notes et leurs signets avec leur numéro de page, comme dans un livre. Chaque ligne est un lien. Pour l'avoir sur papier, imprimez le PDF.",
+    "summaryPageHint": "En tête du PDF : le nom du classeur, puis ce que vous avez choisi dans le sommaire, avec les numéros de page, comme dans un livre. Chaque ligne est un lien. Pour l'avoir sur papier, imprimez le PDF.",
     "summaryOutline": "Sommaire",
-    "showDates": "Afficher les dates",
-    "showDatesHint": "Sans les dates, une note sans titre s'appelle « Note sans titre » : le sommaire et les signets du PDF se lisent comme ceux d'un livre. Même choix pour le sommaire du classeur.",
-    "binderPdfHint": "Un seul PDF, une page par note ({count} au total), dans l'ordre du classeur. Chaque note est un signet du PDF, rangé sous le nom de son sous-classeur.",
+    "binderPdfHint": "Un seul PDF, une page par note ({count} au total), dans l'ordre du classeur. Ses signets suivent « Dans le sommaire », ci-dessous.",
+    "summaryEmpty": "Avec ces choix, le sommaire serait vide : le PDF n'aurait ni signets ni page de sommaire.",
     "format": "Format",
     "formats": {
       "png": "PNG (image)",

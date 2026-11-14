@@ -14,7 +14,6 @@ import {
   arrangeByBinderOrder,
   binderChain,
   binderPathBelow,
-  binderSummary,
   buildBinderTree,
   displayTitle,
   isInBinder,
@@ -35,7 +34,9 @@ import {
   type MoveStep,
   type OrderChange,
   type SortOrder,
-  type SummaryNote,
+  summaryRows,
+  type SummaryChoices,
+  type SummaryRow,
 } from './library-logic';
 import type { ExportSource, FileStamp, LibraryListing, MergeLayout, NoteSummary, TrashEntry } from './note';
 
@@ -308,9 +309,20 @@ export class LibraryState {
     }));
   }
 
-  /** The names the notes of the summary of `binder` go by, by path (`listedTitles` over every note of the binder and below). */
-  binderTitles(binder: string, withDates: boolean): Map<string, string> {
-    return listedTitles(this.binderNotes(binder, true), currentLocale(), withDates, t('editor.untitled'));
+  /**
+   * The summary of `binder` (SPEC §4.3) for `choices` (« Dans le sommaire »): sub-binder headings, note lines and bookmarks in
+   * the binder's order (`binderNotes`; the sub-binders only when `includeSub`), as `summaryRows` lays them out. A note line
+   * is named by its title, or by its date when `choices.notes` says so and it has no title (« Note sans titre » otherwise).
+   */
+  binderSummaryRows(binder: string, includeSub: boolean, choices: SummaryChoices): SummaryRow[] {
+    const notes = this.binderNotes(binder, includeSub);
+    const titles = listedTitles(notes, currentLocale(), choices.notes === 'titleOrDate', t('editor.untitled'));
+    return summaryRows(notes, binder, choices, titles);
+  }
+
+  /** Whether a note of `binder` (and below it when `includeSub`) has a bookmark: what decides the first summary's defaults. */
+  binderHasBookmarks(binder: string, includeSub: boolean): boolean {
+    return this.binderNotes(binder, includeSub).some((note) => (note.bookmarks?.length ?? 0) > 0);
   }
 
   /**
@@ -619,14 +631,6 @@ export class LibraryState {
       notes.map((note) => ({ path: note.path, title: displayTitle(note, currentLocale()) })),
       t('library.duplicate.word'),
     );
-  }
-
-  /**
-   * The summary of `binder` (SPEC §4.3): its notes that have bookmarks, in the binder's order with those of its sub-binders
-   * after (`binderNotes`), each with its bookmarks in reading order.
-   */
-  binderSummary(binder: string): SummaryNote[] {
-    return binderSummary(this.binderNotes(binder, true), binder);
   }
 
   /** Opens the summary of `binder`. */

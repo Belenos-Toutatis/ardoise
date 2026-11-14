@@ -6,7 +6,7 @@
   import { defaultWindowClose, type WindowClose } from '../lib/editor/window-close';
   import { currentLocale, t } from '../lib/i18n.svelte';
   import { inkspaceOffer } from '../lib/inkspace-offer.svelte';
-  import { displayTitle, type SortOrder } from '../lib/library-logic';
+  import { displayTitle, type SortOrder, type SummaryChoices } from '../lib/library-logic';
   import { LibraryState } from '../lib/library-state.svelte';
   import { isPrintKey } from '../lib/print-key';
   import { share } from '../lib/share-state.svelte';
@@ -73,6 +73,8 @@
       name: binder.split('/').pop() || binder,
       hasSub: lib.hasSubBinders(binder),
       sourcesFor: (includeSub: boolean, withDates: boolean) => lib.binderSources(binder, includeSub, withDates),
+      summaryRows: (includeSub: boolean, choices: SummaryChoices) => lib.binderSummaryRows(binder, includeSub, choices),
+      hasBookmarks: (includeSub: boolean) => lib.binderHasBookmarks(binder, includeSub),
     };
   }
   /** The notes as the library shows them now (binder, tag, search, sort): the editor's page buttons walk through them. */
@@ -184,10 +186,10 @@
   }
 
   /** A bookmark of the binder's summary is chosen: the note opens at it. */
-  function openAtBookmark(note: NoteSummary, bookmark: BookmarkRef) {
+  function openAtBookmark(note: NoteSummary, bookmark?: BookmarkRef) {
     lib.closeSummary();
     leaveLibrary(note.path);
-    openFocus = { id: bookmark.id };
+    openFocus = bookmark ? { id: bookmark.id } : null;
     openPath = note.path;
   }
 

@@ -13,6 +13,7 @@ import type {
   FileStamp,
   MergeLayout,
   Note,
+  OutlineShape,
   PageSize,
   PrintOptions,
   SplitResult,
@@ -81,6 +82,7 @@ export const mockExportRequest = {
     destination: string;
     outline: { path: string[]; title: string }[] | undefined;
     summary: SummaryPage | undefined;
+    shape: OutlineShape | undefined;
   } | null,
 };
 
@@ -233,6 +235,7 @@ export function mockExportInvoke(command: string, args: Record<string, unknown>)
         destination: args.destination as string,
         outline: args.outline as { path: string[]; title: string }[] | undefined,
         summary: args.summary as SummaryPage | undefined,
+        shape: args.shape as OutlineShape | undefined,
       };
       if (isRaster(format)) {
         checkImageSize(

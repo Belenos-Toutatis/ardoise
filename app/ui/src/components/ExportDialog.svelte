@@ -6,7 +6,14 @@
    */
   import { untrack } from 'svelte';
   import { api, errorMessage } from '../lib/api';
-  import { binderContent, loadShowDates, loadSummaryPage, saveShowDates, saveSummaryPage } from '../lib/binder-options';
+  import {
+    binderContent,
+    effectiveChoices,
+    loadSummaryChoices,
+    loadSummaryPage,
+    saveSummaryChoices,
+    saveSummaryPage,
+  } from '../lib/binder-options';
   import { pickExportFile, pickExportFolder } from '../lib/dialogs';
   import {
     DPI_CHOICES,
@@ -20,9 +27,11 @@
     saveChoice,
   } from '../lib/export-options';
   import { t } from '../lib/i18n.svelte';
+  import type { SummaryChoices, SummaryRow } from '../lib/library-logic';
   import type { ExportFormat, ExportOptions, ExportSource, Note } from '../lib/note';
   import { beginWork } from '../lib/work';
   import Modal from './Modal.svelte';
+  import SummaryChoicesGroup from './SummaryChoicesGroup.svelte';
   import TextExportSection from './TextExportSection.svelte';
 
   let {
@@ -40,6 +49,10 @@
       name: string;
       hasSub: boolean;
       sourcesFor: (includeSub: boolean, withDates: boolean) => ExportSource[];
+      /** The lines the summary has for these choices (« Dans le sommaire »): what the outline and the summary page hold. */
+      summaryRows: (includeSub: boolean, choices: SummaryChoices) => SummaryRow[];
+      /** A note has a bookmark (the first summary lists the notes when none has). */
+      hasBookmarks: (includeSub: boolean) => boolean;
     };
     /** What is exported, as a sentence part: the note's title, or "3 notes". */
     subject: string;
@@ -52,11 +65,21 @@
    */
   const content = untrack(() => (binder ? binderContent(binder) : null));
   let includeSub = $state(content?.includeSubAtStart ?? false);
-  /** The dates name the untitled notes in the bookmarks of the PDF (else « Note sans titre »): remembered. */
-  let showDates = $state(loadShowDates());
+  /** What the user chose for the summary (« Dans le sommaire »), remembered; null until they choose. */
+  let stored = $state<SummaryChoices | null>(loadSummaryChoices());
+  const hasBookmarks = $derived(binder ? binder.hasBookmarks(includeSub) : false);
+  const choices = $derived(effectiveChoices(stored, hasBookmarks));
+  /** The notes are listed only because the notes have no bookmark and nothing was chosen. */
+  const fallback = $derived(stored === null && !hasBookmarks);
+  function choose(next: SummaryChoices) {
+    stored = next;
+    saveSummaryChoices(next);
+  }
   /** The PDF of the binder starts with a summary page (the notes and their bookmarks, with their page numbers): remembered. */
   let summaryPage = $state(loadSummaryPage());
-  const sources = $derived(binder ? binder.sourcesFor(includeSub, showDates) : given);
+  const sources = $derived(binder ? binder.sourcesFor(includeSub, choices.notes === 'titleOrDate') : given);
+  /** The choices leave nothing in the summary: no summary page (its box waits), and the PDF has no outline. */
+  const emptySummary = $derived(binder ? binder.summaryRows(includeSub, choices).length === 0 : false);
   /** A binder's dialog with no note to export: the button waits, and a sentence says why. */
   const noNote = $derived(sources.length === 0);
 
@@ -161,11 +184,18 @@
       // PDF (an optional content group, the reader's layers panel opened) because « Separate » was remembered.
       const request: ExportOptions = layerFormat && several ? { ...options, layers: layers[layerFormat] } : { ...options };
       const files = sources.map((source) => ({ ...source }));
-      // The summary pages only for a binder's PDF that asks for them (the other exports keep their four arguments).
-      written =
-        binder && summaryPage
-          ? await api.exportNotes(files, format, request, chosen, { title: binder.name, outlineTitle: t('export.summaryOutline') })
-          : await api.exportNotes(files, format, request, chosen);
+      // A binder's PDF says what its outline and its summary page hold, and asks for the summary page (the other exports
+      // keep their four arguments).
+      written = binder
+        ? await api.exportNotes(
+            files,
+            format,
+            request,
+            chosen,
+            summaryPage && !emptySummary ? { title: binder.name, outlineTitle: t('export.summaryOutline') } : undefined,
+            { binders: choices.binders, notes: choices.notes !== 'none', bookmarks: choices.bookmarks },
+          )
+        : await api.exportNotes(files, format, request, chosen);
       // A binder's PDF keeps what the dialog remembers of the formats (it is not a choice of format).
       if (!binder) saveChoice({ format, options: { ...options }, layers: { ...layers } });
       phase = 'done';
@@ -219,24 +249,20 @@
       {#if !noNote}
         <p class="muted small" data-slot="binder-pdf-hint">{t('export.binderPdfHint', { count: sources.length })}</p>
       {/if}
-      <label class="check" data-slot="show-dates">
-        <input
-          type="checkbox"
-          data-option="show-dates"
-          bind:checked={showDates}
-          onchange={() => saveShowDates(showDates)}
-          disabled={running}
-        />
-        {t('export.showDates')}
-      </label>
-      <p class="muted small">{t('export.showDatesHint')}</p>
+      <SummaryChoicesGroup {choices} binders={includeSub && binder.hasSub} {fallback} disabled={running} onchange={choose} />
+      {#if emptySummary && !noNote}
+        <p class="muted small" role="status" data-slot="summary-empty">{t('export.summaryEmpty')}</p>
+      {/if}
       <label class="check" data-slot="summary-page">
         <input
           type="checkbox"
           data-option="summary-page"
-          bind:checked={summaryPage}
-          onchange={() => saveSummaryPage(summaryPage)}
-          disabled={running}
+          checked={summaryPage && !emptySummary}
+          onchange={(event) => {
+            summaryPage = event.currentTarget.checked;
+            saveSummaryPage(summaryPage);
+          }}
+          disabled={running || emptySummary}
         />
         {t('export.summaryPage')}
       </label>

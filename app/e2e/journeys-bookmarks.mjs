@@ -195,10 +195,11 @@ export const bookmarkJourneys = [
         await app.waitFor(`document.querySelector('[data-dialog="binder-summary"]') !== null`, 'the summary');
         const title = await app.evaluate(`document.querySelector('.modal h2')?.textContent`);
         if (title !== fill(l('library.summary.title'), { name: '3e B' })) throw new Error(`the dialog is titled ${j(title)}`);
+        // « Dans le sommaire » at first: the bookmarks (and the names of sub-binders: this binder has none), no line per note.
         const lines = await app.evaluate(
-          `[...document.querySelectorAll('.summary-note-title, .summary-item')].map((e) => e.classList.contains('summary-item') ? '- ' + e.querySelector('.summary-label').textContent.trim() : e.childNodes[0].textContent.trim())`,
+          `[...document.querySelectorAll('[data-row]')].map((e) => (e.dataset.row === 'bookmark' ? '⚑ ' : e.dataset.row === 'binder' ? '# ' : '') + (e.querySelector('.summary-label') ?? e).textContent.trim())`,
         );
-        if (JSON.stringify(lines) !== j([NOTE, `- ${LABEL}`])) throw new Error(`the summary reads ${j(lines)}`);
+        if (JSON.stringify(lines) !== j([`⚑ ${LABEL}`])) throw new Error(`the summary reads ${j(lines)}`);
         const name = await app.evaluate(`document.querySelector('.summary-item').getAttribute('aria-label')`);
         if (name !== fill(l('library.summary.open'), { note: NOTE, label: LABEL })) throw new Error(`the item is named ${j(name)}`);
       });
