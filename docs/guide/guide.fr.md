@@ -1091,7 +1091,7 @@ de la première note est gardée.
 ### Chercher une note
 
 Tapez dans **Rechercher une note** : Ardoise cherche dans les *titres*, les *étiquettes*, les *textes tapés* (outil
-**Texte**, sur les calques affichés) et l'*écriture manuscrite*, sans tenir compte des accents ni des majuscules. Les notes trouvées grâce à l'écriture sont regroupées
+**Texte**, et le code des équations, sur les calques affichés) et l'*écriture manuscrite*, sans tenir compte des accents ni des majuscules. Les notes trouvées grâce à l'écriture sont regroupées
 sous **Trouvé dans l'écriture manuscrite**. `Ctrl + F` place le curseur dans le champ, `Échap` l'efface.
 
 La recherche dans l'écriture utilise la *reconnaissance d'écriture manuscrite de Windows*, hors connexion, sur ce PC.
@@ -1137,7 +1137,7 @@ modifications, Ardoise demande : **Enregistrer et revenir**, **Revenir sans enre
 rétablir n'ont pas de limite pendant que la note est ouverte.
 
 **La touche `Échap`, par étapes.** Chaque appui fait la plus petite chose qui s'applique : d'abord il abandonne le geste en
-cours (un trait, une forme, un lasso, un déplacement, la question qu'Ardoise pose à l'écran) ; sinon il ferme le panneau ou
+cours (un trait, une forme, un lasso, un déplacement, la question qu'Ardoise pose à l'écran, l'équation en cours d'écriture) ; sinon il ferme le panneau ou
 l'outil ouvert (la découpe, la relecture, le recadrage à la main, le réglage de **Redresser les formes**) ; sinon il enlève
 la sélection ; sinon il **enregistre la note et revient à la bibliothèque**, comme le bouton **Bibliothèque** mais sans poser
 la question des modifications : l'enregistrement est la réponse. Si l'enregistrement échoue (note modifiée ailleurs entre-temps,
@@ -1232,6 +1232,7 @@ La barre d'outils propose les outils suivants (**Outil**) :
 - **Ligne**, **Rectangle**, **Ellipse** : des formes nettes, tracées d'un glissé (voir **Tracer une ligne, un rectangle,
   une ellipse**, plus bas).
 - **Texte** : un cadre où l'on tape au clavier (voir **Taper du texte**, plus bas).
+- **Équation** : une formule ou une équation de chimie écrite en LaTeX (voir **Écrire une équation**, plus bas).
 - **Gomme** : **Traits entiers** ou **Partielle**, avec sa **Taille**. Elle n'efface que sur le calque choisi (voir
   **Calques**).
 - **Sélection** (le lasso) : entourez des traits et des textes du calque choisi pour les sélectionner (un texte est pris quand
@@ -1312,6 +1313,52 @@ le calque choisi et suit son calque. La gomme ne l'efface pas : sélectionnez-le
 relecture et dans les vidéos, au moment où il a été posé, et figure dans tous les exports (images, SVG, PDF, presse-papiers,
 impression, projection, partage sur le réseau ; dans le PDF, il peut être cherché et copié). La recherche de la bibliothèque le
 trouve. L'outil **Texte** n'est pas dans le mode direct, mais une feuille reprise en direct garde ses textes.
+
+### Écrire une équation
+
+L'outil **Équation** (la touche `M`) pose sur la page une formule écrite en LaTeX, en mode mathématique, comme dans un document
+LaTeX entre `$…$` : touchez ou cliquez la page à l'endroit voulu (au stylet, à la souris ou au doigt). Un panneau s'ouvre à côté :
+tapez le code dans **Code LaTeX** ; l'**aperçu** montre au fur et à mesure ce qui sera posé. **Poser** (ou `Entrée`) met
+l'équation sur la page, à l'endroit touché, et la sélectionne ; `Maj + Entrée` commence une nouvelle ligne dans le code ;
+**Annuler** (ou `Échap`, ou un autre outil) ferme le panneau sans rien changer. Tant que l'équation n'est pas posée, la page ne
+change pas ; une fois posée, un seul `Ctrl + Z` la retire. Pendant que vous tapez, les touches vont au code, jamais aux raccourcis
+de l'éditeur. La première fois, l'outil met une seconde à se charger.
+
+Si le code n'est pas correct, l'aperçu le dit avec le message de MathJax (en anglais, par exemple « Missing close brace » pour
+une accolade oubliée) et l'équation ne peut pas être posée : rien n'est corrigé ni deviné à votre place. Ardoise refuse aussi un
+caractère qu'il ne sait pas dessiner (des écritures autres que la latine et la grecque) et les numéros d'équation (`\tag`).
+
+Quelques exemples :
+
+| Vous tapez | Pour |
+|---|---|
+| `v = \dfrac{d}{t}` | une vitesse moyenne (`\dfrac` : une fraction en grand, `\frac` : en petit) |
+| `E_c = \dfrac{1}{2} m v^2` | une énergie cinétique (`_` : indice, `^` : exposant ; `^{-3}` pour plusieurs caractères) |
+| `\vec{F} = m\,\vec{a}` | des vecteurs (`\,` : une petite espace ; `\overrightarrow{AB}` pour une flèche longue) |
+| `\rho = \dfrac{m}{V} = 1{,}0\ \text{g}\cdot\text{cm}^{-3}` | une masse volumique avec son unité (`{,}` : la virgule décimale ; `\text{…}` : des mots droits, accents compris) |
+| `\Delta t`, `\alpha`, `\lambda`, `\Omega` | des lettres grecques |
+| `\ce{2H2 + O2 -> 2H2O}` | une équation de réaction (`\ce{…}` : la chimie, les nombres en indice tout seuls) |
+| `\ce{Cu^2+ + 2e- <=> Cu}` | des ions, des électrons, un équilibre |
+| `\ce{CaCO3 -> CaO + CO2 ^}` | un gaz qui se dégage (`^`), un précipité (`v`) |
+| `\pu{9,81 m/s^2}` | une valeur avec son unité, bien espacée |
+| `20\,\celsius` ou `5\,\ohm` | des degrés Celsius, des ohms |
+| `\begin{cases} x = 1 \\ y = 2 \end{cases}` | un système (`\\` : ligne suivante) |
+
+Pour modifier une équation, touchez-la avec l'outil **Équation**, ou double-cliquez dessus avec l'outil **Sélection** : son code
+revient dans le panneau ; **Mettre à jour** la redessine à la même place (le coin en haut à gauche ne bouge pas). Tant que son
+panneau est ouvert, l'équation reste sélectionnée : les couleurs et les tailles s'y appliquent.
+
+Sous la barre d'outils, avec l'outil **Équation** ou quand des équations sont sélectionnées : la **Taille**, **Petit** (4 mm),
+**Moyen** (6 mm) ou **Grand** (9 mm), la hauteur d'une lettre comme pour un texte de cette taille ; elle s'applique aux
+équations sélectionnées et aux prochaines. La couleur est celle de l'outil.
+
+Une équation vit avec les traits, comme un texte : elle se sélectionne, se déplace, se redimensionne, se duplique, se copie et se
+colle, se supprime, tourne avec la page et suit son calque ; la gomme ne l'efface pas. Elle est dessinée par Ardoise elle-même
+dans tous les exports (images, SVG, PDF vectoriel, vidéos, presse-papiers, impression, projection, partage sur le réseau) et
+apparaît d'un coup dans la relecture, au moment où elle a été posée. La note garde son code : la recherche de la bibliothèque le
+trouve (« H2O » trouve `\ce{2H2 + O2 -> 2H2O}`), l'assistant le lit. Ce n'est pas un LaTeX complet : seulement le mode
+mathématique, la chimie de `\ce` et les commandes courantes (`amsmath`, `\cancel`, `\boxed`, `\celsius`…). L'outil **Équation**
+n'est pas dans le mode direct, mais une feuille reprise en direct garde ses équations.
 
 ### Redresser les formes
 
@@ -1941,10 +1988,10 @@ comparent aux touches que la fenêtre traite vraiment.
 | `Ctrl + A` | Tout sélectionner (les traits et les textes du calque choisi) |
 | `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copier, couper, coller des traits et des textes |
 | `Suppr` ou `Retour arrière` | Supprimer la sélection |
-| `Échap` | Par étapes, un appui par étape : abandonner le geste en cours ou terminer la saisie d'un texte (le texte reste) ; fermer la découpe, la relecture, le recadrage ou le réglage de **Redresser les formes** ; désélectionner ; enregistrer la note et revenir à la bibliothèque (jamais pendant l'enregistrement d'une narration) |
+| `Échap` | Par étapes, un appui par étape : abandonner le geste en cours, terminer la saisie d'un texte (le texte reste) ou abandonner l'équation en cours d'écriture ; fermer la découpe, la relecture, le recadrage ou le réglage de **Redresser les formes** ; désélectionner ; enregistrer la note et revenir à la bibliothèque (jamais pendant l'enregistrement d'une narration) |
 | `Maj`, `Alt` (tenues pendant le tracé d'une forme) | Inverser **Forme régulière** (`Maj`) ou **Depuis le centre** (`Alt`) pour ce tracé |
 | `Alt + ←`, `Alt + →` | **Page précédente**, **Page suivante** (la note d'avant, la note d'après dans la bibliothèque) |
-| `V`, `P`, `E`, `T`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Texte**, **Déplacer la page** |
+| `V`, `P`, `E`, `T`, `M`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Texte**, **Équation**, **Déplacer la page** |
 | `Espace` (maintenu) | Déplacer la page (sauf si un bouton a le focus : `Espace` agit alors sur ce bouton, y compris une icône du rail) |
 | `F` | **Redresser les formes** |
 | `R` | **Relecture** |

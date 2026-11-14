@@ -327,3 +327,17 @@ L'utilisateur a demandé ce qu'on pourrait ajouter à Ardoise, puis a tranché c
 - *Partage sur le réseau* : seuls les textes des calques affichés sont envoyés aux écrans.
 - *« Effacer la page » pendant le direct sur une feuille reprise* : les textes restent (ils font partie de la feuille, comme son papier et son image).
 - *PDF* : le texte est dessiné en contours (identique partout) et doublé d'un texte invisible pour la recherche et le copier-coller ; les caractères hors de l'alphabet latin d'Europe de l'Ouest (grec, symboles) sont dessinés mais pas cherchables.
+
+**Points laissés au développeur pour le point 7 (outil Équation), à confirmer** (conception : `docs/design/equations.md`) :
+
+- *Échap abandonne l'équation en cours d'écriture* (la page ne change pas), alors qu'il termine la saisie d'un texte en le gardant : une équation n'est sur la page qu'une fois posée.
+- *Entrée pose l'équation, Maj + Entrée commence une ligne* dans le code (une équation se tape le plus souvent sur une ligne).
+- *Taille* : les trois tailles du texte (4, 6 et 9 mm, la hauteur d'une lettre comme pour un texte de cette taille), Moyen au départ ; redimensionner avec la sélection donne une taille quelconque, un clic sur une taille la rend.
+- *Style « display » toujours* : fractions en grand, limites au-dessus et en dessous ; pas de style « en ligne ».
+- *Paquets TeX* : amsmath, mhchem (`\ce`, `\pu`), textmacros, gensymb (`\celsius`, `\ohm`, `\micro`), cancel, boldsymbol, upgreek, newcommand. Pas de couleur dans une équation (`\color` n'existe pas : l'équation a la couleur de l'outil), pas de numéros d'équation (`\tag` refusé, avec un message), pas de liens ni de caractères Unicode arbitraires.
+- *Caractères* : lettres latines (accents compris, en droit, gras et italique), grec, symboles et flèches mathématiques ; les autres écritures (cyrillique, hébreu, arabe, grec accentué…) ne sont pas fournies, le panneau dit quel caractère manque. Les ajouter grossirait l'exécutable (de l'ordre de 0,1 à 0,4 Mo compressés par écriture, supposé d'après la taille des fichiers).
+- *Messages d'erreur* : ceux de MathJax, en anglais (« Missing close brace »), précédés de « Code LaTeX incorrect : ».
+- *PDF* : l'équation est dessinée en contours, sans texte invisible (son code LaTeX n'est pas cherchable dans le PDF) ; dans le SVG, le code est le titre du tracé.
+- *Recherche* : le code LaTeX d'une équation est cherché comme un texte tapé (« H2O » trouve `\ce{2H2 + O2 -> 2H2O}`), calques affichés seulement ; l'assistant le lit.
+- *Panneau* : posé à côté de l'endroit touché (en dessous s'il y a la place, sinon au-dessus) ; l'aperçu est dessiné sur la couleur du papier de la note.
+- *Raccourci* : la touche `M` (« maths »).

@@ -1025,8 +1025,8 @@ Give the **Title of the new note** and click **Assemble**. Only the first note's
 
 ### Searching for a note
 
-Type in **Search notes**: Ardoise searches the *titles*, the *tags*, the *typed texts* (**Text** tool, on the layers
-shown) and the *handwriting*, ignoring accents and capital letters. Notes found through the handwriting are grouped under **Found in the handwriting**. `Ctrl + F` puts
+Type in **Search notes**: Ardoise searches the *titles*, the *tags*, the *typed texts* (**Text** tool, and the code of
+the equations, on the layers shown) and the *handwriting*, ignoring accents and capital letters. Notes found through the handwriting are grouped under **Found in the handwriting**. `Ctrl + F` puts
 the cursor in the field, `Esc` clears it.
 
 Searching the handwriting uses *Windows' handwriting recognition*, offline, on this PC. The language module must be
@@ -1069,7 +1069,7 @@ Save*; when you leave with changes, Ardoise asks: **Save and go back**, **Go bac
 and redo have no limit while the note is open.
 
 **The `Esc` key, in steps.** Each press does the smallest thing that applies: first it drops the gesture under way (a
-stroke, a shape, a lasso, a move, a question Ardoise is asking on screen); otherwise it closes the panel or the tool that is
+stroke, a shape, a lasso, a move, a question Ardoise is asking on screen, the equation being written); otherwise it closes the panel or the tool that is
 open (the split, the replay, the manual crop, the setting of **Straighten shapes**); otherwise it clears the selection;
 otherwise it **saves the note and goes back to the library**, like the **Library** button but without asking about the
 changes: the save is the answer. If saving fails (the note was changed elsewhere meanwhile, a full disk), the note stays
@@ -1158,6 +1158,7 @@ The toolbar offers these tools (**Tool**):
 - **Line**, **Rectangle**, **Ellipse**: clean shapes drawn with a drag (see **Drawing a line, a rectangle, an ellipse**,
   below).
 - **Text**: a frame where you type with the keyboard (see **Typing text**, below).
+- **Equation**: a formula or a chemical equation written in LaTeX (see **Writing an equation**, below).
 - **Eraser**: **Whole strokes** or **Partial**, with its **Size**. It erases only on the chosen layer (see **Layers**).
 - **Select** (the lasso): draw around strokes and texts of the chosen layer to select them (a text is taken when its middle
   is in the lasso; a click on a text takes it alone); `Shift` + lasso adds, `Ctrl` + lasso removes. The
@@ -1231,6 +1232,51 @@ follows its layer. The eraser does not erase it: select it and delete it. It app
 the moment it was put down, and is in every export (images, SVG, PDF, clipboard, printing, projection, network share; in the
 PDF it can be searched and copied). The library's search finds it. The **Text** tool is not in live mode, but a sheet resumed
 in live mode keeps its texts.
+
+### Writing an equation
+
+The **Equation** tool (the `M` key) puts on the page a formula written in LaTeX, in math mode, as between `$…$` in a LaTeX
+document: tap or click the page where you want it (with the pen, the mouse or a finger). A panel opens next to it: type the
+code in **LaTeX code**; the **preview** shows, as you type, what will be placed. **Place** (or `Enter`) puts the equation on the
+page, where you tapped, and selects it; `Shift + Enter` starts a new line in the code; **Cancel** (or `Esc`, or another tool)
+closes the panel without changing anything. Until the equation is placed, the page does not change; once placed, one
+`Ctrl + Z` takes it away. While you type, the keys go to the code, never to the editor's shortcuts. The first time, the tool
+takes a second to load.
+
+If the code is not correct, the preview says so with MathJax's message (for example "Missing close brace" for a forgotten
+brace) and the equation cannot be placed: nothing is corrected or guessed for you. Ardoise also refuses a character it cannot
+draw (scripts other than Latin and Greek) and equation numbers (`\tag`).
+
+A few examples:
+
+| You type | For |
+|---|---|
+| `v = \dfrac{d}{t}` | an average speed (`\dfrac`: a large fraction, `\frac`: a small one) |
+| `E_c = \dfrac{1}{2} m v^2` | a kinetic energy (`_`: subscript, `^`: superscript; `^{-3}` for several characters) |
+| `\vec{F} = m\,\vec{a}` | vectors (`\,`: a thin space; `\overrightarrow{AB}` for a long arrow) |
+| `\rho = \dfrac{m}{V} = 1.0\ \text{g}\cdot\text{cm}^{-3}` | a density with its unit (`\text{…}`: upright words, accents included) |
+| `\Delta t`, `\alpha`, `\lambda`, `\Omega` | Greek letters |
+| `\ce{2H2 + O2 -> 2H2O}` | a reaction (`\ce{…}`: chemistry, the numbers subscripted by themselves) |
+| `\ce{Cu^2+ + 2e- <=> Cu}` | ions, electrons, an equilibrium |
+| `\ce{CaCO3 -> CaO + CO2 ^}` | a gas given off (`^`), a precipitate (`v`) |
+| `\pu{9.81 m/s^2}` | a value with its unit, well spaced |
+| `20\,\celsius` or `5\,\ohm` | degrees Celsius, ohms |
+| `\begin{cases} x = 1 \\ y = 2 \end{cases}` | a system (`\\`: next line) |
+
+To change an equation, tap it with the **Equation** tool, or double-click it with the **Select** tool: its code comes back in
+the panel; **Update** draws it again in the same place (its top-left corner does not move). While its panel is open, the
+equation stays selected: the colours and the sizes apply to it.
+
+Under the toolbar, with the **Equation** tool or when equations are selected: the **Size**, **Small** (4 mm), **Medium** (6 mm)
+or **Large** (9 mm), the height of a letter as for a text of that size; it applies to the selected equations and to the next
+ones. The colour is the tool's.
+
+An equation lives with the strokes, like a text: it is selected, moved, resized, duplicated, copied and pasted, deleted, turned
+with the page and follows its layer; the eraser does not erase it. Ardoise draws it itself in every export (images, SVG, vector
+PDF, videos, clipboard, printing, projection, network share), and it appears at once in the replay, at the moment it was
+placed. The note keeps its code: the library's search finds it ("H2O" finds `\ce{2H2 + O2 -> 2H2O}`), the assistant reads it.
+This is not full LaTeX: only math mode, `\ce` chemistry and the common commands (`amsmath`, `\cancel`, `\boxed`,
+`\celsius`…). The **Equation** tool is not in live mode, but a sheet resumed in live mode keeps its equations.
 
 ### Straightening shapes
 
@@ -1832,10 +1878,10 @@ These shortcuts do nothing while you are typing in a text field, except those of
 | `Ctrl + A` | Select everything (the chosen layer's strokes and texts) |
 | `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copy, cut, paste strokes and texts |
 | `Delete` or `Backspace` | Delete the selection |
-| `Esc` | In steps, one press per step: drop the gesture under way or end the typing of a text (the text stays); close the split, the replay, the crop or the **Straighten shapes** setting; deselect; save the note and go back to the library (never while a narration is being recorded) |
+| `Esc` | In steps, one press per step: drop the gesture under way, end the typing of a text (the text stays) or drop the equation being written; close the split, the replay, the crop or the **Straighten shapes** setting; deselect; save the note and go back to the library (never while a narration is being recorded) |
 | `Shift`, `Alt` (held while drawing a shape) | Invert **Regular shape** (`Shift`) or **From the centre** (`Alt`) for that stroke |
 | `Alt + ←`, `Alt + →` | **Previous page**, **Next page** (the note before, the note after in the library) |
-| `V`, `P`, `E`, `T`, `H` | Tools **Select**, **Pen**, **Eraser**, **Text**, **Move the page** |
+| `V`, `P`, `E`, `T`, `M`, `H` | Tools **Select**, **Pen**, **Eraser**, **Text**, **Equation**, **Move the page** |
 | `Space` (held) | Move the page (unless a button has the focus: `Space` then works that button, a rail icon included) |
 | `F` | **Straighten shapes** |
 | `R` | **Replay** |

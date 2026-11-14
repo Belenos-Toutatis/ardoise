@@ -1,9 +1,10 @@
 # The `.ardoise` file format
 
 > Developer document, written in English (the planning documents are in French). It describes format
-> **version 1.4** byte by byte (1.1 = 1.0 plus the optional `favorite` field; 1.2 = 1.1 plus the optional
+> **version 1.5** byte by byte (1.1 = 1.0 plus the optional `favorite` field; 1.2 = 1.1 plus the optional
 > `backgroundImage` field and `original.ardoise` member; 1.3 = 1.2 plus the optional `revision.json` member; 1.4 = 1.3
-> plus the optional `objects` field, the page objects such as text frames, §2.2). Requirements: SPEC §3.3 and §3.4. Code:
+> plus the optional `objects` field, the page objects such as text frames, §2.2; 1.5 = 1.4 plus page objects of kind
+> `equation`, §2.3). Requirements: SPEC §3.3 and §3.4. Code:
 > `crates/ardoise-core/src/format.rs` (container, `note.json`), `crates/ardoise-core/src/objects.rs` (page objects) and
 > `crates/ardoise-core/src/format/strokes.rs` (`strokes.bin`). Model: `note.rs` (`ardoise-core`) and `model.rs`
 > (`ardoise-ink`). Committed sample files: `testdata/format/v1/`.
@@ -96,7 +97,7 @@ alphabetical order; **key order and whitespace are not significant**.
 | `tags` | array of strings | tags, in the user's order. |
 | `favorite` | boolean, optional (1.1) | `true` when the note is a favourite; absent otherwise. Absent in 1.0 files: not a favourite. |
 | `layers` | array of `{"name": string, "visible": boolean}` | at least one; strokes refer to layers by index (0 = first). |
-| `objects` | array, optional (1.4) | what the page holds besides its strokes: text frames today (§2.2); absent when there is none. |
+| `objects` | array, optional (1.4) | what the page holds besides its strokes: text frames (§2.2), equations (1.5, §2.3); absent when there is none. |
 | `timing` | `"recorded"` or `"synthesized"` | whether point times were measured or made up (imported notes without timing). |
 | `origin` | `{"kind": "tablet"}`, `{"kind": "live"}`, `{"kind": "ardoise"}` or `{"kind": "inkspace", "id": string}` | where the note comes from (`id` = Inkspace's note UUID). |
 | `boardPosition` | `"buttonsBottom"`, `"buttonsTop"`, `"buttonsRight"` or `"buttonsLeft"`, optional | for a note made from a page of the Xiaomi blackboard (its `original.bin`): how the blackboard was held, i.e. how the page's points were turned to make the note (docs/design/blackboard.md, « Positions, the Rust side »). Absent: `buttonsBottom` (notes made before 2026-11). Not a key of the format's model: `ardoise-device` writes and reads it, and every reader, of any 1.x version, keeps it verbatim as an unknown key; it describes `original.bin`, which no edit changes, so it stays true after an older version edited the note. |
@@ -125,8 +126,8 @@ that does not exist. Writers refuse to write such a note.
 
 ### 2.2 Page objects (`objects`, 1.4)
 
-What a page holds besides its strokes: **text frames** (SPEC §4.4, « Texte tapé au clavier »), and later other kinds
-(equations, bookmarks: `docs/design/page-objects.md`, which also says how to add a kind). Each element of the array is one
+What a page holds besides its strokes: **text frames** (SPEC §4.4, « Texte tapé au clavier »), **equations** (1.5, §2.3),
+and later other kinds (bookmarks: `docs/design/page-objects.md`, which also says how to add a kind). Each element of the array is one
 flat JSON object: the **placement**, the same for every kind, and the keys of its **kind**.
 
 ```json
@@ -144,7 +145,7 @@ Placement (every kind):
 
 | Key | Type | Meaning |
 |---|---|---|
-| `kind` | string, not empty | the kind: `"text"` in 1.4. |
+| `kind` | string, not empty | the kind: `"text"` in 1.4, `"equation"` in 1.5. |
 | `id` | string | unique within the note, kept by every operation that keeps the object (a reader gives a new one to an object without id, or with the id of an earlier one: `<id>-2`, `object-2`…). |
 | `layer` | integer ≥ 0 | index into `layers`: the object is drawn with its layer, **above the strokes of that layer**, objects in array order. A reader puts an object on a missing layer on the last one (a reader before 1.4 may have merged layers without knowing objects). |
 | `t` | integer ≥ 0 | milliseconds since `created` (like a point's `t`): when the replay shows the object, all at once. |
@@ -192,6 +193,45 @@ Rules for readers and writers:
 A reader of 1.3 or older keeps `objects` verbatim (an unknown top-level key) but neither draws nor moves the objects: a note
 whose page such a version turned or cropped has its objects misplaced, and one whose layers it merged may have them on the
 wrong layer (a 1.4 reader moves an object of a missing layer to the last one).
+
+### 2.3 Equations (`"kind": "equation"`, 1.5)
+
+An equation (SPEC §4.4 « Équation », `docs/design/equations.md`): the LaTeX source the user typed and the drawing MathJax
+made of it in the editor, kept as filled outlines, so that every reader draws it without MathJax. Its content's units are
+**1/1000 em** of its type (MathJax's), y down, origin at the top-left corner of its drawing; the placement's `scale` is the em
+on the page divided by 1000 (the tool's sizes 4, 6 and 9 mm give 0.4, 0.6 and 0.9).
+
+```json
+{
+  "kind": "equation", "id": "9b2f…", "layer": 0, "t": 1200,
+  "x": 1500.0, "y": 2500.0, "scale": 0.6, "quarterTurns": 0, "width": 7811.3, "height": 862.4,
+  "latex": "\\ce{2H2 + O2 -> 2H2O}",
+  "path": "M218.4 641.2C…ZM…Z",
+  "color": { "r": 26, "g": 58, "b": 138, "a": 255 }
+}
+```
+
+| Key | Type | Meaning |
+|---|---|---|
+| `latex` | string, at most 4000 characters (Unicode scalar values) | the source, in TeX's math mode; kept to be edited again, never read to draw. |
+| `path` | string, at most 262 144 bytes | the drawing: SVG path data (below), filled with the non-zero rule. |
+| `color` | `{"r", "g", "b", "a"}` (u8 each) | colour of the whole drawing, straight alpha. |
+
+The path data's grammar is a strict subset of SVG's, ASCII only: commands `M`, `L`, `Q`, `C` (absolute, upper case) and `Z`;
+`M` first, and only `M` after a `Z`; a command may be followed by further groups of numbers (an `M` by line ends, as in SVG);
+numbers `[-+]?(digits(.digits?)?|.digits)` without exponent, separated by white space or commas, each coordinate within
+±1 000 000; nothing else. Writers write one `M` … `Z` contour after another, numbers with at most one decimal (`M218.4
+641.2C…Z`), the drawing moved so that the smallest x and y of its points (control points included) are 0.
+
+`width` and `height` are measured from the drawing: from the origin to the largest x and y of its points, control points
+included. A reader measures them again; they are there for the readers that do not know the kind.
+
+An equation this version cannot read — a `latex` or `path` that is missing, not a string or beyond its limit, path data
+outside the grammar, a `color` missing or of a wrong type — is kept with all its keys and drawn nowhere, like an unknown kind (§2.2). So a
+hostile `note.json` costs at most one linear pass over a quarter of a megabyte per equation; nothing in it ever reaches a
+renderer. Writers refuse (the note is not written) an equation they could not read back.
+
+A reader of 1.4 keeps equations as objects of a kind it does not know: moved with the page, drawn nowhere.
 
 ## 3. `strokes.bin`
 

@@ -9,18 +9,20 @@
 ## 1. What a page object is
 
 A note's page held strokes only. It now holds **page objects** too (`Note.objects`, format 1.4): things placed on the page that
-are not ink. Text frames are the first kind; equations (an object that keeps its LaTeX source and the vector drawing made from
-it) and bookmarks (a short label at a point, shown in the editor only) are planned as the next two kinds. The layer was designed
-so that they are added as kinds, not as new mechanisms (§6).
+are not ink. Text frames are the first kind; equations (format 1.5: an object that keeps its LaTeX source and the vector drawing
+made from it, `docs/design/equations.md`) the second; bookmarks (a short label at a point, shown in the editor only) are
+planned as the next. The layer was designed so that they are added as kinds, not as new mechanisms (§6).
 
 Every object is two parts:
 
 - **The placement**, the same for every kind: `id`, `layer`, `t`, `x`, `y`, `scale`, `quarterTurns`, `width`, `height`. The
   content of an object is drawn in its own coordinates (origin at the top-left corner of its content, y down, its own units) and
   put on the page by `page = (x, y) + turn(scale × (u, v))`. `width` × `height` is the content's box.
-- **The body**, the keys of its kind (`kind` names it). Rust: `ObjectBody::Text(TextBody)`, or `ObjectBody::Unknown { kind,
-  fields }` for a kind this version does not know (or a known kind with a value it does not know, such as a font of a later
-  version). TS: `PageObject` (placement plus any keys) and `TextObject` with its guard `isTextObject`.
+- **The body**, the keys of its kind (`kind` names it). Rust: `ObjectBody::Text(TextBody)`, `ObjectBody::Equation(EquationBody)`,
+  or `ObjectBody::Unknown { kind, fields }` for a kind this version does not know (or a known kind with a value it does not
+  know, such as a font of a later version). `ObjectBody::outline` gives what every output draws of a body, `is_drawn` whether it
+  draws. TS: `PageObject` (placement plus any keys), `TextObject` and `EquationObject` with their guards `isTextObject` and
+  `isEquationObject`, and `isDrawnObject` for both.
 
 Why a placement common to every kind: **every operation that rewrites a page moves objects through the placement alone**. A
 turn, a crop, a resize of the page, a move or a resize of the selection, a merge, a split, never need to know what an object
@@ -74,7 +76,10 @@ Rule: nothing that rewrites a note may drop an object; wherever strokes move wit
   frame object. The live renderer (live control window and projector on a resumed sheet, the editor's projection window, the
   share's viewers) draws them on its cache with a 2D context; a stroke appended under a frame, or a repaint that would cross one,
   redraws the whole cache instead.
-- **Network share**: only text frames of visible layers are sent (`share/page.rs`), keys of later versions stripped.
+- **Network share**: only text frames and equations of visible layers are sent (`share/page.rs`), keys of later versions
+  stripped.
+- **Equations** are drawn by the same code from the outline they store (`ObjectBody::outline`; `equations.md` §1): no
+  MathJax outside the editor's equation tool.
 - **Projection feed**: a change of objects sends the whole page again (`projection-feed.ts` `sameLayout`).
 
 ## 4. Text frames
@@ -148,10 +153,10 @@ The equation and bookmark lots plug in here. For a kind `k`:
 
 Notes for the two planned kinds:
 
-- **Equation**: keep the LaTeX source and the drawing made from it by MathJax in the interface (SVG path data in its own
-  units, with its box), so that Rust draws it like a text frame's glyphs without running MathJax; `scale` resizes it; a double
-  click reopens the source. Its paths may be large: if `note.json` would grow too much, they can go to a member
-  (`objects/<id>.svg`) referenced by the object, a new optional member being a minor version too.
+- **Equation** (done, format 1.5: `docs/design/equations.md`): the LaTeX source and the drawing made from it by MathJax in the
+  interface (path data in 1/1000 em, its box measured from it), drawn by Rust like a text frame's glyphs without MathJax;
+  `scale` is its size; a double click reopens the source. The drawing stays in `note.json` (at most 256 KiB each); a member of
+  its own (`objects/<id>.svg`) remains possible later, as another minor version.
 - **Bookmark**: a label at a point (`width`/`height` the label's box on screen, `scale` 1, its point the origin); drawn in the
   editor only, never in image or video exports nor the replay's clock; a PDF of a binder makes them PDF bookmarks; the listing
   gives them to the binder's table of contents (no note to open), as it gives the typed text.
