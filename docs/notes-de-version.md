@@ -1,6 +1,6 @@
 # Notes de version — Ardoise 0.1.0
 
-<!-- Texte de la page de publication GitHub : copier ce qui est entre « DÉBUT RELEASE-FR » et « FIN RELEASE-EN », puis remplacer chaque lien relatif par l'adresse complète du fichier dans le dépôt, à l'étiquette v0.1.0. La ligne marquée GUIDE-F1 (une par langue) est à retirer si le bouton Guide n'est pas fusionné. -->
+<!-- Texte de la page de publication GitHub : copier ce qui est entre « DÉBUT RELEASE-FR » et « FIN RELEASE-EN », puis remplacer chaque lien relatif par l'adresse complète du fichier dans le dépôt, à l'étiquette v0.1.0. -->
 
 <!-- DÉBUT RELEASE-FR -->
 **Ardoise** est une application portable pour Windows qui remplace Wacom Inkspace pour la tablette **Bamboo Slate** et lit aussi la tablette **Xiaomi Mijia « petit tableau noir »** (13,5 pouces, version à mémoire). Elle récupère les pages écrites sur la tablette, laisse écrire en direct à l'écran et au vidéoprojecteur, range les notes dans le dossier de votre choix (par exemple synchronisé par Nextcloud) et permet de les modifier, rejouer, exporter et imprimer, hors connexion, sans compte, avec un seul fichier : `ardoise.exe`.
@@ -23,7 +23,7 @@
 
 - Windows 11, sans droits d'administrateur. Décompressez `ardoise-0.1.0-windows-x64.zip` où vous voulez et lancez `ardoise.exe`. **L'exécutable n'est pas signé** : Windows peut afficher « Windows a protégé votre ordinateur » ; cliquez sur *Informations complémentaires*, puis *Exécuter quand même*. Un PC géré peut refuser de le lancer.
 - Le guide d'utilisation (illustré, avec une section « Premiers pas ») est dans l'archive, dossier `guide\`, à ouvrir dans un navigateur ; le dépôt le contient aussi : [français](guide/guide.fr.md), [English](guide/guide.en.md).
-- Le bouton **Guide** (touche `F1`) ouvre ce guide depuis Ardoise. <!-- GUIDE-F1 : retirer cette ligne si le bouton Guide n'est pas fusionné -->
+- Le bouton **Guide** (touche `F1`) ouvre ce guide depuis Ardoise.
 - Logiciel libre, licence GPL-3.0 ou ultérieure. [Les notes complètes](#ce-que-fait-cette-version) disent ce qui est vérifié, ce qui reste à essayer et les limites connues.
 <!-- FIN RELEASE-FR -->
 
@@ -34,7 +34,7 @@
 - **Tested how**: by hand with a real Bamboo Slate A4 (sync, live mode, projector, network sharing, correcting with a Surface pen, sound while writing); only first trials with the real Xiaomi tablet (13 November 2026), its test procedure is not finished; everything else by automated tests on Windows, on the real executable, in French and English, with simulated tablets. Never tried by hand: printing on a real printer, a Word export opened in Word, a PDF's outline and links in a PDF reader, an Inkspace import with Inkspace open, a Windows logoff with unsaved work. Windows 10 not tried.
 - **Start**: Windows 11, no administrator rights. Unzip `ardoise-0.1.0-windows-x64.zip` anywhere and run `ardoise.exe`. **It is not signed**: Windows may show "Windows protected your PC"; click *More info*, then *Run anyway*. A managed PC may refuse to run it.
 - **Guide**: the illustrated user guide (with a "Getting started" section) is in the archive, `guide\` folder, to open in a browser; it is also in the repository: [French](guide/guide.fr.md), [English](guide/guide.en.md).
-- The **Guide** button (`F1` key) opens this guide from Ardoise. <!-- GUIDE-F1 : remove this line if the Guide button is not merged -->
+- The **Guide** button (`F1` key) opens this guide from Ardoise.
 - Free software, GPL-3.0-or-later licence. [The full notes](#what-this-version-does) (French, with an English section) say what is checked, what is still to be tried and the known limits.
 <!-- FIN RELEASE-EN -->
 
@@ -101,7 +101,7 @@ Version 0.1.0, première version d'Ardoise. Date de publication : à publier. Ce
 - Interface en français et en anglais, thèmes clair et sombre, application portable (un exécutable, réglages à côté), aucun droit d'administrateur, aucun compte, aucune connexion sauf le téléchargement facultatif d'OpenH264 et le partage sur le réseau local lancé à la main.
 - **Clic droit** : des menus d'Ardoise là où on les attend (cartes, classeurs, étiquettes, corbeille, calques, page de l'éditeur), jamais le menu d'une page web ; les raccourcis d'un navigateur (`F5`, `Ctrl + R`, `F12`…) sont désactivés.
 - **Archive de distribution** : un dossier `ardoise-<version>` avec `ardoise.exe`, `LICENSE`, `THIRD-PARTY-NOTICES`, `LISEZMOI.txt` et les guides en pages HTML (`guide\`), en français et en anglais, illustrés de captures et avec une section « Premiers pas ». Écran **À propos** (version, licence, crédits, composants).
-- Le bouton **Guide** (touche `F1`) ouvre le guide d'utilisation depuis Ardoise. <!-- GUIDE-F1 : retirer cette ligne si le bouton Guide n'est pas fusionné -->
+- Le bouton **Guide** (touche `F1`) ouvre le guide d'utilisation depuis Ardoise.
 - Une seule fenêtre par exemplaire d'Ardoise : un second lancement ramène la fenêtre ouverte au premier plan ; deux exemplaires dans deux dossiers fonctionnent côte à côte.
 - Logiciel libre, licence GPL-3.0 ou ultérieure. Crédits : le projet Tuhi (documentation du protocole Wacom), MathJax (Apache 2.0), les polices Latin Modern et Andika, OpenH264 de Cisco (jamais fourni : téléchargé par vous, si besoin).
 - Format de fichier des notes : version 1.6 (les versions précédentes sont lues ; une version plus ancienne d'Ardoise garde les textes, équations et signets d'une note sans les dessiner).
@@ -237,7 +237,7 @@ Version 0.1.0, the first version of Ardoise. Publication date: to be published. 
 - French and English interface, light and dark themes, portable application (one executable, settings next to it), no administrator rights, no account, no connection except the optional OpenH264 download and the local network share started by hand.
 - **Right-click**: Ardoise's own menus where you expect them (cards, binders, tags, trash, layers, the editor's page), never a web page's menu; a browser's shortcuts (`F5`, `Ctrl + R`, `F12`…) are turned off.
 - **Distribution archive**: an `ardoise-<version>` folder with `ardoise.exe`, `LICENSE`, `THIRD-PARTY-NOTICES`, `LISEZMOI.txt` and the guides as HTML pages (`guide\`), in French and English, illustrated with screenshots and with a "Getting started" section. An **About** screen (version, licence, credits, components).
-- The **Guide** button (`F1` key) opens the user guide from Ardoise. <!-- GUIDE-F1 : remove this line if the Guide button is not merged -->
+- The **Guide** button (`F1` key) opens the user guide from Ardoise.
 - One window per copy of Ardoise: a second launch brings the open window to the front; two copies in two folders run side by side.
 - Free software, GPL-3.0-or-later licence. Credits: the Tuhi project (documentation of the Wacom protocol), MathJax (Apache 2.0), the Latin Modern and Andika fonts, Cisco's OpenH264 (never shipped: downloaded by you, if needed).
 - Note file format: version 1.6 (earlier versions are read; an older version of Ardoise keeps a note's texts, equations and bookmarks without drawing them).
