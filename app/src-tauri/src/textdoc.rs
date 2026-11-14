@@ -833,6 +833,7 @@ mod tests {
                 bold: true,
                 size: 900.0,
                 color: Rgba::BLACK,
+                wrap_width: None,
             },
         )];
         // What the crop is taken from: the strokes asked for, no object.

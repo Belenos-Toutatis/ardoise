@@ -61,6 +61,7 @@ fn body(text: &str, font: FontFamily, bold: bool, size: f32, color: Rgba) -> Tex
         bold,
         size,
         color,
+        wrap_width: None,
     }
 }
 
@@ -320,6 +321,7 @@ fn objects_go_over_their_layers_strokes_and_under_the_layers_above() {
         family: FontFamily::Andika,
         bold: true,
         size: 1800.0,
+        wrap: None,
     };
     let text = |id, layer, color| {
         frame(
@@ -817,6 +819,7 @@ fn the_pdf_paints_frames_as_curves_and_carries_their_words() {
                 family,
                 bold: false,
                 size: 1000.0,
+                wrap: None,
             },
         )
         .width

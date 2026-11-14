@@ -4,22 +4,27 @@
 //!
 //! Protocol, for one text:
 //! 1. `text_alloc(n)` reserves `n` bytes, where the caller writes the text in UTF-8.
-//! 2. `text_layout(ptr, n, family, bold, size)` returns the number of f32 values of the layout, at
-//!    `text_layout_result()` until the next call: `[width, height, line height, ascent, descent,
-//!    line count, then for each line: top, baseline, width, start, end, glyph count, then for each
-//!    glyph: x, advance, index]` (start, end and index: UTF-16 offsets in the text).
-//! 3. `text_path(ptr, n, family, bold, size)` returns the length in bytes of the SVG path data of
-//!    its glyphs (UTF-8, at `text_path_result()` until the next call), in the text's own
+//! 2. `text_layout(ptr, n, family, bold, size, wrap)` returns the number of f32 values of the
+//!    layout, at `text_layout_result()` until the next call: `[width, height, line height, ascent,
+//!    descent, line count, then for each line: top, baseline, width, start, end, wrapped (0 or 1),
+//!    glyph count, then for each glyph: x, advance, index, flags]` (start, end and index: UTF-16
+//!    offsets in the text; flags: 1 when no face has the character, drawn as a white square).
+//! 3. `text_path(ptr, n, family, bold, size, wrap)` returns the length in bytes of the SVG path
+//!    data of its glyphs (UTF-8, at `text_path_result()` until the next call), in the text's own
 //!    coordinates (origin top-left, y down), to fill with the non-zero rule.
 //! 4. `text_free(ptr, n)` releases the bytes.
 //!
 //! Family codes: `FontFamily::code` (0 Latin Modern, 1 Andika; an unknown code means Latin
-//! Modern); `bold` is 0 or 1. `text_font(family, bold)` and `text_font_len(family, bold)` give the
-//! bytes of the font file.
+//! Modern); `bold` is 0 or 1; `wrap` is the wrap width in the text's units, 0 (or anything not
+//! positive) for none. `text_font(face)` and `text_font_len(face)` give the bytes of the font file
+//! of `FontFace::code` `face` (0 to `text_font_count() - 1`: Latin Modern regular and bold, Andika
+//! regular and bold, Latin Modern Math).
 
 use std::cell::RefCell;
 
-use ardoise_text::{FontFamily, TextStyle, font_file, layout, text_outline};
+use ardoise_text::{
+    FONT_FILES, FontFace, FontFamily, GlyphLook, TextStyle, font_file, layout, text_outline,
+};
 
 thread_local! {
     static LAYOUT: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
@@ -27,11 +32,12 @@ thread_local! {
 }
 
 /// The style of the codes passed by the interface.
-pub fn style_from(family: u32, bold: u32, size: f32) -> TextStyle {
+pub fn style_from(family: u32, bold: u32, size: f32, wrap: f32) -> TextStyle {
     TextStyle {
         family: FontFamily::from_code(family),
         bold: bold != 0,
         size,
+        wrap: (wrap.is_finite() && wrap > 0.0).then_some(wrap),
     }
 }
 
@@ -53,10 +59,12 @@ pub fn layout_floats(text: &str, style: TextStyle) -> Vec<f32> {
             line.width,
             line.start as f32,
             line.end as f32,
+            f32::from(u8::from(line.wrapped)),
             line.glyphs.len() as f32,
         ]);
         for glyph in &line.glyphs {
-            out.extend([glyph.x, glyph.advance, glyph.index as f32]);
+            let flags = f32::from(u8::from(glyph.look == GlyphLook::Missing));
+            out.extend([glyph.x, glyph.advance, glyph.index as f32, flags]);
         }
     }
     out
@@ -115,10 +123,11 @@ pub unsafe extern "C" fn text_layout(
     family: u32,
     bold: u32,
     size: f32,
+    wrap: f32,
 ) -> usize {
     // SAFETY: forwarded from the caller.
     let text = unsafe { text_at(ptr, len) };
-    let flat = layout_floats(&text, style_from(family, bold, size));
+    let flat = layout_floats(&text, style_from(family, bold, size, wrap));
     let count = flat.len();
     LAYOUT.with(|layout| *layout.borrow_mut() = flat);
     count
@@ -142,10 +151,11 @@ pub unsafe extern "C" fn text_path(
     family: u32,
     bold: u32,
     size: f32,
+    wrap: f32,
 ) -> usize {
     // SAFETY: forwarded from the caller.
     let text = unsafe { text_at(ptr, len) };
-    let data = path_svg(&text, style_from(family, bold, size)).into_bytes();
+    let data = path_svg(&text, style_from(family, bold, size, wrap)).into_bytes();
     let count = data.len();
     PATH.with(|path| *path.borrow_mut() = data);
     count
@@ -157,27 +167,40 @@ pub extern "C" fn text_path_result() -> *const u8 {
     PATH.with(|path| path.borrow().as_ptr())
 }
 
-/// Address of the bytes of the font file of `family` in that weight.
+/// How many font files [`text_font`] gives.
 #[unsafe(no_mangle)]
-pub extern "C" fn text_font(family: u32, bold: u32) -> *const u8 {
-    font_file(FontFamily::from_code(family), bold != 0)
-        .bytes
-        .as_ptr()
+pub extern "C" fn text_font_count() -> u32 {
+    FONT_FILES.len() as u32
+}
+
+/// The file of the face `code`, Latin Modern regular for an unknown code.
+fn file_of(code: u32) -> &'static ardoise_text::FontFile {
+    font_file(FontFace::from_code(code).unwrap_or(FontFace::LatinModern))
+}
+
+/// Address of the bytes of the font file of the face `code` ([`FontFace::code`]).
+#[unsafe(no_mangle)]
+pub extern "C" fn text_font(code: u32) -> *const u8 {
+    file_of(code).bytes.as_ptr()
 }
 
 /// Length of the font file of [`text_font`].
 #[unsafe(no_mangle)]
-pub extern "C" fn text_font_len(family: u32, bold: u32) -> usize {
-    font_file(FontFamily::from_code(family), bold != 0)
-        .bytes
-        .len()
+pub extern "C" fn text_font_len(code: u32) -> usize {
+    file_of(code).bytes.len()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn through_memory(text: &str, family: u32, bold: u32, size: f32) -> (Vec<f32>, String) {
+    fn through_memory(
+        text: &str,
+        family: u32,
+        bold: u32,
+        size: f32,
+        wrap: f32,
+    ) -> (Vec<f32>, String) {
         let bytes = text.as_bytes();
         let ptr = text_alloc(bytes.len());
         // SAFETY: ptr holds `bytes.len()` bytes reserved just above (or is null for none).
@@ -185,9 +208,9 @@ mod tests {
             if !bytes.is_empty() {
                 std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, bytes.len());
             }
-            let n = text_layout(ptr, bytes.len(), family, bold, size);
+            let n = text_layout(ptr, bytes.len(), family, bold, size, wrap);
             let layout = std::slice::from_raw_parts(text_layout_result(), n).to_vec();
-            let n = text_path(ptr, bytes.len(), family, bold, size);
+            let n = text_path(ptr, bytes.len(), family, bold, size, wrap);
             let path =
                 String::from_utf8(std::slice::from_raw_parts(text_path_result(), n).to_vec())
                     .unwrap();
@@ -199,40 +222,73 @@ mod tests {
     #[test]
     fn gives_exactly_the_native_layout_and_glyphs() {
         for (family, bold) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
-            let text = "Élève « ça »\nα + 2 €";
-            let style = style_from(family, bold, 600.0);
-            let (layout, path) = through_memory(text, family, bold, 600.0);
-            assert_eq!(layout, layout_floats(text, style));
-            assert_eq!(path, ardoise_text::text_outline(text, style).1.to_svg());
-            assert!(path.starts_with('M'));
-            // Two lines.
-            assert_eq!(layout[5], 2.0);
+            for wrap in [0.0, 2500.0] {
+                let text = "Élève « ça » dans un cadre qui passe à la ligne\nα + 2 € ϵ ⇌ H₂O 10⁻⁴ \u{1F600}";
+                let style = style_from(family, bold, 600.0, wrap);
+                let (layout, path) = through_memory(text, family, bold, 600.0, wrap);
+                assert_eq!(layout, layout_floats(text, style));
+                assert_eq!(path, ardoise_text::text_outline(text, style).1.to_svg());
+                assert!(path.starts_with('M'));
+                // Two lines without wrapping, more with.
+                if wrap == 0.0 {
+                    assert_eq!(layout[5], 2.0);
+                } else {
+                    assert!(layout[5] > 2.0);
+                }
+            }
         }
     }
 
     #[test]
-    fn the_layout_lists_every_glyph_with_its_utf16_offset() {
-        let (layout, _) = through_memory("ab\ncd", 1, 0, 1000.0);
-        // [w, h, lh, asc, desc, 2, top, base, w, start, end, n, (x, adv, idx)×n, …]
-        assert_eq!(&layout[6..6 + 6][3..], &[0.0, 2.0, 2.0]);
+    fn the_layout_lists_every_line_and_glyph_with_its_utf16_offset() {
+        let (layout, _) = through_memory("ab\ncd", 1, 0, 1000.0, 0.0);
+        // [w, h, lh, asc, desc, 2, top, base, w, start, end, wrapped, n, (x, adv, idx, flags)×n, …]
+        assert_eq!(&layout[6..6 + 7][3..], &[0.0, 2.0, 0.0, 2.0]);
         let first_line_glyphs = 2;
-        let second = 6 + 6 + 3 * first_line_glyphs;
-        assert_eq!(&layout[second + 3..second + 6], &[3.0, 5.0, 2.0]);
-        assert_eq!(layout[second + 6 + 2], 3.0);
+        let second = 6 + 7 + 4 * first_line_glyphs;
+        assert_eq!(&layout[second + 3..second + 7], &[3.0, 5.0, 0.0, 2.0]);
+        assert_eq!(layout[second + 7 + 2], 3.0);
+        assert_eq!(layout[second + 7 + 3], 0.0);
+        // A wrapped line says so; a missing character is flagged.
+        let (layout, _) = through_memory("ab cd \u{1F600}", 1, 0, 1000.0, 1200.0);
+        assert!(layout[5] >= 2.0);
+        assert_eq!(layout[6 + 5], 1.0);
+        let mut at = 6;
+        let mut flags = Vec::new();
+        for _ in 0..layout[5] as usize {
+            let n = layout[at + 6] as usize;
+            at += 7;
+            for g in 0..n {
+                flags.push(layout[at + 4 * g + 3]);
+            }
+            at += 4 * n;
+        }
+        assert_eq!(flags.iter().filter(|f| **f == 1.0).count(), 1);
+    }
+
+    #[test]
+    fn a_wrap_width_that_is_not_positive_is_none() {
+        for wrap in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            assert_eq!(style_from(0, 0, 600.0, wrap).wrap, None);
+        }
+        assert_eq!(style_from(0, 0, 600.0, 10.0).wrap, Some(10.0));
     }
 
     #[test]
     fn empty_text_and_font_bytes() {
-        let (layout, path) = through_memory("", 7, 0, 400.0);
+        let (layout, path) = through_memory("", 7, 0, 400.0, 0.0);
         assert_eq!(layout[5], 1.0);
         assert!(path.is_empty());
-        for family in [0, 1] {
-            for bold in [0, 1] {
-                let file = font_file(FontFamily::from_code(family), bold != 0);
-                assert_eq!(text_font(family, bold), file.bytes.as_ptr());
-                assert_eq!(text_font_len(family, bold), file.bytes.len());
-            }
+        assert_eq!(text_font_count(), 5);
+        for face in FontFace::ALL {
+            let file = font_file(face);
+            assert_eq!(text_font(face.code()), file.bytes.as_ptr());
+            assert_eq!(text_font_len(face.code()), file.bytes.len());
         }
+        assert_eq!(
+            text_font(99),
+            font_file(FontFace::LatinModern).bytes.as_ptr()
+        );
         assert!(text_alloc(0).is_null());
     }
 }

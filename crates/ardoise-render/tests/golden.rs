@@ -14,8 +14,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use ardoise_core::note::{
-    A4_LANDSCAPE, A4_PORTRAIT, Background, BackgroundImage, ImageRect, Layer, Note, Origin,
-    PageObject, PageSize, Paper, Template, TextBody, Timing,
+    A4_LANDSCAPE, A4_PORTRAIT, Background, BackgroundImage, ImageRect, Layer, Note, ObjectBody,
+    Origin, PageObject, PageSize, Paper, Template, TextBody, Timing,
 };
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
 use ardoise_render::{
@@ -422,6 +422,7 @@ fn text_frame(
             bold,
             size,
             color,
+            wrap_width: None,
         },
     );
     object.quarter_turns = quarter_turns;
@@ -431,8 +432,8 @@ fn text_frame(
 
 /// Text frames in both families, bold or not, the three sizes, several colours (one
 /// translucent), turned and scaled, several lines with a tab, accents and Greek letters (taken
-/// from Andika); over a highlighter stroke of their layer, under a stroke of the layer above; one
-/// on a hidden layer (not drawn), one on a layer without entry (on top).
+/// from Latin Modern Math); over a highlighter stroke of their layer, under a stroke of the layer
+/// above; one on a hidden layer (not drawn), one on a layer without entry (on top).
 fn text_frames() -> Note {
     const LM: FontFamily = FontFamily::LatinModern;
     const ANDIKA: FontFamily = FontFamily::Andika;
@@ -545,6 +546,75 @@ fn text_frames() -> Note {
             visible: i != 2,
         })
         .collect();
+    n.objects = objects;
+    n
+}
+
+/// The whole Greek alphabet, its variants and the symbols of physics and chemistry in both
+/// families and both weights (Greek and symbols from Latin Modern Math, emboldened in bold; the
+/// superscript and subscript digits of a Latin Modern frame drawn from its own digits, Andika's
+/// from Andika), a frame that wraps (one word longer than its width), a turned frame that wraps,
+/// and a character no face has (a white square).
+fn greek_and_wrapping() -> Note {
+    const LM: FontFamily = FontFamily::LatinModern;
+    const ANDIKA: FontFamily = FontFamily::Andika;
+    const GREEK: &str = "ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ\nαβγδεζηθικλμνξοπρςστυφχψω ϵϑϕϖϱ\nµ Ω Δ ° ± × · ≈ ≠ ≤ ≥ → ⇌ ∞ √ ∑ ∫ ∂ ∝ ‰ ′ ″ −\nH₂O, SO₄²⁻, 10⁻⁴ m², x⁰¹²³⁴⁵⁶⁷⁸⁹ y₀₁₂₃₄₅₆₇₈₉";
+    let mut objects: Vec<PageObject> = [(LM, false), (LM, true), (ANDIKA, false), (ANDIKA, true)]
+        .into_iter()
+        .enumerate()
+        .map(|(k, style)| {
+            text_frame(
+                0,
+                (400.0, 300.0 + 2700.0 * k as f32),
+                GREEK,
+                (style.0, style.1, 450.0),
+                if k % 2 == 0 { BLACK } else { NAVY },
+                0,
+                1.0,
+            )
+        })
+        .collect();
+    let mut wrapped = text_frame(
+        0,
+        (12_500.0, 300.0),
+        "La lumière se propage en ligne droite dans un milieu transparent et homogène : anticonstitutionnellement.",
+        (LM, false, 500.0),
+        RED,
+        0,
+        1.0,
+    );
+    if let ObjectBody::Text(body) = &mut wrapped.body {
+        body.wrap_width = Some(6000.0);
+    }
+    wrapped.measure();
+    let mut turned = text_frame(
+        0,
+        (20_500.0, 6500.0),
+        "Un cadre tourné qui revient à la ligne",
+        (ANDIKA, true, 400.0),
+        GREEN,
+        1,
+        1.2,
+    );
+    if let ObjectBody::Text(body) = &mut turned.body {
+        body.wrap_width = Some(3500.0);
+    }
+    turned.measure();
+    let missing = text_frame(
+        0,
+        (400.0, 11_400.0),
+        "Absent de toutes les polices : \u{1F600} \u{4E2D}",
+        (LM, false, 450.0),
+        BLACK,
+        0,
+        1.0,
+    );
+    objects.extend([wrapped, turned, missing]);
+    let page = PageSize {
+        width: 21_000,
+        height: 12_600,
+    };
+    let mut n = note(page, bg(Paper::White, Template::Blank, false), Vec::new());
     n.objects = objects;
     n
 }
@@ -966,6 +1036,7 @@ fn cases() -> Vec<(&'static str, Note, RenderOptions, Option<Picture>)> {
         ("background_off", background_off(), plain, None),
         ("background_image", with_image, at(0.06), Some(picture)),
         ("text_frames", text_frames(), at(0.06), None),
+        ("greek_and_wrapping", greek_and_wrapping(), at(0.06), None),
     ]
 }
 

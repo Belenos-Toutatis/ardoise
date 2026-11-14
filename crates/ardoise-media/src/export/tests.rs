@@ -561,6 +561,7 @@ fn note_ending_with_text() -> Note {
             bold: true,
             size: 1500.0,
             color: Rgba::rgb(220, 20, 20),
+            wrap_width: None,
         },
     )];
     note

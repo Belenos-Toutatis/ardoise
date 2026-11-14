@@ -108,6 +108,7 @@ impl Look {
             family: FontFamily::Andika,
             bold: self.bold,
             size: self.size,
+            wrap: None,
         }
     }
 
@@ -234,6 +235,7 @@ fn frame(done: &[PageObject], text: &str, x: f32, y: f32, look: Look) -> PageObj
             bold: look.bold,
             size: look.size,
             color: Rgba::rgb(look.rgb[0], look.rgb[1], look.rgb[2]),
+            wrap_width: None,
         },
     )
 }

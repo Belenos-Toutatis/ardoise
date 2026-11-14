@@ -100,6 +100,11 @@ const GUST_SOURCE: &str =
     "https://www.gust.org.pl/projects/e-foundry/latin-modern/download/lm2.004otf.zip";
 const GUST_TEXTS: &[&str] = &["GUST-FONT-LICENSE.txt", "LPPL-1.3c.txt"];
 const GUST_LICENCE: &str = "GUST Font License 1.0 (LPPL-1.3c or later)";
+const GUST_MATH_SOURCE: &str =
+    "https://www.gust.org.pl/projects/e-foundry/lm-math/download/latinmodern-math-1959.zip";
+const GUST_MATH_TEXTS: &[&str] = &["GUST-FONT-LICENSE-math.txt", "LPPL-1.3c.txt"];
+/// The release ships the text of the GUST Font License dated 2006-09-30: the same licence (LPPL 1.3c or later).
+const GUST_MATH_LICENCE: &str = "GUST Font License (LPPL-1.3c or later)";
 const SIL_SOURCE: &str = "https://software.sil.org/downloads/r/andika/Andika-6.200.zip";
 const SIL_TEXTS: &[&str] = &["OFL-Andika.txt"];
 const SIL_LICENCE: &str = "OFL-1.1, Reserved Font Names \"Andika\" and \"SIL\"";
@@ -140,6 +145,15 @@ const FONTS: &[Font] = &[
         source: SIL_SOURCE,
         sha256: "568e48915cd0ebbadfc3309e0550d050ccf9df526e809dffea189c68a54fb760",
         texts: SIL_TEXTS,
+    },
+    Font {
+        file: "latinmodern-math.otf",
+        family: "Latin Modern Math",
+        version: "1.959",
+        licence: GUST_MATH_LICENCE,
+        source: GUST_MATH_SOURCE,
+        sha256: "6075562b771f8b82f0c179e363389684f2dd09de30038269e2628e504bd7be0f",
+        texts: GUST_MATH_TEXTS,
     },
 ];
 
@@ -995,6 +1009,15 @@ fn notices(root: &Path, rust: &[Pkg], npm: &[Pkg]) -> Result<String, String> {
     w(
         &mut out,
         "https://www.gust.org.pl/projects/e-foundry/latin-modern.",
+    );
+    w(
+        &mut out,
+        "Latin Modern Math: the font file of the Latin Modern Math release by GUST",
+    );
+    w(&mut out, "e-foundry; the complete work is at");
+    w(
+        &mut out,
+        "https://www.gust.org.pl/projects/e-foundry/lm-math.",
     );
     w(&mut out, "");
     w(&mut out, "file | font version | licence | source | SHA-256");
