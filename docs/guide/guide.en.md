@@ -967,6 +967,17 @@ comes back as soon as you open a binder again.
   lost. If two PCs arrange the same binder at once, Nextcloud keeps a "conflicted copy" of the file: the most recent arrangement
   is used, and no note is lost (a note that arrangement does not mention goes to the end).
 
+### The summary of a binder
+
+To find a passage across a whole binder, put **bookmarks** in your notes (see **Putting bookmarks**, in chapter 8): a word or a
+short phrase at the right spot of the page ("Chapter 3", "Answer to exercise 2"). When a binder is shown, the **Summary** button of
+the top bar (or **Binder summary…**, in the binder's **⋯** menu) opens the list of its bookmarks, **note by note, in the binder's
+order** (**Binder order**, above: the one you arranged, otherwise by date, oldest first), the notes of its sub-binders after its
+own. Only the notes that have bookmarks are listed. A click on a bookmark (or `Enter`, after walking through the list with `Tab` or
+the arrows) opens the note **at that spot**: the bookmark is selected and in the middle of the editor. The **Filter the
+bookmarks** field keeps the bookmarks whose text (or whose note's title) holds the words typed. The summary is not shown again when
+you come back from the note; open it again with the same button.
+
 ### Duplicating a note, changing its date
 
 - **Duplicate** (the card's menu, right click, or the selection bar for one or several notes) makes a copy in the *same
@@ -1025,8 +1036,8 @@ Give the **Title of the new note** and click **Assemble**. Only the first note's
 
 ### Searching for a note
 
-Type in **Search notes**: Ardoise searches the *titles*, the *tags*, the *typed texts* (**Text** tool, on the layers
-shown) and the *handwriting*, ignoring accents and capital letters. Notes found through the handwriting are grouped under **Found in the handwriting**. `Ctrl + F` puts
+Type in **Search notes**: Ardoise searches the *titles*, the *tags*, the *bookmarks*, the *typed texts* (**Text** tool, on the
+layers shown) and the *handwriting*, ignoring accents and capital letters. Notes found through the handwriting are grouped under **Found in the handwriting**. `Ctrl + F` puts
 the cursor in the field, `Esc` clears it.
 
 Searching the handwriting uses *Windows' handwriting recognition*, offline, on this PC. The language module must be
@@ -1158,6 +1169,7 @@ The toolbar offers these tools (**Tool**):
 - **Line**, **Rectangle**, **Ellipse**: clean shapes drawn with a drag (see **Drawing a line, a rectangle, an ellipse**,
   below).
 - **Text**: a frame where you type with the keyboard (see **Typing text**, below).
+- **Bookmark**: a word or a short phrase put at a spot of the page, to find a passage again (see **Putting bookmarks**, below).
 - **Eraser**: **Whole strokes** or **Partial**, with its **Size**. It erases only on the chosen layer (see **Layers**).
 - **Select** (the lasso): draw around strokes and texts of the chosen layer to select them (a text is taken when its middle
   is in the lasso; a click on a text takes it alone); `Shift` + lasso adds, `Ctrl` + lasso removes. The
@@ -1232,6 +1244,28 @@ the moment it was put down, and is in every export (images, SVG, PDF, clipboard,
 PDF it can be searched and copied). The library's search finds it. The **Text** tool is not in live mode, but a sheet resumed
 in live mode keeps its texts.
 
+### Putting bookmarks
+
+The **Bookmark** tool (the `B` key) puts on the page a small marker holding a word or a short phrase: tap or click the page where
+you want it (with the pen, the mouse or a finger), then type the text in the field that opens under the bookmark. The bookmark is
+drawn as you type, with a small flag. `Enter` or `Esc` (or a click elsewhere, or another tool) ends the typing: the text stays and
+the bookmark is selected. An empty text removes the bookmark. The text is one line (60 characters at most). The whole typing is
+undone by one `Ctrl + Z`, and the keys you type never trigger the editor's shortcuts.
+
+To rename a bookmark, tap it with the **Bookmark** tool, or double-click it with the **Select** tool. To move it, select it (a
+click, or the lasso) and drag it; **Delete** removes it; it is duplicated, copied and pasted like a text.
+
+Bookmarks are **for the editor**: they show on screen, but are **not in the image exports (PNG, JPG, WebP, SVG), the videos, the
+replay, printing, the projection or the network share**. They are used for three things:
+
+- **the summary of the binder** (see **The summary of a binder**, chapter 7);
+- the library's **search**, which finds a note by the text of its bookmarks;
+- **the PDF's bookmarks**: the PDF of a binder (**Export the binder as a PDF…**) has, under each note's bookmark, that note's
+  bookmarks, which lead to their spot on the page; the PDF of a single note has its bookmarks as its outline.
+
+No layer hides a bookmark: it stays visible, selectable and in the summary even when its layer is hidden. "Back to the original"
+does not remove it (a bookmark is not ink). A note that holds only bookmarks is still an empty page for the export.
+
 ### Straightening shapes
 
 Select strokes, then **Straighten shapes** (or the `F` key): lines, circles, ellipses, rectangles (even rotated) and
@@ -1263,7 +1297,7 @@ bottom. A small upright oval (an "O", a "0") is never straightened, whatever the
 
 ### Copy and paste
 
-`Ctrl + C`, `Ctrl + X` and `Ctrl + V` (or the buttons of the **Selection** block) copy, cut and paste strokes and texts
+`Ctrl + C`, `Ctrl + X` and `Ctrl + V` (or the buttons of the **Selection** block) copy, cut and paste strokes, texts and bookmarks
 *from one note to another*, from one window to another, through Windows' clipboard. Pasted strokes keep their colour, tool
 and width, texts their font, size and colour; they are replayed last. Anything that does not come from Ardoise is ignored.
 
@@ -1575,8 +1609,9 @@ could not analyse the layout, Ardoise says so: the structure is then guessed fro
 PDF, one page per note, **in the binder's order** (**Binder order**, above), whatever sort is shown. The window is the export
 window reduced to PDF, with the **Include the sub-binders** box (unchecked at first; it only appears if the binder has
 sub-binders); their notes come after the binder's, each sub-binder in its own order. The PDF has **bookmarks**: one per note (its
-title, or its date), and, with the sub-binders, one per sub-binder that groups the bookmarks of its notes; open your PDF reader's
-bookmarks panel to see them. **Print the binder…** opens the print window with the same notes in the same order, and the same
+title, or its date), and, with the sub-binders, one per sub-binder that groups the bookmarks of its notes; under a note's come the
+**bookmarks put in that note** (**Bookmark** tool), which lead to their spot on the page; open your PDF reader's bookmarks panel to
+see them. **Print the binder…** opens the print window with the same notes in the same order, and the same
 **Include the sub-binders** box.
 - *Dragging out of Ardoise*: the handle of a library card drops a *PNG image* of the note into Explorer, onto the
   desktop, into Word, OneNote or an email (one image per note if several are selected). Keep the button pressed while
@@ -1835,7 +1870,7 @@ These shortcuts do nothing while you are typing in a text field, except those of
 | `Esc` | In steps, one press per step: drop the gesture under way or end the typing of a text (the text stays); close the split, the replay, the crop or the **Straighten shapes** setting; deselect; save the note and go back to the library (never while a narration is being recorded) |
 | `Shift`, `Alt` (held while drawing a shape) | Invert **Regular shape** (`Shift`) or **From the centre** (`Alt`) for that stroke |
 | `Alt + ←`, `Alt + →` | **Previous page**, **Next page** (the note before, the note after in the library) |
-| `V`, `P`, `E`, `T`, `H` | Tools **Select**, **Pen**, **Eraser**, **Text**, **Move the page** |
+| `V`, `P`, `E`, `T`, `B`, `H` | Tools **Select**, **Pen**, **Eraser**, **Text**, **Bookmark**, **Move the page** |
 | `Space` (held) | Move the page (unless a button has the focus: `Space` then works that button, a rail icon included) |
 | `F` | **Straighten shapes** |
 | `R` | **Replay** |

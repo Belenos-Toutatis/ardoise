@@ -1,9 +1,10 @@
 # The `.ardoise` file format
 
 > Developer document, written in English (the planning documents are in French). It describes format
-> **version 1.4** byte by byte (1.1 = 1.0 plus the optional `favorite` field; 1.2 = 1.1 plus the optional
+> **version 1.6** byte by byte (1.1 = 1.0 plus the optional `favorite` field; 1.2 = 1.1 plus the optional
 > `backgroundImage` field and `original.ardoise` member; 1.3 = 1.2 plus the optional `revision.json` member; 1.4 = 1.3
-> plus the optional `objects` field, the page objects such as text frames, §2.2). Requirements: SPEC §3.3 and §3.4. Code:
+> plus the optional `objects` field, the page objects such as text frames, §2.2; 1.6 = a new kind of page object, the
+> bookmark, §2.2; 1.5 is another new kind of page object, the equation). Requirements: SPEC §3.3 and §3.4. Code:
 > `crates/ardoise-core/src/format.rs` (container, `note.json`), `crates/ardoise-core/src/objects.rs` (page objects) and
 > `crates/ardoise-core/src/format/strokes.rs` (`strokes.bin`). Model: `note.rs` (`ardoise-core`) and `model.rs`
 > (`ardoise-ink`). Committed sample files: `testdata/format/v1/`.
@@ -96,7 +97,7 @@ alphabetical order; **key order and whitespace are not significant**.
 | `tags` | array of strings | tags, in the user's order. |
 | `favorite` | boolean, optional (1.1) | `true` when the note is a favourite; absent otherwise. Absent in 1.0 files: not a favourite. |
 | `layers` | array of `{"name": string, "visible": boolean}` | at least one; strokes refer to layers by index (0 = first). |
-| `objects` | array, optional (1.4) | what the page holds besides its strokes: text frames today (§2.2); absent when there is none. |
+| `objects` | array, optional (1.4) | what the page holds besides its strokes: text frames, bookmarks (1.6) (§2.2); absent when there is none. |
 | `timing` | `"recorded"` or `"synthesized"` | whether point times were measured or made up (imported notes without timing). |
 | `origin` | `{"kind": "tablet"}`, `{"kind": "live"}`, `{"kind": "ardoise"}` or `{"kind": "inkspace", "id": string}` | where the note comes from (`id` = Inkspace's note UUID). |
 | `boardPosition` | `"buttonsBottom"`, `"buttonsTop"`, `"buttonsRight"` or `"buttonsLeft"`, optional | for a note made from a page of the Xiaomi blackboard (its `original.bin`): how the blackboard was held, i.e. how the page's points were turned to make the note (docs/design/blackboard.md, « Positions, the Rust side »). Absent: `buttonsBottom` (notes made before 2026-11). Not a key of the format's model: `ardoise-device` writes and reads it, and every reader, of any 1.x version, keeps it verbatim as an unknown key; it describes `original.bin`, which no edit changes, so it stays true after an older version edited the note. |
@@ -125,9 +126,9 @@ that does not exist. Writers refuse to write such a note.
 
 ### 2.2 Page objects (`objects`, 1.4)
 
-What a page holds besides its strokes: **text frames** (SPEC §4.4, « Texte tapé au clavier »), and later other kinds
-(equations, bookmarks: `docs/design/page-objects.md`, which also says how to add a kind). Each element of the array is one
-flat JSON object: the **placement**, the same for every kind, and the keys of its **kind**.
+What a page holds besides its strokes: **text frames** (SPEC §4.4, « Texte tapé au clavier »), **bookmarks** (1.6, SPEC §4.4,
+« Signets »), and other kinds later (`docs/design/page-objects.md`, which also says how to add a kind). Each element of the
+array is one flat JSON object: the **placement**, the same for every kind, and the keys of its **kind**.
 
 ```json
 "objects": [
@@ -144,7 +145,7 @@ Placement (every kind):
 
 | Key | Type | Meaning |
 |---|---|---|
-| `kind` | string, not empty | the kind: `"text"` in 1.4. |
+| `kind` | string, not empty | the kind: `"text"` in 1.4, `"bookmark"` in 1.6. |
 | `id` | string | unique within the note, kept by every operation that keeps the object (a reader gives a new one to an object without id, or with the id of an earlier one: `<id>-2`, `object-2`…). |
 | `layer` | integer ≥ 0 | index into `layers`: the object is drawn with its layer, **above the strokes of that layer**, objects in array order. A reader puts an object on a missing layer on the last one (a reader before 1.4 may have merged layers without knowing objects). |
 | `t` | integer ≥ 0 | milliseconds since `created` (like a point's `t`): when the replay shows the object, all at once. |
@@ -170,6 +171,24 @@ Text frame (`"kind": "text"`):
 | `bold` | boolean | the bold face of the family. |
 | `size` | number > 0 | size of the font (its em), in the content's units: device units at scale 1 (the tool offers 400, 600 and 900: 4, 6 and 9 mm). |
 | `color` | `{"r", "g", "b", "a"}` (u8 each) | colour, straight alpha. |
+
+Bookmark (`"kind": "bookmark"`, 1.6): a word or a short phrase at a spot of the page, one line, with a flag. It is **the editor's
+only**: image, SVG, video and print outputs, the replay, the projection and the share on the network do not show it. The library's
+listing gives its label and its spot (for the summary of a binder and the search), and the PDF of a binder or of one note makes
+its outline of the bookmarks.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `label` | string | the text: one line, at most 60 characters when the editor writes it (a longer or multi-line label read from a file is kept and shown as it is, the line breaks being spaces). An empty or blank label says nothing: the editor removes such a bookmark, and no listing shows it. |
+
+Its content is the flag, the label (Andika regular, `ardoise_core::objects::BOOKMARK_FONT_SIZE` = 500 units, 5 mm, laid out as a
+text frame's line) and room around them (`BOOKMARK_PAD` = 150 units on each side, the flag `BOOKMARK_FLAG_WIDTH` = 300 units
+wide and one pad before the label): `width` = 3 × pad + flag + the label's advance width, `height` = 2 × pad + the line height
+(1.25 × the font size). It is placed like any object (`x`, `y` the top-left corner of the content, `scale`, `quarterTurns`),
+so a turned page turns it. Writers write that box, readers measure it again. A bookmark has a `layer` like every object (the
+layer of the page when it was put), but **no layer hides it**: it is drawn, selectable and listed whatever the layer shows. Its
+`t` is when it was put (a split at an instant cuts by it) and nothing else: no replay waits for it, and the clock of a writing
+recording ignores it. A bookmark whose `label` is not a string is kept as an object of a kind this version does not know.
 
 The layout of a frame is `ardoise-text`'s (`crates/ardoise-text/src/layout.rs`): glyphs placed by their advance widths, no
 kerning nor ligature, a character missing from the family taken from the other one, a tab to the next multiple of four spaces,
@@ -442,6 +461,7 @@ Sample files of version 1 (regenerate only when adding one:
 | `testdata/format/v1/full-1.2.ardoise` | format 1.2: a turned, translucent background image from a PDF page, and `original.ardoise` |
 | `testdata/format/v1/revision-1.3.ardoise` | format 1.3: a revision with an account of two entries |
 | `testdata/format/v1/objects-1.4.ardoise` | format 1.4: text frames in both families, one bold, turned and scaled with a key of a later version, on two layers; a text frame in a font this version does not know and an object of an unknown kind (`equation`), both kept |
+| `testdata/format/v1/bookmarks-1.6.ardoise` | format 1.6: bookmarks (one with a key of a later version, one scaled and turned on a hidden layer, one whose label is not a string), a text frame and an object of an unknown kind (`sticker`), all kept |
 
 ## 6. Library conventions (not part of the file)
 

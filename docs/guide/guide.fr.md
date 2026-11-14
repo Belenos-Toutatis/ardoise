@@ -1025,6 +1025,17 @@ la plus récente d'abord ; votre choix revient dès que vous rouvrez un classeur
   rien perdre. Si deux PC rangent le même classeur en même temps, Nextcloud garde une « copie en conflit » du fichier : c'est le
   rangement le plus récent qui est retenu, et aucune note n'est perdue (une note que ce rangement ne cite pas passe à la fin).
 
+### Le sommaire d'un classeur
+
+Pour retrouver un passage dans tout un classeur, posez des **signets** dans vos notes (voir **Poser des signets**, au chapitre 8) :
+un mot ou une courte phrase à l'endroit voulu de la page (« Chapitre 3 », « Corrigé de l'exercice 2 »). Quand un classeur est
+affiché, le bouton **Sommaire** de la barre du haut (ou **Sommaire du classeur…**, dans le menu **⋯** du classeur) ouvre la liste de
+ses signets, **note par note, dans l'ordre du classeur** (**Ordre du classeur**, ci-dessus : celui que vous avez rangé, sinon par
+date, la plus ancienne d'abord), les notes de ses sous-classeurs après les siennes. Seules les notes qui ont des signets y figurent.
+Un clic sur un signet (ou `Entrée`, après avoir parcouru la liste avec `Tab` ou les flèches) ouvre la note **à cet endroit** : le
+signet est sélectionné et au milieu de l'éditeur. Le champ **Filtrer les signets** ne garde que ceux dont le texte (ou le titre de la
+note) contient les mots tapés. Ce sommaire n'est pas affiché quand on revient de la note ; rouvrez-le avec le même bouton.
+
 ### Dupliquer une note, changer sa date
 
 - **Dupliquer** (menu de la carte, clic droit, ou barre de la sélection pour une ou plusieurs notes) crée une copie dans le
@@ -1090,7 +1101,7 @@ de la première note est gardée.
 
 ### Chercher une note
 
-Tapez dans **Rechercher une note** : Ardoise cherche dans les *titres*, les *étiquettes*, les *textes tapés* (outil
+Tapez dans **Rechercher une note** : Ardoise cherche dans les *titres*, les *étiquettes*, les *signets*, les *textes tapés* (outil
 **Texte**, sur les calques affichés) et l'*écriture manuscrite*, sans tenir compte des accents ni des majuscules. Les notes trouvées grâce à l'écriture sont regroupées
 sous **Trouvé dans l'écriture manuscrite**. `Ctrl + F` place le curseur dans le champ, `Échap` l'efface.
 
@@ -1232,6 +1243,8 @@ La barre d'outils propose les outils suivants (**Outil**) :
 - **Ligne**, **Rectangle**, **Ellipse** : des formes nettes, tracées d'un glissé (voir **Tracer une ligne, un rectangle,
   une ellipse**, plus bas).
 - **Texte** : un cadre où l'on tape au clavier (voir **Taper du texte**, plus bas).
+- **Signet** : un mot ou une courte phrase posés à un endroit de la page, pour retrouver un passage (voir **Poser des signets**,
+  plus bas).
 - **Gomme** : **Traits entiers** ou **Partielle**, avec sa **Taille**. Elle n'efface que sur le calque choisi (voir
   **Calques**).
 - **Sélection** (le lasso) : entourez des traits et des textes du calque choisi pour les sélectionner (un texte est pris quand
@@ -1313,6 +1326,29 @@ relecture et dans les vidéos, au moment où il a été posé, et figure dans to
 impression, projection, partage sur le réseau ; dans le PDF, il peut être cherché et copié). La recherche de la bibliothèque le
 trouve. L'outil **Texte** n'est pas dans le mode direct, mais une feuille reprise en direct garde ses textes.
 
+### Poser des signets
+
+L'outil **Signet** (la touche `B`) pose sur la page un petit repère portant un mot ou une courte phrase : touchez ou cliquez la page
+à l'endroit voulu (au stylet, à la souris ou au doigt), puis tapez le texte dans le champ qui s'ouvre sous le signet. Le signet se
+dessine au fur et à mesure, avec un petit drapeau. `Entrée` ou `Échap` (ou un clic ailleurs, ou un autre outil) termine la saisie :
+le texte reste et le signet est sélectionné. Un texte vide supprime le signet. Le texte tient sur une ligne (60 caractères au plus).
+Toute la saisie s'annule d'un seul `Ctrl + Z`, et les touches tapées ne déclenchent jamais les raccourcis de l'éditeur.
+
+Pour renommer un signet, touchez-le avec l'outil **Signet**, ou double-cliquez dessus avec l'outil **Sélection**. Pour le
+déplacer, sélectionnez-le (un clic, ou le lasso) et faites-le glisser ; **Supprimer** le retire ; il se duplique, se copie et se colle
+comme un texte.
+
+Les signets sont **à l'usage de l'éditeur** : ils sont visibles à l'écran, mais **absents des exports en image (PNG, JPG, WebP,
+SVG), des vidéos, de la relecture, de l'impression, de la projection et du partage sur le réseau**. Ils servent à trois choses :
+
+- **le sommaire du classeur** (voir **Le sommaire d'un classeur**, chapitre 7) ;
+- **la recherche** de la bibliothèque, qui trouve une note par le texte de ses signets ;
+- **les signets du PDF** : le PDF d'un classeur (**Exporter le classeur en PDF…**) a, sous le signet de chaque note, ceux de ses
+  signets, qui mènent à leur endroit sur la page ; le PDF d'une seule note a ses signets pour plan.
+
+Aucun calque ne masque un signet : il reste visible, sélectionnable et dans le sommaire même si son calque est masqué. « Revenir à
+l'original » ne l'enlève pas (un signet n'est pas du tracé). Une note qui n'a que des signets reste une page vide pour l'export.
+
 ### Redresser les formes
 
 Sélectionnez des traits, puis **Redresser les formes** (ou la touche `F`) : les droites, cercles, ellipses, rectangles
@@ -1347,8 +1383,8 @@ visibles en bas. Un petit ovale debout (un « O », un « 0 ») n'est jamais red
 
 ### Copier et coller
 
-`Ctrl + C`, `Ctrl + X` et `Ctrl + V` (ou les boutons du bloc **Sélection**) copient, coupent et collent des traits et des
-textes *d'une note à l'autre*, d'une fenêtre à l'autre, par le presse-papiers de Windows. Les traits collés gardent leur
+`Ctrl + C`, `Ctrl + X` et `Ctrl + V` (ou les boutons du bloc **Sélection**) copient, coupent et collent des traits, des
+textes et des signets *d'une note à l'autre*, d'une fenêtre à l'autre, par le presse-papiers de Windows. Les traits collés gardent leur
 couleur, leur outil et leur épaisseur, les textes leur police, leur taille et leur couleur ; ils sont rejoués en dernier. Ce
 qui ne vient pas d'Ardoise est ignoré.
 
@@ -1675,7 +1711,8 @@ seul PDF, une page par note, **dans l'ordre du classeur** (**Ordre du classeur**
 fenêtre est celle de l'export, réduite au PDF, avec la case **Inclure les sous-classeurs** (décochée au départ : elle n'apparaît
 que si le classeur a des sous-classeurs) ; leurs notes viennent après celles du classeur, chaque sous-classeur dans son ordre.
 Le PDF a des **signets** : un par note (son titre, ou sa date), et, avec les sous-classeurs, un par sous-classeur qui regroupe les
-signets de ses notes ; ouvrez le panneau des signets de votre lecteur PDF pour les voir. **Imprimer le classeur…** ouvre la
+signets de ses notes ; sous celui d'une note viennent les **signets posés dans cette note** (outil **Signet**), qui mènent à leur
+endroit de la page ; ouvrez le panneau des signets de votre lecteur PDF pour les voir. **Imprimer le classeur…** ouvre la
 fenêtre d'impression avec les mêmes notes, dans le même ordre, et la même case **Inclure les sous-classeurs**.
 - *Glisser hors d'Ardoise* : la poignée d'une carte de la bibliothèque dépose une *image PNG* de la note dans
   l'Explorateur, sur le bureau, dans Word, OneNote ou un courriel (une image par note si plusieurs sont sélectionnées).
@@ -1944,7 +1981,7 @@ comparent aux touches que la fenêtre traite vraiment.
 | `Échap` | Par étapes, un appui par étape : abandonner le geste en cours ou terminer la saisie d'un texte (le texte reste) ; fermer la découpe, la relecture, le recadrage ou le réglage de **Redresser les formes** ; désélectionner ; enregistrer la note et revenir à la bibliothèque (jamais pendant l'enregistrement d'une narration) |
 | `Maj`, `Alt` (tenues pendant le tracé d'une forme) | Inverser **Forme régulière** (`Maj`) ou **Depuis le centre** (`Alt`) pour ce tracé |
 | `Alt + ←`, `Alt + →` | **Page précédente**, **Page suivante** (la note d'avant, la note d'après dans la bibliothèque) |
-| `V`, `P`, `E`, `T`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Texte**, **Déplacer la page** |
+| `V`, `P`, `E`, `T`, `B`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Texte**, **Signet**, **Déplacer la page** |
 | `Espace` (maintenu) | Déplacer la page (sauf si un bouton a le focus : `Espace` agit alors sur ce bouton, y compris une icône du rail) |
 | `F` | **Redresser les formes** |
 | `R` | **Relecture** |

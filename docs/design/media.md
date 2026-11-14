@@ -91,7 +91,8 @@ Two work packages run in parallel on disjoint files:
   screen and in the PNG export.
 - Page objects (text frames, format 1.4): an object of a visible layer, of a kind that is drawn, counts as a stroke of one
   sample at its time `t` (duration, trimmed pauses) and appears all at once then, in the exports' drawing order (strokes of
-  its layer under it): `docs/design/page-objects.md` §3.
+  its layer under it): `docs/design/page-objects.md` §3. A bookmark (format 1.6) is none of this: it is not in `draw_items`, so
+  the replay neither draws it nor waits for it (`page-objects.md` §7).
 - The mapping must stay simple and pure: the editor's on-screen replay (TypeScript, later) uses the same rules
   and will reuse it through the WebAssembly build if needed.
 - Narration keeps the time base it was recorded in (replay time with its options, or note time in live mode);
