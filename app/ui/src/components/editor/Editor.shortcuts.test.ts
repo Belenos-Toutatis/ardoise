@@ -296,6 +296,13 @@ const PROBES: Record<string, (v: View) => Promise<void>> = {
     expect(v.onclose).not.toHaveBeenCalled();
     expect(v.dirty()).toBe('no');
   },
+  // F1 opens the user guide: `App.svelte` answers it, for every screen (`App.guide.test.ts`). The editor leaves it alone.
+  guide: async (v) => {
+    const taken = await v.press('guide');
+    expect(taken).toBe(false);
+    expect(v.onclose).not.toHaveBeenCalled();
+    expect(v.dirty()).toBe('no');
+  },
   leaveReplay: async (v) => {
     await v.press('replay');
     expect(v.q('.replay-bar')).toBeTruthy();

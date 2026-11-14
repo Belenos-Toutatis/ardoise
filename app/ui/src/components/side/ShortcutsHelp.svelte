@@ -6,8 +6,10 @@
    * Each entry is a `dt[data-shortcut]` with the chords it shows (one per display, duplicates merged, separated by
    * « , »; each chord as `<kbd>Ctrl</kbd> + <kbd>Z</kbd>` in a `span.chord`) or the text of its `keysLabel`, and a `dd`
    * with what it does. The look of the block, of `dl.keys` and of `kbd` is the pane's (`SidePanel.svelte`); only what
-   * is specific to the help is scoped here.
+   * is specific to the help is scoped here. Above the shortcuts, the button that opens the user guide (also F1, listed
+   * with the shortcuts), with what happens when the guide is not next to the executable.
    */
+  import { openGuide } from '../../lib/guide.svelte';
   import { t } from '../../lib/i18n.svelte';
   import { chordParts, type Shortcut } from '../../lib/shortcuts';
   import type { SideWhere } from '../../lib/side-panel.svelte';
@@ -59,6 +61,13 @@
   </dl>
 {/snippet}
 
+<section class="pane-block" data-section="guide" aria-label={t('guide.label')}>
+  <div class="pane-actions">
+    <button type="button" class="button" data-action="open-guide" onclick={() => void openGuide('guide')}>{t('guide.open')}</button>
+  </div>
+  <p class="guide-hint">{t('guide.openHint')}</p>
+</section>
+
 <section class="pane-block" data-section="shortcuts" aria-labelledby="side-help-title-{where}">
   <h3 class="pane-title" id="side-help-title-{where}">{t(where === 'editor' ? 'side.help.editor' : 'side.help.live')}</h3>
   {@render list(main)}
@@ -70,6 +79,11 @@
 </section>
 
 <style>
+  .guide-hint {
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+
   /* A chord is not broken across lines; two chords of one entry may wrap between them. */
   .chord {
     white-space: nowrap;

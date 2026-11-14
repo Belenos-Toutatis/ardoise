@@ -8,6 +8,7 @@
   import { onMount } from 'svelte';
   import { api, errorMessage, genericError, type BridgeStatus } from '../lib/api';
   import { claudeCodeCommand, claudeDesktopConfig } from '../lib/assistant-setup';
+  import { openGuide } from '../lib/guide.svelte';
   import { t } from '../lib/i18n.svelte';
 
   type Target = 'claudeCode' | 'claudeDesktop';
@@ -107,6 +108,15 @@
   {/if}
   <p class="muted small" data-slot="assistant-privacy">{t('assistant.privacy')}</p>
   <p class="muted small">{t('assistant.guide')}</p>
+  <button
+    type="button"
+    class="button"
+    data-action="open-assistant-guide"
+    title={t('guide.assistantHint')}
+    onclick={() => void openGuide('assistant')}
+  >
+    {t('guide.assistantOpen')}
+  </button>
 </section>
 
 <style>

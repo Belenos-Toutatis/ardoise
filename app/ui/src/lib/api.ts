@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import type { AboutInfo, AboutText } from './about';
 import type { BackgroundSource, NotesProgress, StagedBackground } from './background';
 import type { Decision, DiagnosticEvent, DiagnosticOptions } from './diagnostic';
+import type { GuideOpened, GuidePage } from './guide';
 import type { LanguagePreference } from './i18n-core';
 import { t } from './i18n.svelte';
 import { PAGES_FIRST_CODE, pagesFirstText, pagesInMessage } from './live-pages-first';
@@ -757,6 +758,13 @@ export const api = {
   aboutInfo: () => call<AboutInfo>('about_info'),
   /** The licence of Ardoise (`license`) or the licences of its components (`notices`), in full. */
   aboutText: (which: AboutText) => call<string>('about_text', { which }),
+
+  // --- The user guide (guide.rs) ---
+  /**
+   * Opens the guide (or the assistant's) in `language` in the default browser: from the `guide` folder next to the executable,
+   * else from GitHub. Says which one was used.
+   */
+  openGuide: (page: GuidePage, language: 'fr' | 'en') => call<GuideOpened>('open_guide', { page, language }),
 
   // --- Drafts and the end of the Windows session (M10; drafts.rs, session_end.rs) ---
   /** Keeps the editor's unsaved note outside the library (replacing its previous draft). */

@@ -24,6 +24,7 @@ mod drag;
 #[cfg(windows)]
 mod drag_windows;
 mod export;
+mod guide;
 mod handwriting;
 mod import;
 mod instance;
@@ -427,6 +428,7 @@ pub fn run() {
             handwriting::copy_handwriting_text,
             about::about_info,
             about::about_text,
+            guide::open_guide,
             app_bridge::bridge_reply,
             app_bridge::mcp_launch_info,
             import::inkspace_detect,

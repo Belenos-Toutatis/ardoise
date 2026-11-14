@@ -3,10 +3,10 @@
  * tab of the control window shows, and what `sweepShortcuts` confronts with the key mapping (`liveKeyAction` and
  * `liveEditKeyAction`, `lib/live-keys.ts`) in both directions. `does` is the word of the action: the touch-up keys
  * (`select`, `pen`, `deselect`, `deleteSelection`, `undo`, `redo`), the `command` of a `command` action (`nextPage`,
- * `previousPage`, `clearPage`), `zoomIn` / `zoomOut` for a `zoom`, `quit` for Ctrl + Q (which `App.svelte` answers),
- * and otherwise the action's `kind` (`board`, `laser`, `wholePage`, `fitWidth`, `clearMarks`, `pan`, `leave`).
+ * `previousPage`, `clearPage`), `zoomIn` / `zoomOut` for a `zoom`, `quit` for Ctrl + Q and `guide` for F1 (which
+ * `App.svelte` answers), and otherwise the action's `kind` (`board`, `laser`, `wholePage`, `fitWidth`, `clearMarks`, `pan`, `leave`).
  * The live window's `does` for the sweep: the touch-up keys first, as `LiveView.onkeydown` does (while a session
- * runs), then `closeKey(e) === 'quit'`, then `liveKeyAction`.
+ * runs), then `closeKey(e) === 'quit'`, then `isGuideKey(e)`, then `liveKeyAction`.
  *
  * Entries in the order of the help; a key with `shown: false` is a variant the mapping takes too (Shift + a letter,
  * `=` for +, the keypad…). The `presentation` group holds the keys of the projected window, which do nothing in the
@@ -122,6 +122,7 @@ export const LIVE_SHORTCUTS: readonly Shortcut<LiveKeyContext>[] = [
     keys: [key({ key: 'Escape' }, 'deselect', selecting), key({ key: 'Escape' }, 'leave', noSelection)],
   },
   { id: 'close', label: label('close'), keys: [key({ key: 'w', ctrl: true }, 'leave'), key({ key: 'F4', ctrl: true }, 'leave')] },
+  { id: 'guide', label: label('guide'), keys: [key({ key: 'F1' }, 'guide')] },
   { id: 'quit', label: label('quit'), keys: [key({ key: 'q', ctrl: true }, 'quit')] },
   {
     id: 'marks',

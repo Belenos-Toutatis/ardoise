@@ -4,6 +4,7 @@
   import { bridgeScreens } from '../lib/app-bridge.svelte';
   import { closeKey } from '../lib/close-keys';
   import { defaultWindowClose, type WindowClose } from '../lib/editor/window-close';
+  import { openGuide } from '../lib/guide.svelte';
   import { currentLocale, t } from '../lib/i18n.svelte';
   import { inkspaceOffer } from '../lib/inkspace-offer.svelte';
   import { displayTitle, type SortOrder, type SummaryChoices } from '../lib/library-logic';
@@ -451,6 +452,16 @@
       {t('background.library.open')}
     </button>
     <ShareIndicator />
+    <button
+      type="button"
+      class="button ghost"
+      data-action="open-guide"
+      aria-label={t('guide.label')}
+      title={t('guide.tooltip')}
+      onclick={() => void openGuide('guide')}
+    >
+      {t('guide.button')}
+    </button>
     <button
       type="button"
       class="button ghost"

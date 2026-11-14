@@ -3,12 +3,14 @@ import { closeKey } from '../close-keys';
 import type { KeyInput } from '../live-keys';
 import { chordEvents, keyPress, type EditorKeyContext, type Shortcut, type ShortcutKey } from '../shortcuts';
 import { SWEEP_KEYS, SWEEP_MODIFIERS, sweepShortcuts } from '../shortcuts-sweep';
+import { isGuideKey } from '../guide';
 import { editorKeyAction } from './keys';
 import { EDITOR_KEY_CONTEXTS, EDITOR_SHORTCUTS } from './shortcuts';
 
-/** What the editor does with a key, in the words of the table: Ctrl + Q is `App.svelte`'s, the rest `editorKeyAction`'s. */
+/** What the editor does with a key, in the words of the table: Ctrl + Q and F1 are `App.svelte`'s, the rest `editorKeyAction`'s. */
 function editorDoes(e: KeyInput, context: EditorKeyContext): string | null {
-  return closeKey(e) === 'quit' ? 'quit' : (editorKeyAction(e, context)?.kind ?? null);
+  if (closeKey(e) === 'quit') return 'quit';
+  return isGuideKey(e) ? 'guide' : (editorKeyAction(e, context)?.kind ?? null);
 }
 
 function inContext(key: { in?: Partial<EditorKeyContext> }, context: EditorKeyContext): boolean {
@@ -30,6 +32,9 @@ describe('the editor shortcut table', () => {
     expect(editorDoes({ key: 'r' }, { replaying: false })).toBe('replay');
     expect(editorDoes({ key: 'r' }, { replaying: true })).toBe('leaveReplay');
     expect(editorDoes({ key: 'q', ctrlKey: true }, { replaying: false })).toBe('quit');
+    expect(editorDoes({ key: 'F1' }, { replaying: false })).toBe('guide');
+    expect(editorDoes({ key: 'F1' }, { replaying: true })).toBe('guide');
+    expect(editorDoes({ key: 'F1', ctrlKey: true }, { replaying: false })).toBeNull();
   });
 
   it('lists every kind of action the mapping gives over the swept keys, so none escapes the sweep', () => {
@@ -129,6 +134,7 @@ describe('the sweep catches a table that lies about the editor', () => {
       ['playPause', 0, 'Space gives "playPause" in {"replaying":true}'],
       ['pages', 1, 'Alt + ArrowRight gives "nextPage"'],
       ['quit', 0, 'Ctrl + q gives "quit"'],
+      ['guide', 0, 'F1 gives "guide"'],
     ] as const) {
       const table = copy();
       (entry(table, id).keys as ShortcutKey<EditorKeyContext>[]).splice(index, 1);

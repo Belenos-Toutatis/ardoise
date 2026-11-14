@@ -453,7 +453,18 @@
     "copied": "Copied",
     "copyFailed": "Cannot copy: select the text and copy it with Ctrl+C.",
     "privacy": "Privacy: what the assistant reads (the text and image of your notes, sometimes students' names) goes to its provider, under your account's settings. Assistants usually ask for your consent before changing anything, but that depends on their permission settings; Ardoise flags the tools that change or remove notes. Nothing is ever deleted for good, and the assistant never writes the ink of the original: it retouches a copy (what it is asked to do there is not checked: look at the copy). To let it only read, declare it with \"Read only\" ticked.",
-    "guide": "Step by step: the \"Assistant\" guide, file guide\\assistant.en.html in Ardoise's folder."
+    "guide": "Step by step: the \"Assistant\" guide."
+  },
+  "guide": {
+    "button": "Guide",
+    "label": "User guide",
+    "tooltip": "Open the user guide (F1) in your browser, offline. If it is missing next to Ardoise (\"guide\" folder), the guide on GitHub opens instead.",
+    "open": "Open the user guide",
+    "openHint": "In your browser, offline (shortcut: F1). If it is missing next to Ardoise (\"guide\" folder), the guide on GitHub opens instead.",
+    "assistantOpen": "Open the \"Assistant\" guide",
+    "assistantHint": "In your browser, offline. If it is missing next to Ardoise (\"guide\" folder), the guide on GitHub opens instead.",
+    "web": "Guide opened on GitHub (Internet connection): the \"guide\" folder is missing next to Ardoise.",
+    "dismiss": "Close this message"
   },
   "about": {
     "section": "About",
@@ -847,6 +858,7 @@
     "exportFailed": "the export couldn't be written ({detail}); choose another location and check that there is enough space",
     "dragUnavailable": "dragging to another program isn't possible ({detail})",
     "clipboardUnavailable": "the clipboard isn't available ({detail}); close the program that is using it and try again, or export the image as a PNG",
+    "guideUnavailable": "the browser could not open the guide ({detail})",
     "printFailed": "printing failed ({detail}); check the printer and try again, or export the note as a PDF",
     "printUnavailable": "printing is only possible on Windows ({detail}); export the note as a PDF",
     "nothingToSplit": "this split would leave nothing on one side; choose an instant or a zone that divides the note into two non-empty parts",
@@ -1385,6 +1397,7 @@
         "print": "Print the note",
         "close": "Back to the library (first closes the split or the replay)",
         "quit": "Quit Ardoise",
+        "guide": "Open the user guide",
         "leaveReplay": "Leave the replay",
         "playPause": "Play / pause"
       }
@@ -1439,8 +1452,8 @@
       "live": "Live mode shortcuts",
       "replay": "During a replay",
       "presentation": "In the projected window",
-      "typingEditor": "They do nothing while you type in a text field, except Ctrl + S, Ctrl + W, Ctrl + F4 and Ctrl + Q.",
-      "typingLive": "They do nothing while you type in a text field, except Ctrl + W, Ctrl + F4 and Ctrl + Q. Space turns the page even when a button has the focus."
+      "typingEditor": "They do nothing while you type in a text field, except F1, Ctrl + S, Ctrl + W, Ctrl + F4 and Ctrl + Q.",
+      "typingLive": "They do nothing while you type in a text field, except F1, Ctrl + W, Ctrl + F4 and Ctrl + Q. Space turns the page even when a button has the focus."
     }
   },
   "shortcuts": {
@@ -2091,6 +2104,9 @@
         },
         "quit": {
           "action": "Quit Ardoise (after confirmation)"
+        },
+        "guide": {
+          "action": "Open the user guide"
         },
         "marks": {
           "action": "Clear the annotations drawn over the presentation"

@@ -1,11 +1,14 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
+  import GuideNotice from './components/GuideNotice.svelte';
   import Home from './components/Home.svelte';
   import Wizard from './components/Wizard.svelte';
   import { api, errorMessage, genericError, onBridgeRequest, type AppState } from './lib/api';
   import { bridgeScreens, startAppBridge } from './lib/app-bridge.svelte';
   import { closeKey } from './lib/close-keys';
   import { quit } from './lib/editor/window-close';
+  import { isGuideKey } from './lib/guide';
+  import { openGuide } from './lib/guide.svelte';
   import { resolveLocale } from './lib/i18n-core';
   import { catalogs, currentLocale, setLocale, t } from './lib/i18n.svelte';
   import { uiSelfTest } from './lib/selftest';
@@ -39,8 +42,13 @@
     }
   });
 
-  /** Ctrl + Q, whatever is on display. */
+  /** Ctrl + Q and F1 (the user guide), whatever is on display. */
   function onkeydown(event: KeyboardEvent) {
+    if (isGuideKey(event)) {
+      event.preventDefault();
+      void openGuide('guide');
+      return;
+    }
     if (closeKey(event) !== 'quit') return;
     event.preventDefault();
     quit();
@@ -65,3 +73,5 @@
 {:else}
   <Wizard app={appState} onchange={apply} />
 {/if}
+
+<GuideNotice />
