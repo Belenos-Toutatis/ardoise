@@ -14,8 +14,8 @@
    * A modal dialog: title, content, Escape (or Ctrl + W, Ctrl + F4) to close, Tab kept inside, focus
    * moved in on opening and given back on closing. `dismissible` false (an operation is running)
    * ignores those keys. They work wherever the focus is (a button that became disabled, the native
-   * file picker that just closed: the focus is then on the page), for the topmost modal only; the
-   * focus comes back to the card when the control that had it is disabled.
+   * file picker that just closed: the focus is then on the page), for the topmost modal only, once per press (the
+   * repeats of a key held down do nothing); the focus comes back to the card when the control that had it is disabled.
    */
   import { onMount, type Snippet } from 'svelte';
   import { closeKey } from '../lib/close-keys';
@@ -74,6 +74,9 @@
     if (event.defaultPrevented || stack[stack.length - 1] !== id) return;
     event.preventDefault();
     event.stopPropagation();
+    // A key held down is one press: the repeats of the Escape that opened this dialog (the editor's question about
+    // unsaved changes) must not answer it.
+    if (event.repeat) return;
     if (dismissible) onclose();
   }
 

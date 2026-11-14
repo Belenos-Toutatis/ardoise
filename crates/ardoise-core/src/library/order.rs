@@ -254,6 +254,24 @@ impl Library {
         self.update_order(binder, |_| Some(ids.clone()))
     }
 
+    /// Stores `ids` as the order of `binder` only if the order the files hold now is `expected`
+    /// (what the undo of a rearrangement needs: it puts the former order back, never over a newer
+    /// one that another computer, a sync or a newer version wrote since). Both lists are cleaned
+    /// as [`Library::set_binder_order`] cleans its own.
+    ///
+    /// Fails with [`LibraryError::OrderChanged`] when the order is not `expected` (nothing is
+    /// written), and with the errors of [`Library::set_binder_order`].
+    pub fn set_binder_order_if(
+        &self,
+        binder: &Path,
+        expected: &[String],
+        ids: &[String],
+    ) -> Result<(), LibraryError> {
+        let expected = clean_ids(expected.iter().cloned());
+        let ids = clean_ids(ids.iter().cloned());
+        self.update_order_checked(binder, Some(&expected), |_| Some(ids.clone()))
+    }
+
     /// Puts the note `id` right after `after` in the order of `binder`, when `binder` has an
     /// order that lists `after` (a duplicate goes after its original). With no order, or `after`
     /// unlisted, nothing is written: the copy is then at the end like any note that arrives, and
@@ -279,6 +297,17 @@ impl Library {
         binder: &Path,
         change: impl Fn(Option<&Vec<String>>) -> Option<Vec<String>>,
     ) -> Result<(), LibraryError> {
+        self.update_order_checked(binder, None, change)
+    }
+
+    /// [`Library::update_order`], refused with [`LibraryError::OrderChanged`] when `expected` is
+    /// given and the order read is not it (checked on every attempt, so on the version replaced).
+    fn update_order_checked(
+        &self,
+        binder: &Path,
+        expected: Option<&Vec<String>>,
+        change: impl Fn(Option<&Vec<String>>) -> Option<Vec<String>>,
+    ) -> Result<(), LibraryError> {
         let dir = self.binder_dir(binder)?;
         if !dir.is_dir() {
             return Err(LibraryError::BinderNotFound {
@@ -291,11 +320,14 @@ impl Library {
             if let Some(path) = &state.newer {
                 return Err(LibraryError::OrderNewer { path: path.clone() });
             }
-            let expected = match &state.main {
+            let current = state.winner.as_ref().map(|winner| &winner.notes);
+            if expected.is_some_and(|wanted| current != Some(wanted)) {
+                return Err(LibraryError::OrderChanged { path });
+            }
+            let replaced = match &state.main {
                 Main::Missing => None,
                 Main::Readable(stamp) | Main::Damaged(stamp) => Some(*stamp),
             };
-            let current = state.winner.as_ref().map(|winner| &winner.notes);
             let Some(ids) = change(current).map(clean_ids) else {
                 return Ok(());
             };
@@ -316,7 +348,7 @@ impl Library {
             .map_err(|e| io_error(&path)(io::Error::other(e)))?;
             bytes.push(b'\n');
             match write_atomic_checked(&path, &bytes, || {
-                main_is_unchanged(&path, expected.as_ref())
+                main_is_unchanged(&path, replaced.as_ref())
             }) {
                 Ok(_) => {
                     for copy in &state.copies {
@@ -656,6 +688,62 @@ mod tests {
             library.binder_order(Path::new("Classe")),
             ids(&["z", "a", "n"])
         );
+    }
+
+    #[test]
+    fn an_order_is_put_back_only_over_the_order_it_was_made_from() {
+        let (_dir, library) = new_library();
+        library.create_binder(Path::new("Classe")).unwrap();
+        let binder = Path::new("Classe");
+        library
+            .set_binder_order(binder, &ids(&["b", "a", "c"]))
+            .unwrap();
+        // The order is the expected one: the former order comes back.
+        library
+            .set_binder_order_if(binder, &ids(&["b", "a", "c"]), &ids(&["a", "b", "c"]))
+            .unwrap();
+        assert_eq!(library.binder_order(binder), ids(&["a", "b", "c"]));
+        // Another computer wrote since: refused, and what is there is kept.
+        write_order(
+            &order_path(&library, "Classe"),
+            i64::MAX / 2,
+            &["c", "a", "b"],
+        );
+        let error = library
+            .set_binder_order_if(binder, &ids(&["a", "b", "c"]), &ids(&["b", "a", "c"]))
+            .unwrap_err();
+        assert!(
+            matches!(error, LibraryError::OrderChanged { .. }),
+            "{error}"
+        );
+        assert_eq!(error.code(), "orderChanged");
+        assert_eq!(library.binder_order(binder), ids(&["c", "a", "b"]));
+        // No order file at all is not the expected order either.
+        library.create_binder(Path::new("Autre")).unwrap();
+        let error = library
+            .set_binder_order_if(Path::new("Autre"), &ids(&["a"]), &ids(&["b"]))
+            .unwrap_err();
+        assert!(
+            matches!(error, LibraryError::OrderChanged { .. }),
+            "{error}"
+        );
+        assert!(library.binder_order(Path::new("Autre")).is_empty());
+    }
+
+    #[test]
+    fn an_order_is_never_put_back_over_a_file_of_a_newer_version() {
+        let (_dir, library) = new_library();
+        library.create_binder(Path::new("Classe")).unwrap();
+        let path = order_path(&library, "Classe");
+        fs::write(
+            &path,
+            br#"{ "version": 9, "changed": 5, "notes": ["a", "b"] }"#,
+        )
+        .unwrap();
+        let error = library
+            .set_binder_order_if(Path::new("Classe"), &ids(&["a", "b"]), &ids(&["b", "a"]))
+            .unwrap_err();
+        assert_eq!(error.code(), "orderNewer");
     }
 
     #[test]

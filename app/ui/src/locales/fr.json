@@ -191,8 +191,8 @@
         "other": "{count} notes n'ont pas pu être copiées :"
       },
       "undone": {
-        "one": "La copie est à la corbeille.",
-        "other": "Les {count} copies sont à la corbeille."
+        "one": "Copie annulée : « {title} » est à la corbeille.",
+        "other": "Copies annulées : {count} copies sont à la corbeille."
       },
       "undoFailed": {
         "one": "Une copie n'a pas pu être mise à la corbeille :",
@@ -210,7 +210,7 @@
       "applying": "Changement…",
       "error": "Impossible de changer la date : {message}",
       "done": "Date de « {title} » changée.",
-      "undone": "Date de « {title} » rétablie.",
+      "undone": "Changement de date annulé : « {title} » a retrouvé sa date.",
       "undoFailed": "La date n'a pas pu être rétablie :"
     },
     "order": {
@@ -219,7 +219,13 @@
       "moved": "{title} déplacée en position {position} sur {count}.",
       "movedMany": "{count} notes déplacées à partir de la position {position} sur {total}.",
       "atStart": "Déjà au début du classeur.",
-      "atEnd": "Déjà à la fin du classeur."
+      "atEnd": "Déjà à la fin du classeur.",
+      "undone": {
+        "one": "Rangement annulé : « {title} » est revenue à sa place.",
+        "other": "Rangement annulé : {count} notes sont revenues à leur place."
+      },
+      "undoRefused": "Rangement non annulé : l'ordre du classeur a changé depuis (une note copiée, un autre ordinateur, une synchronisation). Le nouvel ordre est conservé.",
+      "undoFailed": "Le rangement n'a pas pu être annulé : {message}"
     },
     "turn": {
       "button": "Tourner",
@@ -242,8 +248,8 @@
         "other": "{count} notes n'ont pas pu être tournées :"
       },
       "undone": {
-        "one": "La note a retrouvé son sens d'origine.",
-        "other": "Les {count} notes ont retrouvé leur sens d'origine."
+        "one": "Rotation annulée : « {title} » a retrouvé son sens d'origine.",
+        "other": "Rotation annulée : {count} notes ont retrouvé leur sens d'origine."
       },
       "undoFailed": {
         "one": "Une note n'a pas pu retrouver son sens d'origine :",
@@ -267,8 +273,8 @@
         "other": "{count} notes mises à la corbeille."
       },
       "restored": {
-        "one": "Note restaurée.",
-        "other": "{count} notes restaurées."
+        "one": "Mise à la corbeille annulée : « {title} » est de retour dans son classeur.",
+        "other": "Mise à la corbeille annulée : {count} notes sont de retour dans leur classeur."
       },
       "progress": "Restauration des notes : {done} sur {total}",
       "failed": {
@@ -333,10 +339,10 @@
         "other": "{count} notes n'ont pas pu être mises à la corbeille (elles restent dans leur classeur) :"
       },
       "restored": {
-        "one": "Classeur « {name} » rétabli avec sa note.",
-        "other": "Classeur « {name} » rétabli avec ses {count} notes."
+        "one": "Suppression du classeur annulée : « {name} » est rétabli avec sa note.",
+        "other": "Suppression du classeur annulée : « {name} » est rétabli avec ses {count} notes."
       },
-      "restoredEmpty": "Classeur « {name} » rétabli."
+      "restoredEmpty": "Suppression du classeur annulée : « {name} » est rétabli."
     },
     "printNone": "Sélectionnez des notes à imprimer, ou ouvrez un classeur."
   },
@@ -950,7 +956,8 @@
     "pageDoubtful": "Une page de la tablette Xiaomi n'a pas été reçue proprement, et la tablette ne la garde peut-être plus : ce qui est arrivé est gardé à part (dossier _ardoise\\rescued-pages\\doubtful de la bibliothèque, ou dossier doubtful sous Ardoise\\blackboard-rescue dans les données locales de ce PC), sans en faire une note. Si une note de cette page a été faite, vérifiez-la, et gardez le journal de diagnostic.",
     "pageNotSaved": "Une page de la tablette Xiaomi n'a pu être écrite ni dans la bibliothèque ni sur ce PC, et la tablette ne la garde plus : Ardoise la garde en mémoire et réessaiera à la prochaine synchronisation. Ne fermez pas Ardoise d'ici là, rendez la bibliothèque accessible ou libérez de la place, puis synchronisez de nouveau.",
     "sheetBoardPosition": "Cette page de la tablette Xiaomi n'est pas dans le même sens que la tablette telle que vous la tenez : une page en largeur se continue avec la tablette tenue en largeur (boutons à droite ou à gauche), une page en hauteur avec la tablette tenue en hauteur (boutons en bas ou en haut). Pour la continuer, choisissez dans les réglages de la tablette Xiaomi une position du même sens que la page, tenez la tablette ainsi, puis reprenez le direct ; ou reprenez le direct sur une autre feuille. Rien n'a été écrit sur la note.",
-    "boardPositionFixed": "Ce direct écrit sur une page de la tablette Xiaomi qui garde sa forme (une feuille reprise, ou une page écrite sur une image) : seules les deux positions du même sens que cette page sont possibles jusqu'à la fin du direct. La position n'a pas changé."
+    "boardPositionFixed": "Ce direct écrit sur une page de la tablette Xiaomi qui garde sa forme (une feuille reprise, ou une page écrite sur une image) : seules les deux positions du même sens que cette page sont possibles jusqu'à la fin du direct. La position n'a pas changé.",
+    "orderChanged": "l'ordre de ce classeur a changé depuis ; il n'a pas été modifié ({detail})"
   },
   "editor": {
     "back": "Bibliothèque",
@@ -1089,6 +1096,16 @@
         "tag": "Les numéros d'équation (\\tag) ne sont pas pris en charge.",
         "tooLarge": "Cette équation est trop grande pour être posée sur la page.",
         "unavailable": "L'outil Équation n'a pas pu se charger : {message}"
+      },
+      "ask": {
+        "title": "Équation non posée",
+        "message": "L'équation en cours n'est pas posée.",
+        "messageEdit": "Les changements de l'équation ne sont pas posés.",
+        "invalid": "Le code est vide ou incorrect : rien ne peut être posé.",
+        "place": "Poser",
+        "update": "Mettre à jour",
+        "drop": "Abandonner",
+        "keep": "Continuer l'écriture"
       }
     },
     "bookmark": {
@@ -1389,7 +1406,7 @@
         "selectAll": "Tout sélectionner (les traits, les textes et les équations du calque choisi)",
         "clipboard": "Copier, couper, coller des traits, des textes et des équations",
         "delete": "Supprimer la sélection",
-        "escape": "Échap, par étapes : annule le geste en cours, termine la saisie d’un texte, d’un signet (le texte reste) ou d’une équation (posée si son code est correct) ; sinon ferme la découpe, la relecture, le recadrage ou le réglage de « Redresser les formes » ouverts ; sinon désélectionne ; sinon enregistre la note et revient à la bibliothèque (pas pendant un enregistrement sonore)",
+        "escape": "Échap, par étapes : annule le geste en cours, termine la saisie d’un texte, d’un signet (le texte reste) ou d’une équation (posée si son code est correct) ; sinon ferme la découpe, la relecture, le recadrage ou le réglage de « Redresser les formes » ouverts ; sinon désélectionne ; sinon revient à la bibliothèque, en demandant d’enregistrer s’il y a des modifications (pas pendant un enregistrement sonore)",
         "fit": "Ajuster : la page entière",
         "fitWidth": "Largeur : la page sur toute la largeur",
         "pages": "Page précédente, page suivante (la note d'avant, celle d'après)",

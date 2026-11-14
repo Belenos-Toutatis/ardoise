@@ -239,7 +239,8 @@ export const api = {
    * Stores the free order of a binder (`''` is the root): the ids of its notes as they are shown, first to last, in
    * the binder's own folder (it follows the sync). `orderConflict` when the file kept changing meanwhile.
    */
-  setBinderOrder: (binder: string, ids: string[]) => call<void>('set_binder_order', { binder, ids }),
+  setBinderOrder: (binder: string, ids: string[], expected?: string[]) =>
+    call<void>('set_binder_order', expected ? { binder, ids, expected } : { binder, ids }),
 
   // --- Library: organising (milestone M10; Rust side: app/src-tauri/src/organize.rs) -------
 

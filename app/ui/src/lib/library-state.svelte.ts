@@ -6,7 +6,7 @@
 import { api, errorMessage, followHandwritingStatus, onLibraryChanged } from './api';
 import { dragOutSupported } from './drag-out';
 import type { HandwritingHit, IndexStatus } from './handwriting';
-import { currentLocale, t } from './i18n.svelte';
+import { currentLocale, t, tn } from './i18n.svelte';
 import { LibraryActivity } from './library-activity.svelte';
 import type { TurnDirection } from './library-batch';
 import { TagColorState } from './tag-colors.svelte';
@@ -40,6 +40,22 @@ import {
 } from './library-logic';
 import type { ExportSource, FileStamp, LibraryListing, MergeLayout, NoteSummary, TrashEntry } from './note';
 
+/** Rearrangements one can undo one after the other, at most. */
+const MAX_ORDER_STEPS = 50;
+
+/** One rearrangement of a binder's free order, as the undo needs it (`LibraryState.undoOrder`). */
+interface OrderStep {
+  /** Number of its notice, which `activity.forget` takes away. */
+  id: number;
+  binder: string;
+  /** The order before the move, and the order the move wrote (what the file must hold for the undo to be done). */
+  before: string[];
+  after: string[];
+  /** The notes that moved: their paths (a held key extends the step of the same cards) and their titles. */
+  paths: string[];
+  titles: string[];
+}
+
 /** Thumbnails kept: at least this many, and enough for the whole library (up to the maximum). */
 const THUMBNAIL_CACHE_MIN = 400;
 const THUMBNAIL_CACHE_MAX = 2000;
@@ -63,10 +79,14 @@ export class LibraryState {
   emptyTrashAsked = $state(false);
   /** Message of the last failed operation, shown in a banner. */
   error = $state<string | null>(null);
-  view = $state<LibraryView>({ kind: 'all' });
+  #view = $state<LibraryView>({ kind: 'all' });
   #query = $state('');
-  /** The order the user chose; what is shown is `effectiveOrder` (the free order of a binder only applies to one). */
-  order = $state<SortOrder>('date-desc');
+  #order = $state<SortOrder>('date-desc');
+  /**
+   * The rearrangements of the free order made in the binder shown, newest last: what Ctrl+Z puts back one by one. Dropped
+   * with the view of the binder or the sort: what Ctrl+Z undoes is what is in front of the user.
+   */
+  #orderSteps: OrderStep[] = [];
   /** Paths of the selected notes. */
   selected = $state<string[]>([]);
   /** True while cards are being dragged (sidebar drop targets light up). */
@@ -93,6 +113,27 @@ export class LibraryState {
   readonly activity = new LibraryActivity(() => this.refresh());
   /** Colours of the tags (`_ardoise/tags.json`), loaded by the sidebar (`tag-colors.svelte.ts`). */
   readonly tagColors = new TagColorState((message) => (this.error = message));
+
+  /** What is shown: all notes, a binder, a tag, the trash. Leaving the binder drops the rearrangements it could undo. */
+  get view(): LibraryView {
+    return this.#view;
+  }
+
+  set view(next: LibraryView) {
+    const here = this.#view;
+    if (!(here.kind === 'binder' && next.kind === 'binder' && here.binder === next.binder)) this.#forgetOrderSteps();
+    this.#view = next;
+  }
+
+  /** The order the user chose; what is shown is `effectiveOrder` (the free order of a binder only applies to one). */
+  get order(): SortOrder {
+    return this.#order;
+  }
+
+  set order(next: SortOrder) {
+    if (next !== this.#order) this.#forgetOrderSteps();
+    this.#order = next;
+  }
 
   /** The writes of the order of a binder under way, and the last of them (`applyOrder`). */
   #orderWrites = 0;
@@ -468,15 +509,15 @@ export class LibraryState {
     const paths = this.dragPaths;
     const change = spot ? moveToSpot(this.visible, paths, spot) : null;
     this.endDrag();
-    if (change) this.applyOrder(change, paths);
+    if (change) this.applyOrder(change, paths, false);
   }
 
   /**
    * The keyboard's way to reorder: the card `path` (or the whole selection when it is part of it) goes one place
    * earlier or later among the notes of its binder, or to its start or end. Said aloud through `announcement`.
-   * Returns whether anything moved.
+   * `repeat`: the key is held down, and the moves of a held key are one step of the undo. Returns whether anything moved.
    */
-  async moveCards(path: string, step: MoveStep): Promise<boolean> {
+  async moveCards(path: string, step: MoveStep, repeat = false): Promise<boolean> {
     if (!this.canReorder) return false;
     const paths = this.isSelected(path) ? [...this.selected] : [path];
     const change = moveByStep(this.visible, paths, step);
@@ -484,7 +525,7 @@ export class LibraryState {
       this.announcement = t(step === 'earlier' || step === 'start' ? 'library.order.atStart' : 'library.order.atEnd');
       return false;
     }
-    this.applyOrder(change, paths);
+    this.applyOrder(change, paths, repeat);
     return true;
   }
 
@@ -492,13 +533,15 @@ export class LibraryState {
    * Stores a new order of one binder: the grid follows at once (so the caller can put the focus back on the card without
    * waiting for the file), and the file is written behind it.
    */
-  private applyOrder(change: OrderChange, paths: string[]): void {
+  private applyOrder(change: OrderChange, paths: string[], repeat: boolean): void {
     this.error = null;
     const titles = paths.map((p) => this.titleOf(p));
     this.announcement =
       titles.length === 1
         ? t('library.order.moved', { title: titles[0], position: change.position, count: change.count })
         : t('library.order.movedMany', { count: titles.length, position: change.position, total: change.count });
+    const before = this.visible.filter((n) => n.binder === change.binder).map((n) => n.id);
+    const step = this.#recordOrderStep({ binder: change.binder, before, after: change.ids, paths, titles }, this.announcement, repeat);
     if (this.listing) this.listing = { ...this.listing, orders: { ...this.listing.orders, [change.binder]: change.ids } };
     // One write after the other, in the order the moves were made: a key held down makes moves faster than the files
     // are written, and two writes at once could end with the older order. The listing is read again once the last
@@ -511,10 +554,101 @@ export class LibraryState {
       } catch (error) {
         this.error = errorMessage(error);
         this.announcement = '';
+        // What was not written cannot be undone.
+        this.#dropOrderStep(step);
       }
     });
     this.#orderChain = write;
     void write.then(async () => {
+      this.#orderWrites -= 1;
+      this.#orderEpoch += 1;
+      if (this.#orderWrites === 0) await this.refresh();
+    });
+  }
+
+  /**
+   * Keeps the move for the undo and shows its notice with « Annuler » (replacing the one of the move before). A held key's
+   * moves are one step: they take over the step of the same cards, if it is the newest thing there is to undo.
+   */
+  #recordOrderStep(move: Omit<OrderStep, 'id'>, message: string, repeat: boolean): OrderStep {
+    const last = this.#orderSteps.at(-1);
+    const held =
+      repeat &&
+      last !== undefined &&
+      last.binder === move.binder &&
+      last.id === this.activity.nextUndoId &&
+      [...last.paths].sort().join(',') === [...move.paths].sort().join(',')
+        ? last
+        : null;
+    const step: OrderStep = held ? { ...move, before: held.before, id: 0 } : { ...move, id: 0 };
+    if (held) {
+      this.#orderSteps.pop();
+      this.activity.forget(held.id);
+    }
+    step.id = this.activity.show(message, () => this.undoOrder(step), { keep: true, group: 'order', silent: true });
+    this.#orderSteps.push(step);
+    while (this.#orderSteps.length > MAX_ORDER_STEPS) {
+      const oldest = this.#orderSteps.shift();
+      if (oldest) this.activity.forget(oldest.id);
+    }
+    return step;
+  }
+
+  #dropOrderStep(step: OrderStep): void {
+    this.#orderSteps = this.#orderSteps.filter((other) => other !== step);
+    this.activity.forget(step.id);
+  }
+
+  #forgetOrderSteps(): void {
+    if (this.#orderSteps.length === 0) return;
+    this.#orderSteps = [];
+    this.activity.forget({ group: 'order' });
+  }
+
+  /**
+   * Whether the order the library holds for the binder of `step` is the one the step wrote, as far as the notes that still
+   * are there go: ids of notes gone since (a copy the undo of its duplication put in the trash) do not count, a note listed
+   * that the step did not write (a copy still there, a note another computer put in) does.
+   */
+  #holdsOrderOf(step: OrderStep, held: string[]): boolean {
+    const known = new Set(this.notes.filter((note) => note.binder === step.binder).map((note) => note.id));
+    const mine = (ids: string[]) => ids.filter((id) => known.has(id));
+    const [now, wrote] = [mine(held), mine(step.after)];
+    return now.length === wrote.length && now.every((id, i) => id === wrote[i]);
+  }
+
+  /**
+   * Ctrl+Z or « Annuler » after a rearrangement: the order before it is written again, through the queue of the writes
+   * (after those of the moves, so that the file holds the order this step wrote), and only over the order the library
+   * holds (`expected`, which the library checks again on the file it replaces): an order that changed meanwhile (another
+   * computer, a sync, a newer version of Ardoise, a note copied) is never overwritten, the undo is refused with a sentence
+   * and the older steps of the binder, which could not be applied either, are forgotten. Says what was undone; the older
+   * step then undoes over the order just put back.
+   */
+  private undoOrder(step: OrderStep): Promise<void> {
+    this.#orderSteps = this.#orderSteps.filter((other) => other !== step);
+    this.#orderWrites += 1;
+    this.#orderEpoch += 1;
+    const run = this.#orderChain.then(async () => {
+      try {
+        const held = this.listing?.orders[step.binder] ?? [];
+        if (!this.#holdsOrderOf(step, held)) throw { code: 'orderChanged', message: step.binder };
+        await api.setBinderOrder(step.binder, step.before, held);
+        if (this.listing) this.listing = { ...this.listing, orders: { ...this.listing.orders, [step.binder]: step.before } };
+        // The file holds what the older step of the binder expects to find: the order put back.
+        const older = this.#orderSteps.filter((other) => other.binder === step.binder).at(-1);
+        if (older) older.after = step.before;
+        this.activity.undone(tn('library.order.undone', step.titles.length, { title: step.titles[0] }));
+      } catch (error) {
+        for (const stale of this.#orderSteps.filter((other) => other.binder === step.binder)) this.#dropOrderStep(stale);
+        const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : null;
+        this.activity.refused(
+          code === 'orderChanged' ? t('library.order.undoRefused') : t('library.order.undoFailed', { message: errorMessage(error) }),
+        );
+      }
+    });
+    this.#orderChain = run;
+    return run.then(async () => {
       this.#orderWrites -= 1;
       this.#orderEpoch += 1;
       if (this.#orderWrites === 0) await this.refresh();

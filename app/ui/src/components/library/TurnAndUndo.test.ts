@@ -101,7 +101,7 @@ describe('turning several notes', () => {
     expect(ui.q('.selection-bar')?.textContent).toContain('Sélection : 2');
 
     await ui.click(ui.button('Annuler', offer!));
-    await vi.waitFor(() => expect(ui!.q('.activity-offer')?.textContent).toContain("Les 2 notes ont retrouvé leur sens d'origine."));
+    await vi.waitFor(() => expect(ui!.q('.activity-offer')?.textContent).toContain("Rotation annulée : 2 notes ont retrouvé leur sens d'origine."));
     expectSameDrawing(stored('Cours de physique').note, before.physique);
     expectSameDrawing(stored('Liste de courses').note, before.courses);
     expect(ui.q('.activity-offer [data-action="undo"]')).toBeNull();
@@ -141,7 +141,7 @@ describe('turning several notes', () => {
 
     // The undo turns back only the notes that were turned.
     await ui.click(ui.button('Annuler', ui.q('.activity-offer')!));
-    await vi.waitFor(() => expect(ui!.q('.activity-offer')?.textContent).toContain('Les 2 notes ont retrouvé'));
+    await vi.waitFor(() => expect(ui!.q('.activity-offer')?.textContent).toContain('Rotation annulée : 2 notes ont retrouvé'));
     expect(stored('Cours de physique').note.page).toEqual({ width: 29700, height: 21600 });
     expect(drawing(stored('Liste de courses').note)).toEqual(drawing(before));
     expectSameDrawing(stored('Réunion parents').note, beforeMeeting);
@@ -236,7 +236,7 @@ describe('several operations', () => {
     // Both outcomes are on display; the turn can still be undone.
     const offers = ui.all('.activity-offer').map((o) => o.textContent ?? '');
     expect(offers.some((o) => o.includes("1 note tournée d'un quart de tour à droite."))).toBe(true);
-    expect(offers.some((o) => o.includes('Note restaurée.'))).toBe(true);
+    expect(offers.some((o) => o.includes('Mise à la corbeille annulée : « '))).toBe(true);
   });
 
   it('undoes the latest notice with Ctrl+Z, but never in a text field', async () => {
@@ -250,7 +250,7 @@ describe('several operations', () => {
     expect(stored('Réunion parents').note.page.width).toBe(21600);
     await ui.key(document.body, 'z', { ctrlKey: true });
     await vi.waitFor(() => expect(stored('Réunion parents').note.page.width).toBe(29700));
-    expect(ui.q('.activity-offer')?.textContent).toContain("La note a retrouvé son sens d'origine.");
+    expect(ui.q('.activity-offer')?.textContent).toContain("Rotation annulée : « Réunion parents » a retrouvé son sens d'origine.");
   });
 });
 
@@ -269,7 +269,7 @@ describe('undo after « Mettre à la corbeille »', () => {
     expect(mockLibrary().trash.size).toBe(0);
     expect(stored('Cours de physique').binder).toBe('Classe/3e B');
     expect(stored('Réunion parents').binder).toBe('Perso');
-    expect(ui.q('.activity-offer')?.textContent).toContain('2 notes restaurées.');
+    expect(ui.q('.activity-offer')?.textContent).toContain('Mise à la corbeille annulée : 2 notes sont de retour dans leur classeur.');
   });
 
   it('trashes every note it can, lists the one that failed and offers to restore the others', async () => {
@@ -294,7 +294,7 @@ describe('undo after « Mettre à la corbeille »', () => {
     expect(ui.q('.activity-offer')?.textContent).toContain('Note moved to the trash.');
     await ui.click(ui.button('Undo', ui.q('.activity-offer')!));
     await vi.waitFor(() => expect(ui!.all('.note-card').length).toBe(3));
-    expect(ui.q('.activity-offer')?.textContent).toContain('Note restored.');
+    expect(ui.q('.activity-offer')?.textContent).toContain('Move to the trash undone: "Liste de courses" is back in its binder.');
   });
 
   it('says which note could not be restored', async () => {

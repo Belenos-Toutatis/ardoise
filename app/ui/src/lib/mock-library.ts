@@ -381,7 +381,14 @@ export function mockLibraryInvoke(command: string, args: Record<string, unknown>
       const library = mockLibrary();
       const binder = cleanBinder(args.binder as string);
       if (binder !== '' && !library.binders.has(binder)) failure('binderNotFound', binder);
-      library.orders.set(binder, [...new Set((args.ids as string[]).filter(Boolean))]);
+      const clean = (ids: string[]) => [...new Set(ids.filter(Boolean))];
+      // With `expected` (the undo of a rearrangement), only over the order the library holds now.
+      if (args.expected) {
+        const held = library.orders.get(binder) ?? [];
+        const wanted = clean(args.expected as string[]);
+        if (held.length !== wanted.length || held.some((id, i) => id !== wanted[i])) failure('orderChanged', binder);
+      }
+      library.orders.set(binder, clean(args.ids as string[]));
       notifyLibraryChanged();
       return undefined;
     }

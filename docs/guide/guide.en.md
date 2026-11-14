@@ -1085,7 +1085,13 @@ comes back as soon as you open a binder again.
   their order. Dropped on a binder of the sidebar, the note changes binder, whatever the sort.
 - **From the keyboard**: `Alt + Left arrow` or `Alt + Right arrow` moves the focused card (or the selection) one place;
   `Alt + Home` or `Alt + End` puts it at the start or the end. A screen reader announces the new place ("Beta moved to
-  position 1 of 3").
+  position 1 of 3"). A key held down (`Alt + arrow` repeating) counts as one arrangement.
+- **Undoing an arrangement**: `Ctrl + Z` (or the **Undo** button of the message shown after the arrangement) puts the previous
+  order back and says what came back: "Rearrangement undone: "Beta" is back where it was." (or "Rearrangement undone: 3 notes are
+  back where they were."). Several arrangements are undone one by one, last first, even once their messages are gone; the list is
+  emptied when you leave the binder or change the sort. Ardoise **never overwrites a newer order**: if the binder's order has
+  changed since (another computer, the sync, a note copied), it does nothing and says so: "Rearrangement not undone: the binder's
+  order has changed since… The new order is kept."
 - **A parent binder** shows its own notes first, then those of each sub-binder in that sub-binder's order (the sub-binders in
   the sidebar's order). A card only moves among the notes of its own binder: arrange a sub-binder by opening it, or by dropping
   its note next to another note of the same sub-binder.
@@ -1216,8 +1222,11 @@ trash are deleted for good after 30 days.
 *Taking it back straight away.* After **Move to trash** (the button or the `Delete` key), a message appears at the bottom
 of the library ("3 notes moved to the trash.") with an **Undo** button that restores the notes. It stays for a few
 seconds (8), and as long as the mouse or the keyboard is on it. `Ctrl + Z` does the same from the library (outside a text
-field, and not in the editor, which has its own **Undo**). The **Undo** messages of **Turn** and of deleting a binder work
-the same way, and `Ctrl + Z` undoes the most recent of these actions. If a note cannot go to the trash (it was deleted
+field, and not in the editor, which has its own **Undo**). The **Undo** messages of **Turn**, **Duplicate**, **Change the date…**
+and deleting a binder work the same way, and `Ctrl + Z` undoes the most recent of these actions; arranging the cards of a binder
+can be undone too (see "Binder order"). **Every undo is followed by a message that says what was undone** ("Move to the trash
+undone: "Shopping list" is back in its binder.", "Copy undone: "Course (copy)" is in the trash.", "Date change undone: …"), read
+aloud by a screen reader and gone by itself after a few seconds. If a note cannot go to the trash (it was deleted
 meanwhile on another computer, for example), the others go anyway; that one is reported and stays selected.
 
 ### Conflict copies and unreadable files
@@ -1243,8 +1252,9 @@ and redo have no limit while the note is open.
 stroke, a shape, a lasso, a move, a question Ardoise is asking on screen) or ends the typing of a text, a bookmark or an
 equation, keeping what is written (an equation with incorrect code stays in its panel); otherwise it closes the panel or the tool that is
 open (the split, the replay, the manual crop, the setting of **Straighten shapes**); otherwise it clears the selection;
-otherwise it **saves the note and goes back to the library**, like the **Library** button but without asking about the
-changes: the save is the answer. If saving fails (the note was changed elsewhere meanwhile, a full disk), the note stays
+otherwise it **goes back to the library**, exactly like the **Library** button: if the note has unsaved changes, Ardoise asks the
+same question (**Save and go back**, **Go back without saving**, **Stay**; `Esc` answers **Stay**); with no changes it goes back
+at once. If saving fails (the note was changed elsewhere meanwhile, a full disk), the note stays
 open and the message says why. While a narration is being recorded, `Esc` never leaves the note: a message asks you to stop
 the recording first. In a text field (the title, a layer's name, a list of choices) and in an open window (export, print…),
 `Esc` stays that of the field or the window; a key held down counts as one press.
@@ -1417,9 +1427,17 @@ document: tap or click the page where you want it (with the pen, the mouse or a 
 code in **LaTeX code**; the **preview** shows, as you type, what will be placed. **Place** (or `Enter`, or `Esc` as for a
 text) puts the equation on the page, where you tapped, and selects it; `Shift + Enter` starts a new line in the code. With an
 empty field, `Esc` closes the panel without placing anything; with incorrect code, the panel stays open, the code and its error
-in it, for you to correct it: nothing is lost. **Cancel** (or another tool) closes the panel without changing anything. Until
+in it, for you to correct it: nothing is lost. **Cancel** closes the panel without changing anything. Until
 the equation is placed, the page does not change; once placed, one `Ctrl + Z` takes it away. While you type, the keys go to the code, never to the editor's shortcuts. The first time, the tool
 takes a second to load.
+
+*An equation is never lost without asking you.* If the field holds code that is not on the page (a new equation, or an equation
+of the page whose code you changed) and you do something that would close the panel (choose another tool, undo, the replay,
+the split, another page, **Library**, close the window, export…), Ardoise first answers: "The equation being written has not been
+placed." with three buttons: **Place** (or **Update**, only if the code is valid: the equation is placed, then what you asked for
+is done), **Drop it** (the code is thrown away, then what you asked for is done) and **Keep writing** (nothing changes; `Esc`
+answers that too). An empty field, or an equation reopened without a change, asks nothing. For **Undo** (undoing the last action), the question has no **Place**
+button: placing the equation to undo it at once would make no sense.
 
 If the code is not correct, the preview says so with MathJax's message (for example "Missing close brace" for a forgotten
 brace) and the equation cannot be placed: nothing is corrected or guessed for you. Ardoise also refuses a character it cannot
@@ -2130,7 +2148,8 @@ keys stay as described in this chapter.
 | `Esc` | Deselect |
 | `F2` | Rename the note |
 | `Delete` | Move the note (or the selection) to the trash |
-| `Ctrl + Z` | Undo the last action whose **Undo** message is displayed (move to trash, **Turn**, deleting a binder) |
+| `Ctrl + Z` | Undo the last action: move to trash, **Duplicate**, **Change the date…**, **Turn**, deleting a binder, arranging the cards of a binder (several arrangements, one by one); a message says what was undone |
+| `Alt + ←`, `Alt + →`, `Alt + Home`, `Alt + End` | In a binder sorted by **Binder order**: move the card (or the selection) one place, or to the start, or to the end |
 
 ### Editor
 
@@ -2143,7 +2162,7 @@ keys stay as described in this chapter.
 | `Ctrl + A` | Select everything (the chosen layer's strokes and texts) |
 | `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copy, cut, paste strokes and texts |
 | `Delete` or `Backspace` | Delete the selection |
-| `Esc` | In steps, one press per step: drop the gesture under way, end the typing of a text or an equation (what is written stays; an equation with incorrect code stays in its panel); close the split, the replay, the crop or the **Straighten shapes** setting; deselect; save the note and go back to the library (never while a narration is being recorded) |
+| `Esc` | In steps, one press per step: drop the gesture under way, end the typing of a text or an equation (what is written stays; an equation with incorrect code stays in its panel); close the split, the replay, the crop or the **Straighten shapes** setting; deselect; go back to the library, asking whether to save if there are changes (never while a narration is being recorded) |
 | `Shift`, `Alt` (held while drawing a shape) | Invert **Regular shape** (`Shift`) or **From the centre** (`Alt`) for that stroke |
 | `Alt + ←`, `Alt + →` | **Previous page**, **Next page** (the note before, the note after in the library) |
 | `V`, `P`, `E`, `T`, `M`, `B`, `H` | Tools **Select**, **Pen**, **Eraser**, **Text**, **Equation**, **Bookmark**, **Move the page** |

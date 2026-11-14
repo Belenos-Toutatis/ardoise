@@ -7,6 +7,13 @@
  * Operations on several notes run one at a time: one asked while another runs (an undo, say)
  * waits for it. Notices pile up (the last few), each with its own delay, so that a notice never
  * takes the place of another one still useful.
+ *
+ * Every undo ends with the same kind of notice (`undone`, `docs/design/interface.md`, "Undoing in
+ * the library"): it says what was undone and what became of the notes, « Mise à la corbeille
+ * annulée : « Titre » est de retour dans son classeur. », polite to a screen reader, gone after a
+ * few seconds; an undo that cannot be done says so under « failures » (`refused`) and changes nothing.
+ * Ctrl+Z undoes the newest undo there is: a notice still on display, or a step kept beyond its notice
+ * (`show`'s `keep`: the free order's, which one undoes several times in a row, well after the notice went).
  */
 import { api, errorMessage, type BinderDeleted, type FailedNote, type TrashedNotes } from './api';
 import { currentLocale, t, tn } from './i18n.svelte';
@@ -33,7 +40,22 @@ export interface Offer {
   message: string;
   /** False for a plain confirmation (after an undo): no « Annuler » button. */
   undoable: boolean;
+  /** False when something else says the same to a screen reader (the notice is then not a live region). */
+  live: boolean;
 }
+
+/** What a notice may ask of `show`. */
+export interface ShowOptions {
+  /** The undo outlives the notice: Ctrl+Z still runs it once the notice is gone (at most `MAX_KEPT` of them). */
+  keep?: boolean;
+  /** Notices of one group replace each other: a new one takes the place of the one before it. */
+  group?: string;
+  /** Not a live region: the screen reader is told by another way. */
+  silent?: boolean;
+}
+
+/** Undo steps kept beyond their notice at most. */
+const MAX_KEPT = 50;
 
 export class LibraryActivity {
   progress = $state<Progress | null>(null);
@@ -43,6 +65,9 @@ export class LibraryActivity {
   offers = $state<Offer[]>([]);
 
   #undos = new Map<number, () => Promise<void>>();
+  /** The undos that outlive their notice, oldest first (`ShowOptions.keep`). */
+  #kept: { id: number; group?: string; undo: () => Promise<void> }[] = [];
+  #groups = new Map<number, string>();
   #timers = new Map<number, ReturnType<typeof setTimeout>>();
   #held = false;
   #ids = 0;
@@ -57,9 +82,20 @@ export class LibraryActivity {
     return this.progress !== null;
   }
 
-  /** The latest notice that can be undone (« Annuler », Ctrl+Z). */
+  /** The latest notice that can be undone (« Annuler »). */
   get latestUndoable(): Offer | null {
     return [...this.offers].reverse().find((offer) => offer.undoable) ?? null;
+  }
+
+  /** What Ctrl+Z undoes: the newest of the notices that can be undone and of the steps kept beyond theirs. */
+  get nextUndoId(): number | undefined {
+    const ids = [...this.offers.filter((offer) => offer.undoable).map((offer) => offer.id), ...this.#kept.map((step) => step.id)];
+    return ids.length > 0 ? Math.max(...ids) : undefined;
+  }
+
+  /** Something can be undone with Ctrl+Z. */
+  get canUndo(): boolean {
+    return this.nextUndoId !== undefined;
   }
 
   /** Stops the running operation after the note being handled. */
@@ -130,7 +166,9 @@ export class LibraryActivity {
     const outcome = await this.batch('library.turn.undoProgress', 'library.turn.undoFailed', turned, (target) =>
       turnNote(target.path, opposite(direction), stamps.get(target.path)),
     );
-    if (outcome && outcome.done.length > 0) this.show(tn('library.turn.undone', outcome.done.length), null);
+    if (outcome && outcome.done.length > 0) {
+      this.undone(tn('library.turn.undone', outcome.done.length, { title: outcome.done[0].title }));
+    }
   }
 
   /**
@@ -158,7 +196,9 @@ export class LibraryActivity {
       if (done.failed.length > 0) throw done.failed[0].error;
       return done.trashed[0]?.id;
     });
-    if (outcome && outcome.done.length > 0) this.show(tn('library.duplicate.undone', outcome.done.length), null);
+    if (outcome && outcome.done.length > 0) {
+      this.undone(tn('library.duplicate.undone', outcome.done.length, { title: outcome.done[0].title }));
+    }
   }
 
   /**
@@ -174,7 +214,7 @@ export class LibraryActivity {
   private async restoreDate(path: string, title: string, created: number, stamp: FileStamp): Promise<void> {
     try {
       await api.setNoteCreated(path, created, stamp);
-      this.show(t('library.date.undone', { title }), null);
+      this.undone(t('library.date.undone', { title }));
     } catch (error) {
       this.failures = { heading: t('library.date.undoFailed'), items: [{ path, title, message: errorMessage(error) }] };
     } finally {
@@ -197,11 +237,14 @@ export class LibraryActivity {
     this.show(message, () => this.restore(entries));
   }
 
-  private async restore(entries: BatchTarget[], done = (count: number) => tn('library.trashUndo.restored', count)): Promise<void> {
+  private async restore(
+    entries: BatchTarget[],
+    done = (count: number, title: string) => tn('library.trashUndo.restored', count, { title }),
+  ): Promise<void> {
     const outcome = await this.batch('library.trashUndo.progress', 'library.trashUndo.failed', entries, (entry) =>
       api.trashRestore(entry.path),
     );
-    if (outcome && outcome.done.length > 0) this.show(done(outcome.done.length), null);
+    if (outcome && outcome.done.length > 0) this.undone(done(outcome.done.length, outcome.done[0].title));
   }
 
   /**
@@ -224,28 +267,58 @@ export class LibraryActivity {
       await api.createBinder(binder).catch(() => undefined);
       if (entries.length === 0) {
         await this.refresh();
-        this.show(t('library.binder.restoredEmpty', { name }), null);
+        this.undone(t('library.binder.restoredEmpty', { name }));
       } else {
         await this.restore(entries, (count) => tn('library.binder.restored', count, { name }));
       }
     });
   }
 
-  /** Runs the undo of the notice `id` (by default the latest that has one). */
-  async undo(id = this.latestUndoable?.id): Promise<void> {
+  /** Runs the undo of the notice (or kept step) `id`, by default the newest there is (Ctrl+Z). */
+  async undo(id = this.nextUndoId): Promise<void> {
     if (id === undefined) return;
-    const undo = this.#undos.get(id);
+    const undo = this.#undos.get(id) ?? this.#kept.find((step) => step.id === id)?.undo;
     this.dismissOffer(id);
+    this.#kept = this.#kept.filter((step) => step.id !== id);
     if (undo) await undo();
   }
 
-  /** Shows a notice for a few seconds; with `undo`, it has an « Annuler » button. */
-  show(message: string, undo: (() => Promise<void>) | null): void {
+  /** The notice every undo ends with: says what was undone, then goes by itself. */
+  undone(message: string): void {
+    this.show(message, null);
+  }
+
+  /** An undo that could not be done, nothing changed: said under the failures, until dismissed. */
+  refused(heading: string): void {
+    this.failures = { heading, items: [] };
+  }
+
+  /**
+   * Shows a notice for a few seconds; with `undo`, it has an « Annuler » button. Returns the notice's number
+   * (`forget` drops it and the undo it keeps).
+   */
+  show(message: string, undo: (() => Promise<void>) | null, options: ShowOptions = {}): number {
     const id = ++this.#ids;
-    if (undo) this.#undos.set(id, undo);
+    if (options.group) {
+      for (const offer of this.offers) if (this.#groups.get(offer.id) === options.group) this.dismissOffer(offer.id);
+      this.#groups.set(id, options.group);
+    }
+    if (undo) {
+      this.#undos.set(id, undo);
+      if (options.keep) this.#kept = [...this.#kept, { id, group: options.group, undo }].slice(-MAX_KEPT);
+    }
     for (const old of this.offers.slice(0, Math.max(0, this.offers.length + 1 - MAX_OFFERS))) this.dismissOffer(old.id);
-    this.offers = [...this.offers, { id, message, undoable: undo !== null }];
+    this.offers = [...this.offers, { id, message, undoable: undo !== null, live: !options.silent }];
     this.#arm(id);
+    return id;
+  }
+
+  /** Drops the notice `id` and the undo it kept, or, given a group, every notice and kept undo of that group. */
+  forget(which: number | { group: string }): void {
+    const matches = (id: number) => (typeof which === 'number' ? id === which : this.#groups.get(id) === which.group);
+    for (const offer of this.offers) if (matches(offer.id)) this.dismissOffer(offer.id);
+    this.#kept = this.#kept.filter((step) => !matches(step.id));
+    for (const id of [...this.#groups.keys()]) if (matches(id) && !this.offers.some((offer) => offer.id === id)) this.#groups.delete(id);
   }
 
   /** Removes the notice `id`, or every notice. */
@@ -255,6 +328,8 @@ export class LibraryActivity {
       clearTimeout(this.#timers.get(offer.id));
       this.#timers.delete(offer.id);
       this.#undos.delete(offer.id);
+      // A notice of a group that has no undo kept beyond it goes from the group with it.
+      if (!this.#kept.some((step) => step.id === offer.id)) this.#groups.delete(offer.id);
     }
     this.offers = id === undefined ? [] : this.offers.filter((offer) => offer.id !== id);
     if (this.offers.length === 0) this.#held = false;

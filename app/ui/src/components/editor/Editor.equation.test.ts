@@ -4,7 +4,8 @@
  * The equation tool in the editor (SPEC §4.4 « Équation », docs/design/equations.md), with the real MathJax: a tap opens
  * the panel there, the preview is drawn from our own path data as the code is typed, an invalid code shows MathJax's
  * error and cannot be placed, « Poser » puts the equation down as one undoable step (selected), Escape ends it as Enter
- * does (the work kept, as for a text frame: an invalid code keeps the panel open), « Annuler » drops it, the keys typed
+ * does (the work kept, as for a text frame: an invalid code keeps the panel open), « Annuler » drops it (another tool asks first:
+ * `Editor.equation-ask.test.ts`), the keys typed
  * never reach the editor's shortcuts, a double click (or a tap of the tool) on an equation reopens its source, and the
  * size and the colours act on the whole equation: selected (with the lasso too, alone or with strokes and texts), or
  * while its panel is open (the preview shows the colour, the focus stays in the field).
@@ -321,11 +322,13 @@ describe('the equation tool', () => {
     expect(v.panel()).toBeNull();
     expect(v.equations()).toHaveLength(0);
     expect(v.dirty()).toBe('no');
-    // Another tool drops it too.
+    // Another tool drops it too, once the question is answered (`Editor.equation-ask.test.ts`).
     await v.tap(6000, 9000);
     await v.write('y');
     await v.drawn();
     v.tool('Stylo').click();
+    await vi.waitFor(() => expect(document.querySelector('[data-action="equation-ask-drop"]')).not.toBeNull());
+    document.querySelector<HTMLButtonElement>('[data-action="equation-ask-drop"]')!.click();
     await tick();
     expect(v.panel()).toBeNull();
     expect(v.equations()).toHaveLength(0);

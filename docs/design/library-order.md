@@ -75,7 +75,7 @@ their times are offsets from `created`. The same date writes nothing. Dates befo
   dropped, at most 100 000): the interface sends the notes of the binder in the order shown. An id of a note that is not
   there any more is therefore not kept: a note restored from the trash arrives at the end, like any arrival. Atomic
   (temporary file in the folder, then rename), and checked against the file it replaces (`write_atomic_checked`,
-  three attempts, then `orderConflict`). Storing the order the file already holds writes nothing.
+  three attempts, then `orderConflict`). Storing the order the file already holds writes nothing. `set_binder_order_if(binder, expected, ids)` is the same write over a given order only (the undo of a rearrangement): `orderChanged` when the order read is not `expected`, nothing written.
 
 ### Conflicts
 
@@ -117,6 +117,7 @@ The copies are not notes and never appear among the library's conflict cards (`L
 - **The keyboard** (required): `Alt+←` / `Alt+→` move the card (or the selection) one place earlier or later in its binder,
   `Alt+Début` / `Alt+Fin` to the start or the end (`moveByStep`). The focus stays on the card, and an `aria-live` region says
   « Beta déplacée en position 1 sur 3 » or that it already is at the end.
+- **Undo** (2026-11-14, Q21): `Ctrl+Z` or the « Annuler » of the move's notice put the previous order back, with « Rangement annulé : « Beta » est revenue à sa place. ». Several moves undo one by one (up to 50 steps, kept beyond the notice), the repeats of a held `Alt+arrow` count as one, the history goes with the view of the binder or the sort, and the undo goes through the same queue as the moves. **It never overwrites a newer order**: `set_binder_order(binder, ids, expected)` writes only if the order the files hold is `expected` (`Library::set_binder_order_if`, `orderChanged` otherwise, checked on every attempt against the file it replaces); the interface also compares with what it last read (notes that are gone do not count, a note another computer listed does), and refuses with a sentence. The details and the other undos of the library: `interface.md`, « Undoing in the library ».
 - The editor's page buttons and `Alt+←/→` walk through `lib.visible`, and the export of several notes takes the selection in
   display order: both follow the free order with no change to the editor.
 

@@ -560,18 +560,24 @@ pub async fn set_note_created(
     .await
 }
 
-/// Stores the free order of a binder: the ids of its notes as they are shown, first to last.
+/// Stores the free order of a binder: the ids of its notes as they are shown, first to last. With
+/// `expected` (the undo of a rearrangement), only over that order: another one, written since,
+/// is refused (`orderChanged`).
 #[tauri::command]
 pub async fn set_binder_order(
     context: State<'_, AppContext>,
     binder: String,
     ids: Vec<String>,
+    expected: Option<Vec<String>>,
 ) -> CommandResult<()> {
     let library = library_of(&context)?;
     blocking(move || {
-        library
-            .set_binder_order(&binder_path(&binder), &ids)
-            .map_err(order_error)
+        let binder = binder_path(&binder);
+        match expected {
+            Some(expected) => library.set_binder_order_if(&binder, &expected, &ids),
+            None => library.set_binder_order(&binder, &ids),
+        }
+        .map_err(order_error)
     })
     .await
 }
