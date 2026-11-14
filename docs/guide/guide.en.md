@@ -171,6 +171,11 @@ The folder contains:
   `guide.fr.html`, `guide.en.html`, `assistant.fr.html` and `assistant.en.html`. The links from one page to the other
   work.
 
+**Opening this guide from Ardoise.** The **Guide** button in the library's top bar, the first block of the **Help** tab of
+the editor and of live mode, and the `F1` key open this guide in your browser, offline, from the `guide` folder next to
+`ardoise.exe`. If that folder is missing (you only kept `ardoise.exe`), the same guide opens on GitHub, and Ardoise
+tells you so: it is then a page on the Internet.
+
 To uninstall, delete that folder (and, if you like, `%LOCALAPPDATA%\Ardoise`, see below). Your notes are not touched:
 they are in your library.
 
@@ -2013,9 +2018,9 @@ AI and stays usable offline; it is the assistant's software that does the work.
 
 **Settings**, **Assistant (MCP)** section, gives the exact text to copy into the assistant, with a **Read only** box so
 that it can only read. Everything is explained step by step, with example requests, in the
-[assistant guide](assistant.en.md) (en français : [L'assistant](assistant.fr.md)). In Ardoise's archive, it is the file
-`guide\assistant.en.html` (and `guide\assistant.fr.html` in French), to open in a web browser; **Settings** reminds you of
-it under the text to copy.
+[assistant guide](assistant.en.md) (en français : [L'assistant](assistant.fr.md)). The
+**Open the "Assistant" guide** button, under the text to copy, opens it in your browser (in Ardoise's archive, it is the
+file `guide\assistant.en.html`, and `guide\assistant.fr.html` in French).
 
 ## 15. Privacy
 
@@ -2088,7 +2093,7 @@ possible to understand what happened.
 
 ## 17. Keyboard shortcuts
 
-These shortcuts do nothing while you are typing in a text field, except those of **Closing and quitting**. Each window also shows its list in the **Help** tab of its side panel: it is the same list, which the application's tests compare with the keys the window really handles.
+`F1` opens this guide, anywhere in the main window. These shortcuts do nothing while you are typing in a text field, except `F1` and those of **Closing and quitting**. Each window also shows its list in the **Help** tab of its side panel: it is the same list, which the application's tests compare with the keys the window really handles.
 
 ### Browser keys
 

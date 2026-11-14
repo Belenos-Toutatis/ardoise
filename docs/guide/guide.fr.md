@@ -182,6 +182,11 @@ Le dossier contient :
   `guide.fr.html`, `guide.en.html`, `assistant.fr.html` et `assistant.en.html`. Les liens d'une page à l'autre
   fonctionnent.
 
+**Ouvrir ce guide depuis Ardoise.** Le bouton **Guide** de la barre du haut de la bibliothèque, le premier bloc de l'onglet
+**Aide** de l'éditeur et du mode direct, et la touche `F1` ouvrent ce guide dans votre navigateur, hors connexion, depuis
+le dossier `guide` placé à côté d'`ardoise.exe`. Si ce dossier manque (vous n'avez gardé que `ardoise.exe`), le même
+guide s'ouvre sur GitHub, et Ardoise vous le dit : c'est alors une page d'Internet.
+
 Pour la désinstallation, supprimez ce dossier (et, si vous le souhaitez, `%LOCALAPPDATA%\Ardoise`, voir plus bas).
 Vos notes, elles, ne sont pas touchées : elles sont dans votre bibliothèque.
 
@@ -2138,9 +2143,9 @@ ne contient aucune IA et reste utilisable hors ligne ; c'est le logiciel de l'as
 
 **Réglages**, section **Assistant (MCP)**, donne le texte exact à copier dans l'assistant, avec une case **Lecture seule** pour
 qu'il ne puisse que lire. Tout est expliqué pas à pas, avec des exemples de demandes, dans le guide
-[L'assistant](assistant.fr.md) (English: [the assistant guide](assistant.en.md)). Dans l'archive d'Ardoise, c'est le
-fichier `guide\assistant.fr.html` (et `guide\assistant.en.html` en anglais), à ouvrir dans un navigateur ; **Réglages**
-le rappelle sous le texte à copier.
+[L'assistant](assistant.fr.md) (English: [the assistant guide](assistant.en.md)). Le bouton
+**Ouvrir le guide « Assistant »**, sous le texte à copier, l'ouvre dans votre navigateur (dans l'archive d'Ardoise, c'est
+le fichier `guide\assistant.fr.html`, et `guide\assistant.en.html` en anglais).
 
 ## 15. Vie privée
 
@@ -2214,7 +2219,7 @@ permet de comprendre ce qui s'est passé.
 
 ## 17. Raccourcis clavier
 
-Ces raccourcis n'agissent pas quand vous tapez dans un champ de texte, sauf ceux de **Fermer et quitter**. Chaque fenêtre
+`F1` ouvre ce guide, partout dans la fenêtre principale. Ces raccourcis n'agissent pas quand vous tapez dans un champ de texte, sauf `F1` et ceux de **Fermer et quitter**. Chaque fenêtre
 montre aussi sa liste dans l'onglet **Aide** de son panneau de côté : c'est la même liste, que les tests de l'application
 comparent aux touches que la fenêtre traite vraiment.
 

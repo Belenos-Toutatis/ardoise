@@ -198,8 +198,8 @@ même `ardoise.exe` ramène la fenêtre déjà ouverte au premier plan ; deux ex
 
 ## Guides
 
-Dans l'archive de distribution, les guides sont les pages HTML du dossier `guide\` ; dans le dépôt, ce sont les
-fichiers Markdown suivants.
+Dans l'archive de distribution, les guides sont les pages HTML illustrées du dossier `guide\` ; le bouton **Guide**
+d'Ardoise (ou `F1`) les ouvre dans le navigateur. Dans le dépôt, ce sont les fichiers Markdown suivants.
 
 - [Guide d'utilisation](docs/guide/guide.fr.md) · [User guide](docs/guide/guide.en.md)
 - [L'assistant (MCP)](docs/guide/assistant.fr.md) · [The assistant (MCP)](docs/guide/assistant.en.md)
@@ -209,8 +209,9 @@ fichiers Markdown suivants.
 ## Vie privée
 
 Vos notes restent dans votre dossier : pas de compte, pas de nuage. Ardoise n'écoute sur aucun port réseau, sauf pendant
-un partage sur le réseau que vous avez lancé vous-même. La seule connexion sortante possible est le téléchargement, à
-votre demande, de l'encodeur vidéo de secours OpenH264 chez Cisco. La reconnaissance d'écriture est celle de Windows,
+un partage sur le réseau que vous avez lancé vous-même. Ardoise ne va sur Internet qu'à votre demande, dans deux
+cas : le téléchargement de l'encodeur vidéo de secours OpenH264 chez Cisco, et le bouton **Guide** (ou `F1`) quand le
+dossier `guide` est absent à côté d'`ardoise.exe`, qui ouvre alors le guide sur GitHub dans votre navigateur. La reconnaissance d'écriture est celle de Windows,
 hors connexion. Aucune note personnelle ne figure dans le dépôt.
 
 ## Licence et crédits
@@ -326,8 +327,9 @@ is in French and English. The pictures below show the demo library and simulated
 - **Guides**: [user guide](docs/guide/guide.en.md), [assistant guide](docs/guide/assistant.en.md), [release
   notes](docs/notes-de-version.md) (French, with an English section). In the archive, the guides are the HTML pages of
   the `guide\` folder.
-- **Privacy**: no account, no cloud, no listening network port except during a network share you start yourself; the
-  only possible outgoing connection is the optional download of the OpenH264 encoder from Cisco. No personal notes are
+- **Privacy**: no account, no cloud, no listening network port except during a network share you start yourself; Ardoise
+  only goes online when you ask it to: the optional download of the OpenH264 encoder from Cisco, and the **Guide** button
+  (or `F1`) when the `guide` folder is missing next to `ardoise.exe`, which then opens the guide on GitHub. No personal notes are
   in the repository.
 - **Licence**: GPL-3.0-or-later. Credits: the [Tuhi](https://github.com/tuhiproject/tuhi) project for its documentation
   of the Wacom protocol; MathJax (Apache 2.0); the Latin Modern (GUST Font License) and Andika (SIL OFL 1.1) fonts;
