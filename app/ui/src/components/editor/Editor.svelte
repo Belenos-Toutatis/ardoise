@@ -178,6 +178,7 @@
   import {
     isEquationObject,
     isTextObject,
+    type EquationObject,
     type BackgroundImage,
     type ExportSource,
     type FileStamp,
@@ -420,7 +421,14 @@
    * equation rewritten (`at`: under it, where the panel stands), the source it starts with, and its number (a new
    * panel each time it opens).
    */
-  let equationEdit = $state.raw<{ at: Vec; id: string | null; latex: string; session: number } | null>(null);
+  let equationEdit = $state.raw<{
+    at: Vec;
+    id: string | null;
+    /** The equation rewritten, as it was when its panel opened (put back from it if it is deleted meanwhile). */
+    original: EquationObject | null;
+    latex: string;
+    session: number;
+  } | null>(null);
   let equationSessions = 0;
   /** The selected equations the tool's size acts on. */
   const equationTargets = $derived.by((): number => {
@@ -1413,22 +1421,23 @@
 
   /**
    * A tap of the equation tool (or a double click on an equation): the panel for a new equation there, or for the one
-   * tapped. A tap elsewhere while a new equation is written moves where it will go (the source stays).
+   * tapped. A tap while a new equation is written, wherever it lands (on another equation too), moves where it will go:
+   * the source typed stays.
    */
-  function startEquation(request: { kind: 'new'; at: Vec } | { kind: 'edit'; index: number }) {
+  function startEquation(request: { kind: 'new'; at: Vec } | { kind: 'edit'; index: number; at: Vec }) {
     if (!doc || !history || replaying || split) return;
     endText();
     if (tools.mode !== 'equation') tools = { ...tools, mode: 'equation' };
+    if (equationEdit && equationEdit.id === null) {
+      equationEdit = { ...equationEdit, at: request.at };
+      return;
+    }
     if (request.kind === 'new') {
       if (!canDraw(doc)) return hiddenLayerNotice();
-      if (equationEdit && equationEdit.id === null) {
-        equationEdit = { ...equationEdit, at: request.at };
-        return;
-      }
       // The tool's size and colour are for the new equation, not for one selected before.
       reselect(clearSelection(doc));
       equationSessions += 1;
-      equationEdit = { at: request.at, id: null, latex: '', session: equationSessions };
+      equationEdit = { at: request.at, id: null, original: null, latex: '', session: equationSessions };
       return;
     }
     const object = objectsOf(doc.note)[request.index];
@@ -1438,34 +1447,47 @@
     // Selected while it is rewritten: the colours and the sizes act on it.
     reselect(selectItems(doc, [], [request.index]));
     equationSessions += 1;
-    equationEdit = { at: { x: box.x, y: box.y + box.height }, id: object.id, latex: object.latex, session: equationSessions };
+    equationEdit = {
+      at: { x: box.x, y: box.y + box.height },
+      id: object.id,
+      original: object,
+      latex: object.latex,
+      session: equationSessions,
+    };
   }
 
   /** « Poser » or « Mettre à jour »: one undoable step, the equation selected afterwards; the panel closes. */
   function placeEquation(latex: string, drawing: EquationDrawing) {
     const edit = equationEdit;
     if (!edit || !doc || !history) return;
-    equationEdit = null;
     const objects = objectsOf(doc.note);
     const index = edit.id === null ? -1 : objects.findIndex((o) => o.id === edit.id);
     const existing = index >= 0 ? objects[index] : undefined;
     if (existing && isEquationObject(existing)) {
+      equationEdit = null;
       const next = redrawnEquation(existing, latex, drawing);
       change(selectItems(replaceObjectAt(doc, index, next), [], [index]));
       return;
     }
-    // A new one (or one that went meanwhile: put down anew where its panel stood).
+    // A new one, or one that went meanwhile (deleted while its panel was open): put back as it was, rewritten. The
+    // panel stays open, the source kept, while the chosen layer is hidden.
     if (!canDraw(doc)) return hiddenLayerNotice();
-    const object = newEquationObject({
-      id: newObjectId(),
-      layer: doc.activeLayer,
-      t: textTime(doc.note),
-      at: edit.at,
-      size: equationToolSize(tools),
-      latex,
-      drawing,
-      color: tools.color,
-    });
+    equationEdit = null;
+    const object = edit.original
+      ? {
+          ...redrawnEquation(edit.original, latex, drawing),
+          layer: edit.original.layer < doc.note.layers.length ? edit.original.layer : doc.activeLayer,
+        }
+      : newEquationObject({
+          id: newObjectId(),
+          layer: doc.activeLayer,
+          t: textTime(doc.note),
+          at: edit.at,
+          size: equationToolSize(tools),
+          latex,
+          drawing,
+          color: tools.color,
+        });
     const next = addObjectToDoc(doc, object);
     change(selectItems(next, [], [objectsOf(next.note).length - 1]));
   }

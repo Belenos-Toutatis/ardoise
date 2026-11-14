@@ -558,10 +558,8 @@ fn equation_body(map: &Map<String, Value>) -> Option<EquationBody> {
     let body = EquationBody {
         latex: map.get("latex")?.as_str()?.to_owned(),
         path: map.get("path")?.as_str()?.to_owned(),
-        color: match map.get("color") {
-            None => Rgba::BLACK,
-            Some(value) => serde_json::from_value(value.clone()).ok()?,
-        },
+        // Required, as the interface requires it (`isEquationObject`): both read the same objects.
+        color: serde_json::from_value(map.get("color")?.clone()).ok()?,
     };
     body.is_readable().then_some(body)
 }
@@ -749,7 +747,8 @@ mod tests {
     fn an_equation_this_version_cannot_read_is_kept_and_not_drawn() {
         let base = json!({
             "kind": "equation", "id": "e", "layer": 0, "t": 0, "x": 1, "y": 2,
-            "width": 30, "height": 40, "latex": "x", "path": "M0 0L1 0L1 1Z"
+            "width": 30, "height": 40, "latex": "x", "path": "M0 0L1 0L1 1Z",
+            "color": {"r": 0, "g": 0, "b": 0, "a": 255}
         });
         let read = |change: &dyn Fn(&mut Value)| {
             let mut value = base.clone();
@@ -759,9 +758,15 @@ mod tests {
         };
         let (fine, _) = read(&|_| {});
         assert!(fine.as_equation().is_some() && fine.body.is_drawn());
-        let hostile: [(&str, &dyn Fn(&mut Value)); 9] = [
+        let hostile: [(&str, &dyn Fn(&mut Value)); 11] = [
             ("no path", &|v| {
                 v.as_object_mut().unwrap().remove("path");
+            }),
+            ("no colour", &|v| {
+                v.as_object_mut().unwrap().remove("color");
+            }),
+            ("colour beyond a byte", &|v| {
+                v["color"] = json!({"r": 300, "g": 0, "b": 0, "a": 255})
             }),
             ("no source", &|v| {
                 v.as_object_mut().unwrap().remove("latex");

@@ -88,6 +88,8 @@
 
   function schedule() {
     clearTimeout(timer);
+    // Typed after Enter: what is put down must be what is now in the field, so Enter must be pressed again.
+    placeWhenReady = false;
     // Nothing typed: nothing to say yet.
     if (source.trim() === '') {
       request++;

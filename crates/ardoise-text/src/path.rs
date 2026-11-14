@@ -228,11 +228,13 @@ impl PathReader<'_> {
         }
         let text = std::str::from_utf8(&self.bytes[start..self.at])
             .map_err(|_| PathDataError::Syntax(start))?;
-        let value: f32 = text.parse().map_err(|_| PathDataError::Syntax(start))?;
-        if !value.is_finite() || value.abs() > self.max_abs {
+        // Compared before rounding to `f32`, as the interface compares it (in `f64`): a value just
+        // beyond the limit is refused on both sides.
+        let value: f64 = text.parse().map_err(|_| PathDataError::Syntax(start))?;
+        if !value.is_finite() || value.abs() > f64::from(self.max_abs) {
             return Err(PathDataError::OutOfRange);
         }
-        Ok(value)
+        Ok(value as f32)
     }
 
     fn point(&mut self) -> Result<[f32; 2], PathDataError> {
@@ -430,6 +432,12 @@ mod tests {
             Path::from_svg("M0 2000000", LIMIT, 1e6),
             Err(PathDataError::OutOfRange)
         );
+        // Just beyond the limit, though it rounds to it as an `f32`.
+        assert_eq!(
+            Path::from_svg("M1000000.02 0", LIMIT, 1e6),
+            Err(PathDataError::OutOfRange)
+        );
+        assert!(Path::from_svg("M1000000 -1000000", LIMIT, 1e6).is_ok());
         let huge = format!("M{} 0", "9".repeat(60));
         assert_eq!(
             Path::from_svg(&huge, LIMIT, 1e6),

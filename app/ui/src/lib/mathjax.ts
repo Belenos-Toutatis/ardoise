@@ -85,18 +85,22 @@ function start(): Engine {
   RegisterHTMLHandler(adaptor);
   const font = new MathJaxNewcmFont();
   font.addExtension(MathJaxMhchemFontExtension);
-  const tex = new TeX({
-    packages: TEX_PACKAGES,
-    // An error is reported, not drawn in red in the formula.
-    formatError: (_jax: unknown, error: unknown) => {
-      throw error;
-    },
-  });
   const svg = new SVG({ fontData: font, fontCache: 'none' });
-  const document = mathjax.document('', { InputJax: tex, OutputJax: svg });
   engine = {
     adaptor,
-    convert: (latex) => mathjax.handleRetriesFor(() => document.convert(latex, { display: true })),
+    convert: (latex) => {
+      // A TeX input of its own for each conversion (about 2 ms): what one equation defines (`\newcommand`, `\def`,
+      // `\label`) must not change how another is drawn, nor make it depend on what was typed before in the session.
+      const tex = new TeX({
+        packages: TEX_PACKAGES,
+        // An error is reported, not drawn in red in the formula.
+        formatError: (_jax: unknown, error: unknown) => {
+          throw error;
+        },
+      });
+      const document = mathjax.document('', { InputJax: tex, OutputJax: svg });
+      return mathjax.handleRetriesFor(() => document.convert(latex, { display: true }));
+    },
   };
   return engine;
 }

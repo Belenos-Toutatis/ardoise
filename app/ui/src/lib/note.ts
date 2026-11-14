@@ -3,7 +3,7 @@
  * are page coordinates in device units (10 µm), origin top-left; an A4 landscape page is
  * 29700 × 21600. Times are milliseconds since `created`.
  */
-import { EQUATION_MAX_SOURCE_CHARS, readEquationPath, sourceLength } from './equation-path';
+import { EQUATION_MAX_SOURCE_CHARS, readEquationPath, sourceLength, writeEquationPath } from './equation-path';
 import type { InkPoint, Tool } from './ink';
 import type { PathStep } from './text';
 import type { NarrationInfo } from './video';
@@ -181,6 +181,31 @@ export function equationDrawing(object: PageObject): PathStep[] | null {
   return steps;
 }
 
+/** The drawing of each equation written out again, kept per object. */
+const rewritten = new WeakMap<PageObject, string>();
+
+/**
+ * An equation's drawing as path data written from the steps read (`writeEquationPath`), for an SVG `<path d>`: the
+ * browser then draws what Rust draws, even from stored data that Rust's reader accepts and SVG's would not (commas in
+ * places SVG forbids them). Empty when the drawing cannot be read.
+ */
+export function equationPathData(object: PageObject): string {
+  let d = rewritten.get(object);
+  if (d === undefined) {
+    const steps = equationDrawing(object);
+    d = steps ? writeEquationPath(steps) : '';
+    rewritten.set(object, d);
+  }
+  return d;
+}
+
+/** A colour as Rust reads it (`Rgba`: four integers 0 to 255). */
+function isRgba(value: unknown): value is Rgba {
+  if (typeof value !== 'object' || value === null) return false;
+  const { r, g, b, a } = value as Record<string, unknown>;
+  return [r, g, b, a].every((c) => typeof c === 'number' && Number.isInteger(c) && c >= 0 && c <= 255);
+}
+
 /**
  * An equation this version can read and draw, as Rust reads it (`equation_body`): a source and a drawing within their
  * limits, the drawing in the grammar, a colour. One that is not is kept but neither drawn nor selectable.
@@ -190,8 +215,7 @@ export function isEquationObject(object: PageObject): object is EquationObject {
     object.kind === 'equation' &&
     typeof object.latex === 'string' &&
     sourceLength(object.latex) <= EQUATION_MAX_SOURCE_CHARS &&
-    typeof object.color === 'object' &&
-    object.color !== null &&
+    isRgba(object.color) &&
     equationDrawing(object) !== null
   );
 }

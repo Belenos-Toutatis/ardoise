@@ -293,6 +293,46 @@ describe('the equation tool', () => {
     expect(all[1].scale).toBeCloseTo(0.9, 6);
   });
 
+  it('keeps the source typed when the page is tapped again, even on another equation, and puts it down there', async () => {
+    const v = await render();
+    await placeAt(v, 6000, 9000, 'E = mc^2');
+    const first = (await v.saved()).find((o) => o.kind === 'equation') as EquationObject;
+    await v.tap(6000, 15000);
+    await v.write('F = ma');
+    // A tap on the first equation moves where the new one goes; its source stays in the field.
+    await v.tap(first.x + 50, first.y + (first.height * first.scale) / 2);
+    expect(v.field()!.value).toBe('F = ma');
+    await v.drawn();
+    v.placeButton().click();
+    await tick();
+    const all = (await v.saved()).filter((o): o is EquationObject => o.kind === 'equation');
+    expect(all.map((o) => o.latex)).toEqual(['E = mc^2', 'F = ma']);
+    expect(all[1].x).toBeCloseTo(first.x + 50, 3);
+  });
+
+  it('puts an equation deleted while its panel is open back as it was, rewritten', async () => {
+    const v = await render();
+    await placeAt(v, 6000, 9000, 'x^2');
+    v.q<HTMLButtonElement>('.swatch[aria-label="Rouge"]')!.click();
+    await tick();
+    const before = (await v.saved()).find((o) => o.kind === 'equation') as EquationObject;
+    v.tool('Sélection').click();
+    await tick();
+    await v.dblclick(before.x + 10, before.y + (before.height * before.scale) / 2);
+    expect(v.field()!.value).toBe('x^2');
+    // The page has the key now: Delete removes the selected equation, the one being rewritten.
+    v.field()!.blur();
+    await v.key('Delete');
+    expect(v.equations()).toHaveLength(0);
+    await v.write('x^3');
+    await v.drawn();
+    v.placeButton().click();
+    await tick();
+    const after = (await v.saved()).find((o) => o.kind === 'equation') as EquationObject;
+    expect(after.latex).toBe('x^3');
+    expect([after.x, after.y, after.scale, after.color]).toEqual([before.x, before.y, before.scale, before.color]);
+  });
+
   it('speaks English', async () => {
     setLocale('en');
     const v = await render();

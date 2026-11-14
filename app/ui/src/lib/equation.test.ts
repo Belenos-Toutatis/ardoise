@@ -45,6 +45,8 @@ describe('stored path data (Rust’s grammar)', () => {
       'M0 0 #',
       '<script>',
       'M0 2000000',
+      // Just beyond the limit (Rust compares before rounding to f32, as here).
+      'M1000000.02 0',
       'M0 0 é',
     ]) {
       expect(readEquationPath(bad), bad).toBeNull();
@@ -192,6 +194,17 @@ describe('LaTeX to drawing, with the real MathJax', () => {
     expect(await convertLatex('x = 1 \\tag{1}')).toEqual({ ok: false, problem: { kind: 'unsupported', what: 'tag' } });
     // A converter that throws (MathJax could not load): said, not thrown.
     expect(await convertLatex('x', () => Promise.reject(new Error('boom')))).toEqual({ ok: false, problem: { kind: 'latex', message: 'boom' } });
+  });
+
+  it('forgets what an equation defines before the next one is drawn', async () => {
+    await draw('\\newcommand{\\R}{\\mathbb{R}} x \\in \\R');
+    expect(await convertLatex('x \\in \\R')).toEqual({ ok: false, problem: { kind: 'latex', message: 'Undefined control sequence \\R' } });
+    await draw('\\renewcommand{\\frac}[2]{#2} \\frac{1}{2}');
+    const half = await draw('\\frac{1}{2}');
+    expect(half.height).toBeGreaterThan(1000);
+    // A label typed twice (each keystroke draws the preview again) is not « multiply defined ».
+    await draw('\\label{a} x');
+    await draw('\\label{a} x');
   });
 
   it('asks for the parts of the font by their file names', () => {

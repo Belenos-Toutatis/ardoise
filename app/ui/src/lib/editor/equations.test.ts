@@ -54,6 +54,11 @@ describe('equations in the editor', () => {
       expect(selectable(bad), path).toBe(false);
     }
     expect(isEquationObject({ ...equation(), latex: 'x'.repeat(4001) })).toBe(false);
+    // The colour as Rust reads it: present, four bytes.
+    expect(isEquationObject({ ...equation(), color: { r: 300, g: 0, b: 0, a: 255 } })).toBe(false);
+    expect(isEquationObject({ ...equation(), color: {} as EquationObject['color'] })).toBe(false);
+    const { color: _, ...colourless } = equation();
+    expect(isEquationObject(colourless as PageObject)).toBe(false);
     expect(isEquationObject({ ...equation(), latex: 'é'.repeat(4000) })).toBe(true);
   });
 

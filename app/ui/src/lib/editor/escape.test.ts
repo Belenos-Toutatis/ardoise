@@ -59,3 +59,13 @@ describe('what Escape does', () => {
     expect(step({ dragging: true, owned: true })).toBe('ignore');
   });
 });
+
+describe('Escape and the equation being written', () => {
+  it('drops the equation from its own field, after a gesture and before the panels and the selection', () => {
+    expect(step({ editingEquation: true, typing: true, selected: 1 })).toBe('cancelEquation');
+    expect(step({ editingEquation: true, split: true })).toBe('cancelEquation');
+    expect(step({ editingEquation: true, dragging: true })).toBe('cancelDrag');
+    expect(step({ editingEquation: true, owned: true })).toBe('ignore');
+    expect(step({ editingEquation: false, typing: true })).toBe('ignore');
+  });
+});

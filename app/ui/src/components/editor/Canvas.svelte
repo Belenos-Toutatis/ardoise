@@ -117,7 +117,7 @@
   import { nextStrokeBase, type StrokeClock } from '../../lib/editor/writing-clock';
   import { t } from '../../lib/i18n.svelte';
   import type { Ink, InkPoint } from '../../lib/ink';
-  import { cssColor, isEquationObject, isTextObject, type Stroke, type TextObject } from '../../lib/note';
+  import { cssColor, equationPathData, isEquationObject, isTextObject, type Stroke, type TextObject } from '../../lib/note';
   import type { InProgress } from '../../lib/projection-feed';
   import type { NarrationInfo } from '../../lib/video';
 
@@ -202,7 +202,7 @@
     /** The field of the frame being typed lost the focus. */
     ontextblur?: () => void;
     /** A tap with the equation tool (or a double click on an equation): a new equation at `at`, or rewriting equation `index`. */
-    onequation?: (request: { kind: 'new'; at: Vec } | { kind: 'edit'; index: number }) => void;
+    onequation?: (request: { kind: 'new'; at: Vec } | { kind: 'edit'; index: number; at: Vec }) => void;
     /** The page point the equation panel stands by (where the new equation goes, or under the one rewritten); null: closed. */
     equationAnchor?: Vec | null;
     /** The equation panel, given where to stand in the canvas area (pixels) and how wide. */
@@ -323,8 +323,8 @@
         if (!object || !(isTextObject(object) || isEquationObject(object))) continue;
         out.push({
           i: item.index,
-          // An equation's drawing is stored as path data in its own units (checked: `isEquationObject`).
-          d: isTextObject(object) ? glyphPath(object) : object.path,
+          // An equation's drawing, read with Rust's grammar and written out again (`equationPathData`).
+          d: isTextObject(object) ? glyphPath(object) : equationPathData(object),
           fill: cssColor(object.color),
           highlighter: false,
           selected: selectedObjects.has(item.index),
@@ -386,7 +386,7 @@
   /** A tap with the equation tool at `p`: rewriting the equation of the chosen layer under it, or a new one there. */
   function equationTap(p: Vec) {
     const hit = equationAt(doc.note, p, 6 / view.scale, doc.activeLayer);
-    onequation?.(hit !== null ? { kind: 'edit', index: hit } : { kind: 'new', at: p });
+    onequation?.(hit !== null ? { kind: 'edit', index: hit, at: p } : { kind: 'new', at: p });
   }
 
   /** A tap of the tool in use (the text or the equation tool). */
@@ -405,7 +405,7 @@
     const equation = onequation ? equationAt(doc.note, p, 6 / view.scale, doc.activeLayer) : null;
     if (equation !== null) {
       e.preventDefault();
-      onequation?.({ kind: 'edit', index: equation });
+      onequation?.({ kind: 'edit', index: equation, at: p });
       return;
     }
     if (!ontext) return;
