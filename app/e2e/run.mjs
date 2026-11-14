@@ -12,6 +12,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, wr
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { keepTemp, makeTemp, removeStaleTemps, removeTemp, removeTemps } from './temp-dirs.mjs';
 import { fileURLToPath } from 'node:url';
 import { journeys as mainJourneys } from './journeys.mjs';
 import { backgroundJourneys } from './journeys-m7-background.mjs';
@@ -98,7 +99,7 @@ function freePort() {
  * for the ones that stop Chromium from pausing a window it thinks hidden).
  */
 async function startApp(language, port, args = [], { settings = '', env = {}, browserArgs = '' } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), `ardoise-e2e-${language}-`));
+  const dir = makeTemp(`ardoise-e2e-${language}-`);
   const appExe = join(dir, 'ardoise.exe');
   copyFileSync(exe, appExe);
   const library = join(dir, 'Bibliothèque');
@@ -331,6 +332,7 @@ async function startApp(language, port, args = [], { settings = '', env = {}, br
   return app;
 }
 
+removeStaleTemps();
 let failures = 0;
 // A random base port: two runs at the same time (another worktree, another session) must not drive each other's window.
 let port = Number(process.env.ARDOISE_E2E_PORT) || 9400 + 100 * Math.floor(Math.random() * 40);
@@ -375,14 +377,10 @@ for (const language of ['fr', 'en']) {
       console.log(`  → ${label} : ÉCHEC${shot ? ` (capture : ${shot})` : ''}`);
     } finally {
       await app.close();
-      // Only a passed journey leaves nothing behind; a failed one keeps its folder and capture.
-      if (passed) {
-        try {
-          rmSync(app.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-        } catch {
-          // A locked temporary file is not a test failure.
-        }
-      }
+      // Only a passed journey leaves nothing behind (at once, or at the end of the run when WebView2 still holds a
+      // file); a failed one keeps its folder and capture, which a later run removes after a day.
+      if (passed) removeTemp(app.dir);
+      else keepTemp(app.dir);
     }
   }
 }
@@ -400,4 +398,5 @@ if (!only || only.some((part) => 'serveur MCP'.includes(part))) {
 const leftEdges = await sweepBrowsers();
 if (leftEdges > 0) console.log(`\nAttention : ${leftEdges} processus Edge sans fenêtre restaient ouverts après leurs parcours ; arrêtés.`);
 console.log(failures === 0 ? '\nTous les parcours ont réussi.' : `\n${failures} parcours en échec.`);
+await removeTemps();
 process.exit(failures === 0 ? 0 : 1);

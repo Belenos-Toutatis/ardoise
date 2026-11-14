@@ -9,6 +9,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { makeTemp } from './temp-dirs.mjs';
 import { deflateSync } from 'node:zlib';
 
 export const WRITE_ONLY_TOOLS = [
@@ -85,7 +86,7 @@ async function notesByTitle(session) {
  */
 export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold, language }) {
   const app = makeApp();
-  const out = mkdtempSync(join(tmpdir(), 'ardoise-mcp-out-'));
+  const out = makeTemp('ardoise-mcp-out-');
   const session = startServer(app);
   const expectError = async (name, args, code) => {
     const result = await session.call(name, args);

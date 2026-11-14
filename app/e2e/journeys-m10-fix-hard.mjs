@@ -15,6 +15,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { makeTemp } from './temp-dirs.mjs';
 import { fileURLToPath } from 'node:url';
 
 const locales = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'src', 'locales');
@@ -150,7 +151,7 @@ export const hardFixJourneys = [
       });
 
       await check('une copie dans un autre dossier démarre à côté', async () => {
-        const dir = mkdtempSync(join(tmpdir(), 'ardoise-e2e-other-copy-'));
+        const dir = makeTemp('ardoise-e2e-other-copy-');
         copyFileSync(exe, join(dir, 'ardoise.exe'));
         writeFileSync(join(dir, 'ardoise.toml'), `language = "${app.language}"\n`);
         mkdirSync(join(dir, 'LocalAppData'));

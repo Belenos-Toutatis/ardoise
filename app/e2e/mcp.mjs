@@ -15,6 +15,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { makeTemp } from './temp-dirs.mjs';
 import { fileURLToPath } from 'node:url';
 import { mcpWriteTools } from './mcp-write.mjs';
 
@@ -132,7 +133,7 @@ export class McpSession {
 
 /** A portable copy of `exe` with a demo library and this PC's library setting, in a temporary folder. */
 export function prepareApp(exe, language = 'fr') {
-  const dir = mkdtempSync(join(tmpdir(), `ardoise-mcp-${language}-`));
+  const dir = makeTemp(`ardoise-mcp-${language}-`);
   const appExe = join(dir, 'ardoise.exe');
   copyFileSync(exe, appExe);
   const library = join(dir, 'Bibliothèque');

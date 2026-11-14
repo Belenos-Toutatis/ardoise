@@ -29,6 +29,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import { makeTemp } from './temp-dirs.mjs';
 import { fileURLToPath } from 'node:url';
 import { openTab } from './side-panel.mjs';
 
@@ -354,7 +355,7 @@ export async function sweepBrowsers() {
  * `messages`: every console message of level error or warning, log entry and uncaught exception of the page.
  */
 export async function startBrowser(exe, extraArgs = []) {
-  const dir = mkdtempSync(join(tmpdir(), 'ardoise-e2e-edge-'));
+  const dir = makeTemp('ardoise-e2e-edge-');
   liveProfiles.add(dir);
   const port = await freePort();
   const child = spawn(
