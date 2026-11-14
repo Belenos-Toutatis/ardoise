@@ -6,8 +6,10 @@
    * from MathJax's markup. The conversion waits for the typing to pause (`DEBOUNCE_MS`); the first one loads MathJax.
    *
    * Keys: Enter puts the equation down (once its drawing is ready), Shift + Enter starts a new line; Escape is the
-   * editor's (`lib/editor/escape.ts`: it drops the equation). The keys typed in the field never reach the editor's
-   * shortcuts (the editor ignores keys typed in a field). Its buttons are large enough for a pen or a finger.
+   * editor's (`lib/editor/escape.ts`), which asks the panel to end (`finish`): the work kept, as Enter, like a text
+   * frame's. « Annuler » drops it. The keys typed in the field never reach the editor's shortcuts (the editor ignores
+   * keys typed in a field). Its buttons are large enough for a pen or a finger. The swatches of the toolbar do not take
+   * the focus from the field: the preview takes the colour they give (`color`).
    */
   import { onMount } from 'svelte';
   import { convertLatex, type EquationDrawing, type EquationProblem, type EquationResult, type TexConverter } from '../../lib/equation';
@@ -119,6 +121,24 @@
     }
   }
 
+  /**
+   * Escape (the editor's `endEquation`): as Enter, the work kept. A valid code is put down (once its drawing is ready);
+   * an empty field closes the panel, nothing put down (an equation reopened and emptied stays as it was); an invalid
+   * code keeps the panel open with its error, the code in the field (« Annuler » drops it).
+   */
+  export function finish() {
+    if (source.trim() === '') {
+      oncancel();
+      return;
+    }
+    place();
+  }
+
+  /** The focus back in the field, its selection as it was (the custom colour's picker takes it). */
+  export function focusField() {
+    field?.focus({ preventScroll: true });
+  }
+
   function onkeydown(e: KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
@@ -208,7 +228,7 @@
       {t('editor.equation.converting')}
     {/if}
   </p>
-  <p class="hint" id="equation-panel-hint">{t('editor.equation.hint')}</p>
+  <p class="hint" id="equation-panel-hint" data-slot="equation-hint">{editing ? t('editor.equation.hintEdit') : t('editor.equation.hint')}</p>
   <p class="hint examples">{t('editor.equation.examples')}</p>
   <div class="actions">
     <button type="button" class="button" data-action="equation-cancel" onclick={oncancel}>{t('editor.equation.cancel')}</button>

@@ -75,9 +75,11 @@
    * The equation tool (SPEC §4.4 « Équation », docs/design/equations.md): a tap opens its panel (`EquationPanel`, put
    * by the canvas next to the tap, `equationEdit`) for a new equation there, or for the equation under it (a double
    * click with the selection tool too); the panel converts the LaTeX with MathJax (loaded the first time) into our own
-   * drawing, and « Poser » / « Mettre à jour » makes one undoable step of it (`placeEquation`); Escape, another tool,
-   * undo or another note drop it (`cancelEquation`), the page unchanged. The equation rewritten stays selected while
-   * its panel is open, so that the colours and the sizes act on it.
+   * drawing, and « Poser » / « Mettre à jour » makes one undoable step of it (`placeEquation`). Escape ends it as Enter
+   * does, the work kept as with a text frame (`endEquation`: an empty field puts nothing down, an invalid code keeps the
+   * panel open with its error); « Annuler », another tool, undo or another note drop it (`cancelEquation`), the page
+   * unchanged. The equation rewritten stays selected while its panel is open, so that the colours and the sizes act on
+   * it (each change one undoable step); a new one takes the tool's colour, which the swatches change meanwhile.
    */
   import { tick, untrack } from 'svelte';
   import { api, errorMessage, onLibraryChanged, onSessionEnding, type AppState } from '../../lib/api';
@@ -457,6 +459,8 @@
     session: number;
   } | null>(null);
   let equationSessions = 0;
+  /** The panel while it is open (Escape asks it to end, `endEquation`). */
+  let equationView = $state<ReturnType<typeof EquationPanel>>();
   /** The selected equations the tool's size acts on. */
   const equationTargets = $derived.by((): number => {
     if (!doc) return 0;
@@ -1491,7 +1495,10 @@
     };
   }
 
-  /** « Poser » or « Mettre à jour »: one undoable step, the equation selected afterwards; the panel closes. */
+  /**
+   * « Poser » or « Mettre à jour » (Enter, Escape): one undoable step, none for an equation reopened and left as it was;
+   * the equation selected afterwards; the panel closes.
+   */
   function placeEquation(latex: string, drawing: EquationDrawing) {
     const edit = equationEdit;
     if (!edit || !doc || !history) return;
@@ -1500,6 +1507,8 @@
     const existing = index >= 0 ? objects[index] : undefined;
     if (existing && isEquationObject(existing)) {
       equationEdit = null;
+      // Left as it was (Escape or « Mettre à jour » without a change): no step, as for a text frame.
+      if (existing.latex === latex && existing.path === drawing.path) return reselect(selectItems(doc, [], [index]));
       const next = redrawnEquation(existing, latex, drawing);
       change(selectItems(replaceObjectAt(doc, index, next), [], [index]));
       return;
@@ -1530,6 +1539,15 @@
   /** The panel closes without changing anything. */
   function cancelEquation() {
     equationEdit = null;
+  }
+
+  /**
+   * Escape: the panel ends as with Enter, the work kept (`EquationPanel.finish`): a valid code is put down or updates the
+   * equation reopened, an empty field closes the panel with nothing put down, an invalid code keeps it open.
+   */
+  function endEquation() {
+    if (equationView) equationView.finish();
+    else cancelEquation();
   }
 
   /** The equation tool's size: the selected equations take it too. */
@@ -1732,6 +1750,9 @@
   function addCustomColor(color: Rgba) {
     customColors = rememberCustomColor(color, customColors);
     setColor({ ...color, a: 255 });
+    // The colour picker took the focus: it goes back to the code being written (the keys typed next are the field's,
+    // not the editor's shortcuts).
+    equationView?.focusField();
   }
 
   function setWidth(width: number, done: boolean) {
@@ -2480,8 +2501,8 @@
       case 'endText':
         endText();
         return endBookmark();
-      case 'cancelEquation':
-        return cancelEquation();
+      case 'endEquation':
+        return endEquation();
       case 'closeSplit':
         return cancelSplit();
       case 'closeSettings':
@@ -2873,6 +2894,7 @@
       {#if equationEdit}
         {#key equationEdit.session}
           <EquationPanel
+            bind:this={equationView}
             latex={equationEdit.latex}
             editing={equationEdit.id !== null}
             color={equationColor}

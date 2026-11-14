@@ -2,8 +2,10 @@
 // equation is written in LaTeX in the panel opened by a click on the page, with real key events, its preview drawn by the
 // real MathJax (loaded on first use, from the app's own files), put down with Enter, saved (format 1.5, the source and the
 // drawing), exported in SVG (its source as the path's title) and PDF (vector curves), found by the library's search; an
-// invalid code shows MathJax's error and cannot be put down, Escape drops it, a double click reopens the source and
-// « Mettre à jour » redraws it in place, Ctrl + Z undoes that.
+// invalid code shows MathJax's error and cannot be put down (Escape keeps it in the panel, « Annuler » drops it), a
+// swatch colours the equation being written without taking the field's focus, Escape puts it down as Enter does, a
+// double click reopens the source, a swatch recolours it at once, « Mettre à jour » redraws it in place, Ctrl + Z undoes
+// each step; with the selection tool, Ctrl + A and a swatch colour the strokes, the texts and the equation as one step.
 //
 // On the production executable and the demo library, in French and in English. The canvas is reached through
 // `.editor svg.canvas` (the toolbar's icons are SVG too); a page point is turned into a window point with the canvas's
@@ -26,6 +28,7 @@ const catalogs = {
 const text = (language, key) => key.split('.').reduce((node, part) => node?.[part], catalogs[language]);
 const fill = (template, params) => template.replace(/\{(\w+)\}/g, (match, name) => (name in params ? String(params[name]) : match));
 const j = JSON.stringify;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** A demo note with room on its page. */
 const NOTE = 'Idées pour Noël';
@@ -40,6 +43,11 @@ const SPEED = 'v = \\dfrac{d}{t}';
 const SPEED_AGAIN = 'v = \\dfrac{\\Delta x}{\\Delta t}';
 /** Where the equation goes on the page (device units): below the demo's frames. */
 const AT = { x: 9000, y: 15000 };
+/** The swatches used (`INKSPACE_COLORS`), and a colour as `r,g,b,a` (the file's key order is not the interface's). */
+const RED = { r: 0xd8, g: 0, b: 0, a: 255 };
+const BLUE = { r: 0x51, g: 0xa7, b: 0xf9, a: 255 };
+const GREEN = { r: 0x84, g: 0xbd, b: 0x00, a: 255 };
+const rgba = (c) => (c ? [c.r, c.g, c.b, c.a].join(',') : String(c));
 /** The stored drawing's grammar (`docs/file-format.md` §2.3). */
 const PATH_DATA = /^(?:[MLQCZ]|[-\d. ,])+$/;
 
@@ -221,9 +229,12 @@ export const equationJourneys = [
     },
   },
   {
-    name: 'outil Équation : une erreur de LaTeX empêche de poser, Échap abandonne, un double-clic rouvre, Mettre à jour, Ctrl + Z',
+    name: 'outil Équation : une erreur de LaTeX empêche de poser (Échap la garde), une pastille colore, Échap pose, un double-clic rouvre, Mettre à jour, Ctrl + Z',
     async run(app, check) {
       const l = (key) => text(app.language, key);
+      const swatch = (name) => `.toolbar .swatch[aria-label=${j(l(`editor.colors.${name}`))}]`;
+      const previewFill = () => app.evaluate(`document.querySelector(${j(PREVIEW)})?.getAttribute('fill') ?? null`);
+      const focused = () => app.evaluate(`document.activeElement?.matches(${j(FIELD)}) === true`);
       let first;
 
       await check('un code incorrect affiche l’erreur de MathJax et ne se pose pas, même avec Entrée', async () => {
@@ -239,23 +250,38 @@ export const equationJourneys = [
         if ((await app.evaluate(`document.querySelectorAll(${j(EQUATIONS)}).length`)) !== 0) throw new Error('put down anyway');
       });
 
-      await check('Échap ferme le panneau sans rien changer', async () => {
+      await check('Échap avec un code incorrect : le panneau reste, avec le code et l’erreur ; Annuler le ferme sans rien changer', async () => {
+        const hint = await app.evaluate(`document.querySelector('[data-slot="equation-hint"]')?.textContent`);
+        if (hint !== l('editor.equation.hint')) throw new Error(`the hint says ${j(hint)}`);
+        const expected = fill(l('editor.equation.problems.latex'), { message: 'Missing close brace' });
         await app.key('Escape');
+        await sleep(300);
+        if ((await app.evaluate(`document.querySelector(${j(PANEL)}) !== null`)) !== true) throw new Error('Escape closed the panel');
+        const kept = await app.evaluate(`[document.querySelector(${j(FIELD)})?.value, document.querySelector(${j(STATUS)})?.textContent.trim()]`);
+        if (kept[0] !== '\\frac{1' || kept[1] !== expected) throw new Error(`the panel holds ${j(kept)}`);
+        await app.click('[data-action="equation-cancel"]');
         await app.waitFor(`document.querySelector(${j(PANEL)}) === null`, 'the panel closed');
         if ((await app.evaluate(`document.querySelector('.editor').dataset.dirty`)) !== 'no') throw new Error('the note changed');
       });
 
-      await check('poser une fraction avec le bouton', async () => {
+      await check('une pastille colore l’équation en cours d’écriture, sans prendre le focus du champ ; Échap la pose, rouge', async () => {
         await writeAt(app, AT, SPEED);
         await previewed(app);
-        await app.click('[data-action="equation-place"]');
+        await app.click(swatch('red'));
+        await app.waitFor(`document.querySelector(${j(PREVIEW)})?.getAttribute('fill') === 'rgba(216, 0, 0, 1.000)'`, 'the red preview');
+        if (!(await focused())) throw new Error(`the swatch took the focus (${await app.evaluate(`document.activeElement?.outerHTML.slice(0, 80)`)})`);
+        await app.key('Escape');
+        await app.waitFor(`document.querySelector(${j(PANEL)}) === null`, 'the panel closed');
         await app.waitFor(`document.querySelectorAll(${j(EQUATIONS)}).length === 1`, 'the equation on the page');
+        const fillOnPage = await app.evaluate(`document.querySelector(${j(EQUATIONS)}).getAttribute('fill')`);
+        if (fillOnPage !== 'rgba(216, 0, 0, 1.000)') throw new Error(`the page draws it in ${fillOnPage}`);
         await save(app);
         first = (await onDisk(app)).note.objects.find((o) => o.kind === 'equation');
         if (first?.latex !== SPEED) throw new Error(`unexpected ${j(first?.latex)}`);
+        if (rgba(first.color) !== rgba(RED)) throw new Error(`its colour is ${j(first.color)}`);
       });
 
-      await check('un double-clic avec la sélection rouvre son code ; Mettre à jour la redessine au même endroit', async () => {
+      await check('un double-clic avec la sélection rouvre son code ; une pastille la recolore, le focus reste ; Mettre à jour la redessine au même endroit', async () => {
         await app.click('.toolbar .tool', l('editor.modes.select'));
         const at = await pagePoint(app, first.x + (first.width * first.scale) / 2, first.y + (first.height * first.scale) / 2);
         await app.mouse('mouseMoved', at.x, at.y);
@@ -268,6 +294,11 @@ export const equationJourneys = [
         if (value !== SPEED) throw new Error(`the field holds ${j(value)}`);
         const button = await app.evaluate(`document.querySelector('[data-action="equation-place"]').textContent.trim()`);
         if (button !== l('editor.equation.update')) throw new Error(`the button says ${j(button)}`);
+        await previewed(app);
+        await app.click(swatch('blue'));
+        await app.waitFor(`document.querySelector(${j(EQUATIONS)})?.getAttribute('fill') === 'rgba(81, 167, 249, 1.000)'`, 'the blue equation on the page');
+        if ((await previewFill()) !== 'rgba(81, 167, 249, 1.000)') throw new Error(`the preview is ${await previewFill()}`);
+        if (!(await focused())) throw new Error('the swatch took the focus');
         await app.key('a', { ctrl: true });
         await app.type(SPEED_AGAIN);
         await app.waitFor(`document.querySelector(${j(FIELD)})?.value === ${j(SPEED_AGAIN)}`, 'the new code');
@@ -278,15 +309,39 @@ export const equationJourneys = [
         await save(app);
         const after = (await onDisk(app)).note.objects.find((o) => o.kind === 'equation');
         if (after.id !== first.id || after.latex !== SPEED_AGAIN) throw new Error(`not updated: ${j(after.latex)}`);
+        if (rgba(after.color) !== rgba(BLUE)) throw new Error(`its colour is ${j(after.color)}`);
         if (Math.abs(after.x - first.x) > 0.01 || Math.abs(after.y - first.y) > 0.01) throw new Error('its top-left corner moved');
       });
 
-      await check('Ctrl + Z : le premier code revient', async () => {
+      await check('Ctrl + Z : le premier code revient (bleu) ; encore Ctrl + Z : le rouge', async () => {
         await app.evaluate(`document.activeElement?.blur(), true`);
         await app.key('z', { ctrl: true });
         await save(app);
         const back = (await onDisk(app)).note.objects.find((o) => o.kind === 'equation');
-        if (back.latex !== SPEED) throw new Error(`the source is ${j(back.latex)}`);
+        if (back.latex !== SPEED || rgba(back.color) !== rgba(BLUE)) throw new Error(`the equation is ${j({ latex: back.latex, color: back.color })}`);
+        await app.key('z', { ctrl: true });
+        await save(app);
+        const red = (await onDisk(app)).note.objects.find((o) => o.kind === 'equation');
+        if (rgba(red.color) !== rgba(RED)) throw new Error(`its colour is ${j(red.color)}`);
+      });
+
+      await check('outil Sélection, Ctrl + A puis une pastille : traits, textes et équation prennent la couleur ; un Ctrl + Z la leur rend', async () => {
+        const before = await onDisk(app);
+        await app.click('.toolbar .tool', l('editor.modes.select'));
+        await app.key('a', { ctrl: true });
+        await app.waitFor(`document.querySelector('[data-section="selection"] .pane-help') !== null`, 'the selection');
+        await app.click(swatch('green'));
+        await save(app);
+        const coloured = await onDisk(app);
+        const objects = coloured.note.objects.filter((o) => o.kind === 'text' || o.kind === 'equation');
+        if (objects.length < 2 || !objects.some((o) => o.kind === 'equation')) throw new Error(`objects ${j(objects.map((o) => o.kind))}`);
+        if (objects.some((o) => rgba(o.color) !== rgba(GREEN))) throw new Error(`not all green: ${j(objects.map((o) => o.color))}`);
+        if (coloured.strokes.length === 0 || coloured.strokes.some((s) => rgba(s.color) !== rgba(GREEN))) throw new Error('the strokes are not green');
+        await app.key('z', { ctrl: true });
+        await save(app);
+        const undone = await onDisk(app);
+        const colours = (file) => j([...file.note.objects.map((o) => rgba(o.color)), ...file.strokes.map((s) => rgba(s.color))]);
+        if (colours(undone) !== colours(before)) throw new Error(`one Ctrl + Z did not give every colour back: ${colours(undone)}`);
       });
     },
   },

@@ -85,19 +85,29 @@ refuse an equation they could not read back. The clipboard checks a pasted equat
   equation will have), the status (MathJax's error, or « Calcul de l'aperçu… »), the keys, examples, « Annuler » and « Poser » /
   « Mettre à jour ». The conversion waits 150 ms of quiet typing. Enter puts it down (when the drawing of what is typed is
   ready: an Enter typed meanwhile waits for it); Shift + Enter is a new line. Being a field, its keys never reach the editor's
-  shortcuts (`isTyping`); Ctrl + S still saves.
+  shortcuts (`isTyping`); Ctrl + S still saves. The toolbar's swatches and buttons do not take its focus (`keepFocus`: the
+  press's default is prevented); the custom colour's picker does, and gives it back to the field when a colour is chosen
+  (`EquationPanel.focusField`, the caret where it was).
 - **Steps**: nothing changes on the page while the panel is open; « Poser » is one undoable step (the equation added, then
   selected); « Mettre à jour » is one step (source and drawing replaced, id, time, scale, turns and colour kept, the top-left
-  corner of the box where it was). Escape (`lib/editor/escape.ts`: `cancelEquation`, right after ending a text's typing),
-  another tool, undo or redo, the replay, the split, another note: the panel closes, the page unchanged. A tap while a new
+  corner of the box where it was), none when the source and the drawing are the ones it had. Escape
+  (`lib/editor/escape.ts`: `endEquation`, at the step of a text's typing) ends the panel as Enter does, the work kept, as for
+  a text frame (`EquationPanel.finish`): a valid source is put down or updates the equation (once its drawing is ready, if it
+  was being made); an empty field closes the panel, nothing put down (an equation reopened and emptied stays as it was); an
+  invalid source keeps the panel open with its error, every press (the panel's hint says so). « Annuler », another tool, undo
+  or redo, the replay, the split, another note: the panel closes, the page unchanged by it (a colour or a size given meanwhile
+  to the equation reopened is a step of its own, kept). A tap while a new
   equation is written only moves where it will go (on another equation too: the typed source is never thrown away);
   an equation deleted while its panel is open is put back as it was (place, size, colour), rewritten; with the chosen
   layer hidden, the panel stays open.
 - **Placement**: a new equation's left end at the tap, its middle at the tap's height (as a text frame's first line); its time
   is the one a stroke drawn now would take (the sound's clock during a writing recording).
-- **Size and colour**: the equation rewritten stays selected while its panel is open, so the toolbar's colours and sizes act on
-  it as ordinary steps; with the tool or equations selected, the toolbar shows the three sizes. A size sets the scale (top-left
-  corner kept); the colour applies like a text frame's.
+- **Size and colour**: one colour for the whole equation (`color`). The equation rewritten stays selected while its panel is
+  open, so the toolbar's colours and sizes act on it as ordinary steps (the page and the preview show the colour at once); a
+  new one takes the tool's colour, which the swatches change while its panel is open (the preview shows it); with the
+  selection tool, the equations selected take a colour with the strokes and the texts selected, one step for all
+  (`applyStyle`, `takesColor`). With the tool or equations selected, the toolbar shows the three sizes. A size sets the scale
+  (top-left corner kept).
 - **With the strokes**: selection (lasso, click, Ctrl + A), move, resize, delete, duplicate, copy and paste (also into another
   note: `clipboard.ts` carries placement, source, drawing and colour), layers, page turns, crops, resizes, split and merge, back
   to the original: through the placement, as every object (`page-objects.md` §2). The eraser does not erase it.
@@ -113,11 +123,13 @@ refuse an equation they could not read back. The clipboard checks a pasted equat
 
 ## 6. Choices that could have gone another way
 
-- Escape **drops** the equation being written (SPEC: « annule l'action en cours »), where it ends a text's typing with the text
-  kept: an equation is not on the page until it is put down.
+- Escape **ends** the equation being written as Enter does (the work kept, as a text's typing; asked by the user on
+  2026-11-14): only « Annuler » drops it. An invalid source cannot end, so Escape leaves its panel open. Another tool still drops
+  it (the text tool keeps a frame then).
 - Enter puts the equation down; Shift + Enter is a new line in the source.
 - Display style always (`\frac` full size, limits above and below); no inline style.
-- No equation numbers (`\tag` refused), no colours inside an equation, no packages beyond those listed; `\href`, `\class`,
+- No equation numbers (`\tag` refused), no colours inside an equation (one colour for the whole of it: the user's choice of
+  2026-11-14, rather than coloured parts), no packages beyond those listed; `\href`, `\class`,
   `\unicode`, `\require` are undefined.
 - The PDF carries no searchable text for an equation; the SVG carries its source as the path's title.
 - MathJax's error messages are shown as MathJax writes them (English), after a translated prefix.

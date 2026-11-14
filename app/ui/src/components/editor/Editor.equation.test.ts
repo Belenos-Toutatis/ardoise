@@ -3,9 +3,11 @@
 /**
  * The equation tool in the editor (SPEC §4.4 « Équation », docs/design/equations.md), with the real MathJax: a tap opens
  * the panel there, the preview is drawn from our own path data as the code is typed, an invalid code shows MathJax's
- * error and cannot be placed, « Poser » puts the equation down as one undoable step (selected), Escape drops it, the keys
- * typed never reach the editor's shortcuts, a double click (or a tap of the tool) on an equation reopens its source,
- * and the size and the colour act on the selected equations.
+ * error and cannot be placed, « Poser » puts the equation down as one undoable step (selected), Escape ends it as Enter
+ * does (the work kept, as for a text frame: an invalid code keeps the panel open), « Annuler » drops it, the keys typed
+ * never reach the editor's shortcuts, a double click (or a tap of the tool) on an equation reopens its source, and the
+ * size and the colours act on the whole equation: selected (with the lasso too, alone or with strokes and texts), or
+ * while its panel is open (the preview shows the colour, the focus stays in the field).
  */
 import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -133,12 +135,60 @@ async function render(title = TITLE) {
   const dirty = () => q('section.editor')!.getAttribute('data-dirty');
   const count = () => q('[data-section="selection"] .pane-help')?.textContent?.trim() ?? null;
   const undoButton = () => [...target.querySelectorAll<HTMLButtonElement>('.editor-top button')].find((b) => b.title.startsWith('Annuler'))!;
-  const saved = async () => {
+  /** The note as saved (Ctrl + S). */
+  const savedNote = async () => {
     await key('s', { ctrlKey: true });
     await vi.waitFor(() => expect(dirty()).toBe('no'));
-    return (mockLibrary().notes.get(demoPath(title))!.note.objects ?? []) as PageObject[];
+    return mockLibrary().notes.get(demoPath(title))!.note;
   };
-  return { target, q, tap, dblclick, key, panel, field, status, previewPath, placeButton, write, drawn, equations, tool, mode, dirty, count, undoButton, saved };
+  const saved = async () => ((await savedNote()).objects ?? []) as PageObject[];
+  /** A gesture on the page through the page points `points` (a lasso with the selection tool). */
+  const drag = async (points: [number, number][]) => {
+    const [first, ...rest] = points;
+    pointer('pointerdown', first[0], first[1]);
+    for (const [x, y] of rest) pointer('pointermove', x, y);
+    const last = points[points.length - 1];
+    pointer('pointerup', last[0], last[1]);
+    await tick();
+    await tick();
+  };
+  /** The fill of the preview's drawing. */
+  const previewFill = () => q('[data-slot="equation-preview"] path')?.getAttribute('fill') ?? null;
+  const swatch = (name: string) => q<HTMLButtonElement>(`.toolbar .swatch[aria-label="${name}"]`)!;
+  /** A colour chosen with the custom colour's picker (which has the focus meanwhile). */
+  const pickCustom = async (hex: string) => {
+    const picker = q<HTMLInputElement>('.toolbar input[type="color"]')!;
+    picker.focus();
+    picker.value = hex;
+    picker.dispatchEvent(new Event('change', { bubbles: true }));
+    await tick();
+  };
+  return {
+    target,
+    q,
+    tap,
+    dblclick,
+    key,
+    panel,
+    field,
+    status,
+    previewPath,
+    placeButton,
+    write,
+    drawn,
+    equations,
+    tool,
+    mode,
+    dirty,
+    count,
+    undoButton,
+    saved,
+    savedNote,
+    drag,
+    previewFill,
+    swatch,
+    pickCustom,
+  };
 }
 
 /** Puts `latex` down at (x, y) with the equation tool, and waits until it is on the page. */
@@ -219,23 +269,114 @@ describe('the equation tool', () => {
     expect(v.equations()).toHaveLength(1);
   });
 
-  it('drops the equation being written with Escape, the page unchanged, then Escape goes on by steps', async () => {
+  it('ends the equation with Escape as Enter does, as a text frame: put down and selected, the next Escape deselects', async () => {
     const v = await render();
     v.tool('Équation').click();
     await tick();
     await v.tap(6000, 9000);
+    expect(v.q('[data-slot="equation-hint"]')?.textContent).toBe(
+      'Entrée ou Échap : poser · Maj + Entrée : nouvelle ligne · Annuler : abandonner. Un code incorrect reste dans le champ, avec son erreur.',
+    );
     await v.write('x^2');
     await v.drawn();
+    const preview = v.previewPath();
+    expect(await v.key('Escape', {}, v.field()!)).toBe(false);
+    expect(v.panel()).toBeNull();
+    expect(v.equations()).toHaveLength(1);
+    expect(v.equations()[0].getAttribute('d')).toBe(preview);
+    expect(v.count()).toBe('Traits sélectionnés : 0 — textes, équations et signets : 1');
+    expect(v.dirty()).toBe('yes');
+    // The next press deselects; the equation stays.
+    await v.key('Escape');
+    expect(v.count()).toBeNull();
+    expect(v.equations()).toHaveLength(1);
+    // One step: undo takes it away.
+    v.undoButton().click();
+    await tick();
+    expect(v.equations()).toHaveLength(0);
+  });
+
+  it('puts nothing down with Escape when the field is empty, keeps an invalid code with its error; « Annuler » drops it', async () => {
+    const v = await render();
+    v.tool('Équation').click();
+    await tick();
+    await v.tap(6000, 9000);
     expect(await v.key('Escape', {}, v.field()!)).toBe(false);
     expect(v.panel()).toBeNull();
     expect(v.equations()).toHaveLength(0);
     expect(v.dirty()).toBe('no');
-    // Another tool closes it too.
+    // An invalid code: Escape (again and again) keeps the panel open, the code and the error in it.
     await v.tap(6000, 9000);
-    expect(v.panel()).not.toBeNull();
+    await v.write('\\frac{1');
+    await vi.waitFor(() => expect(v.status()).toBe('Code LaTeX incorrect : Missing close brace'), { timeout: 10_000 });
+    for (let press = 0; press < 2; press++) {
+      expect(await v.key('Escape', {}, v.field()!)).toBe(false);
+      expect(v.panel()).not.toBeNull();
+      expect(v.field()!.value).toBe('\\frac{1');
+      expect(v.status()).toBe('Code LaTeX incorrect : Missing close brace');
+    }
+    expect(v.equations()).toHaveLength(0);
+    v.q<HTMLButtonElement>('[data-action="equation-cancel"]')!.click();
+    await tick();
+    expect(v.panel()).toBeNull();
+    expect(v.equations()).toHaveLength(0);
+    expect(v.dirty()).toBe('no');
+    // Another tool drops it too.
+    await v.tap(6000, 9000);
+    await v.write('y');
+    await v.drawn();
     v.tool('Stylo').click();
     await tick();
     expect(v.panel()).toBeNull();
+    expect(v.equations()).toHaveLength(0);
+  });
+
+  it('puts the equation down with Escape pressed while its preview is being drawn, once it is ready', async () => {
+    const v = await render();
+    v.tool('Équation').click();
+    await tick();
+    await v.tap(6000, 9000);
+    await v.write('a + b');
+    expect(v.panel()?.getAttribute('data-state')).toBe('converting');
+    await v.key('Escape', {}, v.field()!);
+    await vi.waitFor(() => expect(v.equations()).toHaveLength(1), { timeout: 10_000 });
+    expect(v.panel()).toBeNull();
+    const equation = (await v.saved()).find((o) => o.kind === 'equation') as EquationObject;
+    expect(equation.latex).toBe('a + b');
+  });
+
+  it('updates an equation reopened with Escape as one step, none when it is left as it was or its field emptied', async () => {
+    const v = await render();
+    await placeAt(v, 6000, 9000, 'v = \\dfrac{d}{t}');
+    const first = (await v.saved()).find((o) => o.kind === 'equation') as EquationObject;
+    const on = { x: first.x + 20, y: first.y + (first.height * first.scale) / 2 };
+    await v.tap(on.x, on.y);
+    expect(v.q('[data-slot="equation-hint"]')?.textContent).toMatch(/^Entrée ou Échap : mettre à jour · /);
+    await v.drawn();
+    await v.write('v = \\dfrac{x}{t}');
+    await v.drawn();
+    await v.key('Escape', {}, v.field()!);
+    expect(v.panel()).toBeNull();
+    const updated = (await v.saved()).find((o) => o.kind === 'equation') as EquationObject;
+    expect([updated.id, updated.latex]).toEqual([first.id, 'v = \\dfrac{x}{t}']);
+    // Reopened and left as it was: nothing changes, not even an undo step.
+    await v.tap(on.x, on.y);
+    await v.drawn();
+    await v.key('Escape', {}, v.field()!);
+    expect(v.panel()).toBeNull();
+    expect(v.dirty()).toBe('no');
+    // Its field emptied: Escape puts nothing down, the equation stays as it was.
+    await v.tap(on.x, on.y);
+    await v.write('');
+    await v.key('Escape', {}, v.field()!);
+    expect(v.panel()).toBeNull();
+    expect(v.equations()).toHaveLength(1);
+    expect(v.dirty()).toBe('no');
+    // One undo takes the update back.
+    v.undoButton().click();
+    await tick();
+    const undone = (await v.saved()).find((o) => o.kind === 'equation') as EquationObject;
+    expect(undone.latex).toBe('v = \\dfrac{d}{t}');
   });
 
   it('reopens an equation’s source by a double click or a tap of the tool, and updates it in place as one step', async () => {
@@ -291,6 +432,121 @@ describe('the equation tool', () => {
     const all = (await v.saved()).filter((o): o is EquationObject => o.kind === 'equation');
     expect(all).toHaveLength(2);
     expect(all[1].scale).toBeCloseTo(0.9, 6);
+  });
+
+  it('colours the new equation with a swatch or the custom colour while its panel is open: the preview shows it, the focus stays', async () => {
+    const v = await render();
+    v.tool('Équation').click();
+    await tick();
+    await v.tap(6000, 9000);
+    await v.write('\\vec{F} = m\\,\\vec{a}');
+    await v.drawn();
+    expect(v.previewFill()).toBe('rgba(0, 0, 0, 1.000)');
+    // A press on a swatch keeps the focus where it is: in the field.
+    const press = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 });
+    v.swatch('Rouge').dispatchEvent(press);
+    expect(press.defaultPrevented).toBe(true);
+    v.swatch('Rouge').click();
+    await tick();
+    expect(v.previewFill()).toBe('rgba(216, 0, 0, 1.000)');
+    expect(document.activeElement).toBe(v.field());
+    expect(v.field()!.value).toBe('\\vec{F} = m\\,\\vec{a}');
+    // Nothing is on the page yet.
+    expect(v.equations()).toHaveLength(0);
+    expect(v.dirty()).toBe('no');
+    // The custom colour's picker takes the focus: it goes back to the field, its caret where it was.
+    v.field()!.setSelectionRange(3, 3);
+    await v.pickCustom('#2e7d32');
+    expect(v.previewFill()).toBe('rgba(46, 125, 50, 1.000)');
+    expect(document.activeElement).toBe(v.field());
+    expect([v.field()!.selectionStart, v.field()!.selectionEnd]).toEqual([3, 3]);
+    await v.key('Enter', {}, v.field()!);
+    expect(v.equations()[0].getAttribute('fill')).toBe('rgba(46, 125, 50, 1.000)');
+    const equation = (await v.saved()).find((o) => o.kind === 'equation') as EquationObject;
+    expect(equation.color).toEqual({ r: 0x2e, g: 0x7d, b: 0x32, a: 255 });
+  });
+
+  it('colours an equation reopened at once with a swatch, as one step, its panel still open on its code', async () => {
+    const v = await render();
+    await placeAt(v, 6000, 9000, 'E = mc^2');
+    const first = (await v.saved()).find((o) => o.kind === 'equation') as EquationObject;
+    v.tool('Sélection').click();
+    await tick();
+    await v.dblclick(first.x + (first.width * first.scale) / 2, first.y + (first.height * first.scale) / 2);
+    await v.drawn();
+    v.swatch('Bleu').click();
+    await tick();
+    expect(v.previewFill()).toBe('rgba(81, 167, 249, 1.000)');
+    expect(v.equations()[0].getAttribute('fill')).toBe('rgba(81, 167, 249, 1.000)');
+    expect(v.panel()).not.toBeNull();
+    expect(document.activeElement).toBe(v.field());
+    expect(v.field()!.value).toBe('E = mc^2');
+    // Its code left as it was, Escape adds no step: one undo gives the colour back.
+    await v.key('Escape', {}, v.field()!);
+    expect(v.panel()).toBeNull();
+    const blue = (await v.saved()).find((o) => o.kind === 'equation') as EquationObject;
+    expect(blue.color).toEqual({ r: 0x51, g: 0xa7, b: 0xf9, a: 255 });
+    v.undoButton().click();
+    await tick();
+    const back = (await v.saved()).find((o) => o.kind === 'equation') as EquationObject;
+    expect(back.color).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+    expect(back.latex).toBe('E = mc^2');
+  });
+
+  it('colours an equation selected with the lasso, alone or with strokes and texts, each colour one step', async () => {
+    const v = await render('Réunion parents');
+    await placeAt(v, 16000, 16000, '\\ce{H2O}');
+    const placed = (await v.saved()).find((o) => o.kind === 'equation') as EquationObject;
+    const box = { x: placed.x, y: placed.y, w: placed.width * placed.scale, h: placed.height * placed.scale };
+    v.tool('Sélection').click();
+    await tick();
+    await v.key('Escape');
+    expect(v.count()).toBeNull();
+    // A lasso round the equation alone.
+    const m = 400;
+    await v.drag([
+      [box.x - m, box.y - m],
+      [box.x + box.w + m, box.y - m],
+      [box.x + box.w + m, box.y + box.h + m],
+      [box.x - m, box.y + box.h + m],
+      [box.x - m, box.y - m],
+    ]);
+    expect(v.count()).toBe('Traits sélectionnés : 0 — textes, équations et signets : 1');
+    v.swatch('Vert').click();
+    await tick();
+    const before = await v.savedNote();
+    const green = { r: 0x84, g: 0xbd, b: 0x00, a: 255 };
+    expect((before.objects ?? []).map((o) => (o as { color?: unknown }).color)).toEqual([
+      { r: 0x8a, g: 0x1c, b: 0x1c, a: 255 },
+      { r: 0x1a, g: 0x3a, b: 0x8a, a: 255 },
+      green,
+    ]);
+    expect(before.strokes.map((s) => s.color)).toEqual([{ r: 0, g: 0, b: 0, a: 255 }]);
+    // A lasso round the whole page: the stroke, the two texts and the equation take the custom colour together.
+    await v.key('Escape');
+    await v.drag([
+      [200, 200],
+      [29500, 200],
+      [29500, 21400],
+      [200, 21400],
+      [200, 200],
+    ]);
+    expect(v.count()).toBe('Traits sélectionnés : 1 — textes, équations et signets : 3');
+    await v.pickCustom('#6a1b9a');
+    const purple = { r: 0x6a, g: 0x1b, b: 0x9a, a: 255 };
+    const all = await v.savedNote();
+    expect((all.objects ?? []).map((o) => (o as { color?: unknown }).color)).toEqual([purple, purple, purple]);
+    expect(all.strokes.map((s) => s.color)).toEqual([purple]);
+    // One undo step for all of them, another for the green.
+    v.undoButton().click();
+    await tick();
+    const undone = await v.savedNote();
+    expect(undone.objects).toEqual(before.objects);
+    expect(undone.strokes.map((s) => s.color)).toEqual([{ r: 0, g: 0, b: 0, a: 255 }]);
+    v.undoButton().click();
+    await tick();
+    const first = (await v.saved()).find((o) => o.kind === 'equation') as EquationObject;
+    expect(first.color).toEqual({ r: 0, g: 0, b: 0, a: 255 });
   });
 
   it('keeps the source typed when the page is tapped again, even on another equation, and puts it down there', async () => {
