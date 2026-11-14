@@ -16,9 +16,9 @@
 
 **Ce qui a été essayé, et comment**
 
-- **À la main** : la Bamboo Slate A4 (synchronisation, mode direct, vidéoprojecteur, partage sur le réseau, correction au stylet d'une Surface, son pendant l'écriture) ; la Xiaomi n'a eu que de premiers essais (13 novembre 2026), sa procédure d'essai n'est pas terminée.
+- **À la main** : la Bamboo Slate A4 (synchronisation, mode direct, vidéoprojecteur, partage sur le réseau, correction au stylet d'une Surface, son pendant l'écriture) ; la Xiaomi, essayée à la main les 13 et 14 novembre 2026 (l'auteur signale que ça marche, sans compte rendu pas à pas). Le 14 novembre 2026, l'auteur a aussi essayé à la main, sans compte rendu détaillé : l'impression (sans préciser l'imprimante), le plan et les liens d'un PDF dans son lecteur PDF, le clavier tactile de Windows dans un cadre de texte, une équation et un signet, les menus du clic droit et le bouton **Guide**.
 - **Par des tests automatiques sous Windows**, sur le vrai exécutable, en français et en anglais : tout le reste, avec des tablettes simulées.
-- **Jamais essayés à la main** : l'impression sur une vraie imprimante, l'export Word ouvert dans Word, le plan et les liens d'un PDF dans un lecteur PDF, l'import avec Inkspace ouvert, la fermeture de session de Windows avec un travail non enregistré. Windows 10 n'a pas été essayé.
+- **Jamais essayés à la main** : l'export Word ouvert dans Word, l'import avec Inkspace ouvert, la fermeture de session de Windows avec un travail non enregistré. Windows 10 n'a pas été essayé.
 
 **Pour commencer**
 
@@ -33,7 +33,7 @@
 
 - **No tablet needed**: on a pen or touch-screen PC (Surface Pro, Yoga, 2-in-1s) Ardoise is a handwritten note-taking application; you write straight on the screen (tried by hand on a Surface).
 - **Highlights**: live mode for the classroom (projection, blackboard, laser pointer, a layer of your own to correct on, paper and a PDF worksheet changed under the page, sharing the sheet with a browser on the local network); a library with binders in a free order, coloured tags and handwriting search; an editor with pressure-sensitive inks, shapes, typed text, LaTeX equations (chemistry included), bookmarks, replay and narration; exports to PNG, JPG, WebP, SVG, PDF, text, Markdown, Word and video, a whole binder in one PDF, printing; Inkspace import; an assistant (Claude Code, Claude Desktop…) can read and tidy your notes.
-- **Tested how**: by hand with a real Bamboo Slate A4 (sync, live mode, projector, network sharing, correcting with a Surface pen, sound while writing); only first trials with the real Xiaomi tablet (13 November 2026), its test procedure is not finished; everything else by automated tests on Windows, on the real executable, in French and English, with simulated tablets. Never tried by hand: printing on a real printer, a Word export opened in Word, a PDF's outline and links in a PDF reader, an Inkspace import with Inkspace open, a Windows logoff with unsaved work. Windows 10 not tried.
+- **Tested how**: by hand with a real Bamboo Slate A4 (sync, live mode, projector, network sharing, correcting with a Surface pen, sound while writing); the real Xiaomi tablet, tried by hand on 13 and 14 November 2026 (the author reports that it works, without a step-by-step report). On 14 November 2026 the author also tried by hand, without a detailed report: printing (the printer is not specified), a PDF's outline and links in his PDF reader, Windows' touch keyboard in a text frame, an equation and a bookmark, the right-click menus and the **Guide** button; everything else by automated tests on Windows, on the real executable, in French and English, with simulated tablets. Never tried by hand: a Word export opened in Word, an Inkspace import with Inkspace open, a Windows logoff with unsaved work. Windows 10 not tried.
 - **Start**: Windows 11, no administrator rights. Unzip `ardoise-0.1.0-windows-x64.zip` anywhere and run `ardoise.exe`. **It is not signed**: Windows may show "Windows protected your PC"; click *More info*, then *Run anyway*. A managed PC may refuse to run it.
 - **Guide**: the illustrated user guide (with a "Getting started" section) is in the archive, `guide\` folder, to open in a browser; it is also in the repository: [French](guide/guide.fr.md), [English](guide/guide.en.md).
 - The **Guide** button (`F1` key) opens this guide from Ardoise.
@@ -128,18 +128,27 @@ Version 0.1.0, première version d'Ardoise. Date de publication : à publier. Ce
 | **H5** — reprendre une feuille en direct, retoucher | Interrompre un direct, reprendre la feuille, écrire dessus ; supprimer, recolorer, annuler pendant que la tablette écrit. | **Fait** (signalé le 7 novembre, sans remarque). Déplacer et redimensionner une sélection au stylet ou au doigt a été ajouté après : pas encore essayé sur la Surface. |
 | **H6** — corriger pendant le direct | Un élève écrit pendant que l'enseignant corrige au stylet de la Surface sur un calque à part ; export PDF à calques séparés. | **Fait** (signalé le 12 novembre). |
 | **H7** — papier et fiche en direct, projection de l'éditeur, son pendant qu'on écrit | Papier et fiche PDF changés pendant que la tablette écrit, note de l'éditeur projetée, narration enregistrée en écrivant avec le micro de la Surface. | **Fait** (signalé le 12 novembre). |
-| **H8** — la tablette Xiaomi | Ajouter la tablette, récupérer puis effacer ses pages, direct, positions, deux tablettes. | **En cours.** Étude du 12 novembre (le mode direct a été lancé depuis le PC avec la vraie tablette et le tracé reconstitué a été confirmé), puis premiers essais du 13 novembre 2026 : l'import d'une page enregistrée pendant qu'Ardoise est connectée, l'effacement de l'écran pendant le direct et la page qui disparaît de la tablette dès son téléchargement ont été observés, et ont fait corriger plusieurs défauts. **Pas encore essayés sur la vraie tablette** : les copies de secours des pages, la mise à jour de la note d'un écran enregistré de nouveau, le direct précédé de l'import des pages, le sens des quatre positions (déduit de leur nom, à confirmer), les boutons de position pendant le direct, la taille réelle de l'écriture importée (l'unité des coordonnées n'a pas été mesurée à la règle) et deux tablettes allumées ensemble : tout cela n'a été vérifié qu'avec une tablette simulée. |
+| **H8** — la tablette Xiaomi | Ajouter la tablette, récupérer puis effacer ses pages, direct, positions, deux tablettes. | **Essayé à la main, sans compte rendu pas à pas.** Étude du 12 novembre (le mode direct a été lancé depuis le PC avec la vraie tablette et le tracé reconstitué a été confirmé), puis essais du 13 novembre 2026 : l'import d'une page enregistrée pendant qu'Ardoise est connectée, l'effacement de l'écran pendant le direct et la page qui disparaît de la tablette dès son téléchargement ont été observés, et ont fait corriger plusieurs défauts. Le 14 novembre 2026, l'auteur a de nouveau essayé la tablette et signale que ça marche, sans dire quelles étapes de la procédure il a faites. **Pas confirmés point par point** : les copies de secours des pages, la mise à jour de la note d'un écran enregistré de nouveau, le direct précédé de l'import des pages, le sens des quatre positions (déduit de leur nom, à confirmer), les boutons de position pendant le direct, la taille réelle de l'écriture importée (l'unité des coordonnées n'a pas été mesurée à la règle) et deux tablettes allumées ensemble : sans détail, ils ne sont établis que par une tablette simulée. |
 
-Pour H2, H3, H6 et H7, la feuille de route dit seulement que l'auteur les a faits et signalés, sans détailler les étapes ni les mesures.
+Pour H2, H3, H6 et H7, la feuille de route dit seulement que l'auteur les a faits et signalés, sans détailler les étapes ni les mesures. Il en va de même pour H8 (13 et 14 novembre 2026).
+
+### Essayé à la main le 14 novembre 2026
+
+L'auteur a signalé, sans détail des étapes (une phrase par sujet) :
+
+- **La tablette Xiaomi** : « ça marche » (voir H8 ci-dessus).
+- **L'impression** : « ça marche ». Il n'a pas dit sur quelle imprimante (vraie ou PDF), ni avec combien de notes par feuille.
+- **Le clavier tactile de Windows** dans un cadre de texte, dans une équation et dans un signet : « ça marche ».
+- **Le plan (les signets) et les liens** d'un PDF, dans son lecteur PDF : « ça marche ». Le lecteur n'a pas été nommé, et il n'a pas dit s'il s'agissait du PDF d'une note ou de celui d'un classeur.
+- **Le clic droit** : « ok », pour les menus du clic droit, y compris dans un champ de texte, et pour le bouton du stylet, qui n'en ouvre aucun.
+- **Le bouton Guide** : il ouvre le guide local dans le navigateur ; sans la page locale, il ouvre celle de GitHub.
 
 ### Ce qui reste à essayer à la main
 
 Ces points n'ont été vérifiés que par des tests automatiques, ou pas du tout :
 
-- **Une vraie imprimante** : l'impression est testée vers « Microsoft Print to PDF » ; la fenêtre de Windows n'est pas pilotée par les tests. Cela vaut aussi pour 2 et 4 notes par feuille.
 - **Word** : un export Word ouvert dans Word, et la mise en forme Markdown et Word sur une vraie écriture.
-- **PDF** : le plan et les liens de la page de sommaire d'un PDF de classeur, ouverts dans un lecteur PDF (Acrobat Reader, Firefox…).
-- **La Surface, au stylet et au doigt, depuis les derniers ajouts** : déplacer et redimensionner une sélection du direct ; les outils Texte, Équation, Signet, Ligne, Rectangle et Ellipse ; les menus du clic droit (qui ne doivent jamais s'ouvrir avec le bouton du stylet) ; le clavier à l'écran de Windows dans les champs de texte, d'équation et de signet ; le sélecteur **Choisir une autre couleur**.
+- **La Surface, au stylet et au doigt, depuis les derniers ajouts** : déplacer et redimensionner une sélection du direct ; les outils Texte, Équation, Signet, Ligne, Rectangle et Ellipse ; le sélecteur **Choisir une autre couleur**.
 - **Le panneau de côté** sur la Surface : le rail et ses icônes de 38 px au stylet, au doigt et à la souris, le thème sombre, la fenêtre de 800 × 560, le focus visible sur les icônes, la lecture des onglets par le Narrateur.
 - **Les raccourcis du clavier** (`Ctrl + W`, `Ctrl + Q`, `Ctrl + P`, `Échap`…) : les parcours automatiques envoient les touches par programme, pas depuis un vrai clavier.
 - **La reconnaissance d'écriture en anglais** (le module d'écriture anglais de Windows n'est pas installé sur le PC de développement) et la pause de la lecture de l'écriture pendant la présentation.
@@ -158,7 +167,7 @@ Mesurées le 12 novembre 2026 sur un portable au repos (Intel Core i5-1235U, 16 
 
 - **Windows seulement** : Windows 11 est la seule version essayée (Windows 10 est visé, non essayé). Pas de macOS, pas de Linux, pas d'application pour téléphone.
 - **Exécutable non signé** : un avertissement SmartScreen au premier lancement est normal ; un PC géré peut refuser de le lancer.
-- **Tablettes** : Bamboo Slate A4 (modèle visé) et Xiaomi Mijia « petit tableau noir » de 13,5 pouces, version à mémoire (premiers essais seulement). Slate A5, Spark, Folio, Intuos Pro Paper et les autres modèles Xiaomi : non testés.
+- **Tablettes** : Bamboo Slate A4 (modèle visé) et Xiaomi Mijia « petit tableau noir » de 13,5 pouces, version à mémoire (essayée à la main, sans compte rendu pas à pas). Slate A5, Spark, Folio, Intuos Pro Paper et les autres modèles Xiaomi : non testés.
 - Ces deux tablettes ne livrent que leur **page la plus ancienne** : la Bamboo Slate, sans l'option « Effacer de la tablette après import » (activée par défaut), n'a qu'une page lisible à la fois.
 - La Bamboo Slate n'est enregistrée qu'auprès d'une application : une fois enregistrée dans Ardoise, elle ne fonctionne plus avec l'application du téléphone ni avec Inkspace avant d'y être réenregistrée. La tablette Xiaomi, elle, ne parle qu'à une application à la fois (Mi Home doit être fermé) et ses pages vont à l'application qui les importe la première.
 - **Xiaomi** : la tablette ne donne pas l'heure de chaque point, donc la relecture et la vidéo d'une page récupérée rejouent les traits à vitesse régulière (en direct, Ardoise horodate ce qu'elle reçoit) ; une page fait environ 20 × 27 cm ; une feuille ne se reprend qu'avec la tablette qui l'a écrite, et seulement dans le sens où la tablette est tenue.
@@ -264,18 +273,27 @@ Version 0.1.0, the first version of Ardoise. Publication date: to be published. 
 | **H5**: resuming a sheet in live mode, touching up | Interrupt a live session, resume the sheet, write on it; delete, recolour and undo while the tablet writes. | **Done** (reported on 7 November, no remark). Moving and resizing a selection with the pen or a finger was added afterwards: not yet tried on the Surface. |
 | **H6**: correcting during live mode | A pupil writes while the teacher corrects with the Surface's pen on a layer of their own; a PDF export with separate layers. | **Done** (reported on 12 November). |
 | **H7**: paper and worksheet in live mode, projecting the editor, sound while writing | Paper and a PDF worksheet changed while the tablet writes, an editor note projected, narration recorded while writing with the Surface's microphone. | **Done** (reported on 12 November). |
-| **H8**: the Xiaomi tablet | Adding the tablet, fetching then deleting its pages, live mode, positions, two tablets. | **In progress.** A study on 12 November (live mode was started from the PC with the real tablet and the reconstructed stroke was confirmed), then first trials on 13 November 2026: importing a page saved while Ardoise is connected, clearing the screen during live mode and the page that disappears from the tablet as soon as it is downloaded were observed, and led to several fixes. **Not yet tried on the real tablet**: the backup copies of pages, updating the note of a screen saved again, live mode preceded by the import of the pages, the direction of the four positions (deduced from their names, to be confirmed), the position buttons during live mode, the real size of the imported writing (the unit of the coordinates has not been measured with a ruler) and two tablets switched on together: all of that has been checked with a simulated tablet only. |
+| **H8**: the Xiaomi tablet | Adding the tablet, fetching then deleting its pages, live mode, positions, two tablets. | **Tried by hand, without a step-by-step report.** A study on 12 November (live mode was started from the PC with the real tablet and the reconstructed stroke was confirmed), then trials on 13 November 2026: importing a page saved while Ardoise is connected, clearing the screen during live mode and the page that disappears from the tablet as soon as it is downloaded were observed, and led to several fixes. On 14 November 2026 the author tried the tablet again and reports that it works, without saying which steps of the procedure he did. **Not confirmed point by point**: the backup copies of pages, updating the note of a screen saved again, live mode preceded by the import of the pages, the direction of the four positions (deduced from their names, to be confirmed), the position buttons during live mode, the real size of the imported writing (the unit of the coordinates has not been measured with a ruler) and two tablets switched on together: without detail, they are established by a simulated tablet only. |
 
-For H2, H3, H6 and H7, the roadmap only says that the author did them and reported back, without detailing the steps or the measurements.
+For H2, H3, H6 and H7, the roadmap only says that the author did them and reported back, without detailing the steps or the measurements. The same goes for H8 (13 and 14 November 2026).
+
+### Tried by hand on 14 November 2026
+
+The author reported, without detail of the steps (one sentence per subject):
+
+- **The Xiaomi tablet**: "it works" (see H8 above).
+- **Printing**: "it works". He did not say on which printer (real or PDF), nor with how many notes per sheet.
+- **Windows' touch keyboard** in a text frame, in an equation and in a bookmark: "it works".
+- **A PDF's outline (the bookmarks) and links**, in his PDF reader: "it works". The reader was not named, and he did not say whether it was a note's PDF or a binder's.
+- **Right-click**: "ok", for the right-click menus, including in a text field, and for the pen's button, which opens none.
+- **The Guide button**: it opens the local guide in the browser; without the local page, it opens the one on GitHub.
 
 ### What remains to try by hand
 
 These points were checked by automated tests only, or not at all:
 
-- **A real printer**: printing is tested towards "Microsoft Print to PDF"; Windows' own dialog is not driven by the tests. This also applies to 2 and 4 notes per sheet.
 - **Word**: a Word export opened in Word, and Markdown and Word formatting on real handwriting.
-- **PDF**: the outline and the links of the summary page of a binder PDF, opened in a PDF reader (Acrobat Reader, Firefox…).
-- **The Surface, with the pen and a finger, since the latest additions**: moving and resizing a selection in live mode; the Text, Equation, Bookmark, Line, Rectangle and Ellipse tools; the right-click menus (which must never open with the pen's button); Windows' on-screen keyboard in the text, equation and bookmark fields; the **Choose another colour** picker.
+- **The Surface, with the pen and a finger, since the latest additions**: moving and resizing a selection in live mode; the Text, Equation, Bookmark, Line, Rectangle and Ellipse tools; the **Choose another colour** picker.
 - **The side panel** on the Surface: the rail and its 38 px icons with the pen, a finger and the mouse, the dark theme, the 800 × 560 window, the visible focus on the icons, Narrator reading the tabs.
 - **Keyboard shortcuts** (`Ctrl + W`, `Ctrl + Q`, `Ctrl + P`, `Esc`…): the automated journeys send the keys by program, not from a real keyboard.
 - **Handwriting recognition in English** (the English handwriting module of Windows is not installed on the development PC) and the pause of handwriting reading during the presentation.
@@ -294,7 +312,7 @@ Measured on 12 November 2026 on an idle laptop (Intel Core i5-1235U, 16 GB), bef
 
 - **Windows only**: Windows 11 is the only version tried (Windows 10 is aimed at, not tried). No macOS, no Linux, no phone app.
 - **Unsigned executable**: a SmartScreen warning at the first start is normal; a managed PC may refuse to run it.
-- **Tablets**: Bamboo Slate A4 (the target model) and Xiaomi Mijia LCD blackboard, 13.5", the model with memory (first trials only). Slate A5, Spark, Folio, Intuos Pro Paper and the other Xiaomi models are untested.
+- **Tablets**: Bamboo Slate A4 (the target model) and Xiaomi Mijia LCD blackboard, 13.5", the model with memory (tried by hand, without a step-by-step report). Slate A5, Spark, Folio, Intuos Pro Paper and the other Xiaomi models are untested.
 - Both tablets hand over only their **oldest page**: the Bamboo Slate, without the "Delete from the tablet after import" option (on by default), has only one readable page at a time.
 - The Bamboo Slate is registered with one application only: once registered in Ardoise, it no longer works with the phone app or with Inkspace until it is registered there again. The Xiaomi tablet talks to one application at a time (Mi Home must be closed) and its pages go to the application that imports them first.
 - **Xiaomi**: the tablet does not give the time of each point, so the replay and the video of a fetched page replay the strokes at a regular speed (in live mode, Ardoise timestamps what it receives); a page is about 20 × 27 cm; a sheet is resumed only with the tablet that wrote it, and only in the direction the tablet is held.

@@ -2,10 +2,15 @@
 
 Ardoise contains no artificial intelligence and works offline. It can, however, be connected to **your own
 assistant** — Claude Code, Claude Desktop or any other program that speaks the **MCP** protocol (Model Context
-Protocol). The assistant then reads your notes, **sees them as images** (diagrams, formulas and layout included), and
-can clean them up, title them, file them or drive Ardoise during a lesson.
+Protocol). The assistant then reads your notes (the handwriting, but also the **typed text**, the **equations** and the
+**bookmarks**), **sees them as images** (diagrams, formulas and layout included), and can clean them up, title them,
+file them or drive Ardoise during a lesson.
 
 The assistant brings the intelligence; Ardoise only gives it access to your library, when it asks.
+
+> **Finding this guide in Ardoise.** In **Settings > Assistant (MCP)**, the **Open the "Assistant" guide** button
+> opens it in your browser, offline; if it is missing next to Ardoise (the `guide` folder), the guide on GitHub opens
+> instead. The `F1` key (or the **Guide** button) opens the user guide.
 
 ## What the assistant can do for you
 
@@ -15,13 +20,44 @@ A few requests, as you would write them:
   diagrams, `mhchem` for chemical equations, `siunitx` for units); the assistant lists what it was unsure of.
 - "Give a title and tags to this week's untitled notes."
 - "Summarise Tuesday's lesson with class 8B for the class log."
-- "Find the note where I wrote Ohm's law."
+- "Find the note where I wrote Ohm's law." (the assistant also searches your typed text, your equations and your
+  bookmarks)
+- "Copy the equation of my note *Dilution* out in LaTeX": it reads the LaTeX source you typed, exact, without guessing
+  it from the picture.
+- "List the bookmarks of the note *Chapter 3*, with their place on the page."
 - "File the chemistry notes in the binder *Chemistry/Year 9*."
+- "Merge my three notes on circuits into one"; "split this note in two where I changed subject"; "put yesterday's test
+  note in the trash".
+- "Create a note on page 3 of this PDF, so I can annotate it" (with the file's path).
 - "Export the dilution method sheet as a PDF to my Documents folder."
 - During a lesson, with Ardoise open: "Open the answers note", "Project the page", "Next page".
 - At the end of a lesson: "Make a clean version of the note I just wrote in live mode."
 - "Tidy the handwriting of my note and correct my spelling mistakes": the assistant retouches a **copy**, never the
   original (see "Retouching a note on a copy" below).
+
+## What the assistant reads in a note
+
+An Ardoise page can hold handwriting, typed text, equations and bookmarks. The assistant receives each in its own way:
+
+- **Handwriting**: the picture of the page (`render_note`) and the text Windows recognised, line by line, with its
+  position in millimetres (`get_note_text`). The recognition makes mistakes, especially on formulas and diagrams: the
+  assistant should compare with the picture.
+- **Typed text** (the **Text** tool): its text is **exact**, nothing is guessed; the assistant also has its font, bold,
+  size, colour and place on the page, in reading order (`get_note` and `get_note_text`). `get_note_text` gives every
+  frame, saying for each whether its layer is visible; the overall "typed text" it returns only holds those of the
+  visible layers.
+- **Equations**: their **LaTeX** source, exact (chemistry in `\ce{…}`), with size, colour and place; `render_note`
+  shows how they look. They are also in the overall typed text, as their source.
+- **Bookmarks**: the words you put at spots of the page, with their position (`get_note`). They only serve the editor:
+  the picture of `render_note` does not draw them.
+- An object of a kind this version of Ardoise does not know is reported to the assistant (`other_objects`), but
+  `render_note` does not show it.
+
+**Search** (`search_notes`) searches like the app: titles, tags, binders, typed text (equations included), bookmarks
+and recognised handwriting, ignoring accents and case. Each result says **where** the word was found (title, tags,
+binder, typed text, bookmarks, handwriting) and shows a short snippet. Notes whose handwriting Windows has not read yet
+are not searched by their handwriting: the result counts them, and the assistant can have one read (`get_note_text`) so
+that it is found next time.
 
 ## Before you start
 
@@ -31,7 +67,8 @@ A few requests, as you would write them:
   language: Windows Settings > Time & language > Language & region > (the language) > Language options >
   Handwriting. Without it, the assistant still sees your notes as images.
 - In Ardoise, **Settings > Assistant (MCP)** shows the exact text to copy, with the path of *your* `ardoise.exe`.
-  Copy it from there rather than typing it: that is the safest.
+  Copy it from there rather than typing it: that is the safest. That page also has the **Read only** box, the **Link
+  with the open Ardoise** line and the button that opens this guide.
 
 > Ardoise is portable: if you move its folder, declare it again with the new path. If you keep several copies of
 > Ardoise, the assistant uses the one whose path is declared.
@@ -85,9 +122,12 @@ If something goes wrong, Claude Desktop's log for Ardoise is `%APPDATA%\Claude\l
 ## The read-only option (`--read-only`)
 
 With `--read-only` (the **Read only** box in Settings > Assistant, which adds it to both texts), the assistant can
-**only read**: list and search notes, read their recognised text, see them as images. It can neither create,
-rename, file or export notes, retouch a copy, nor drive Ardoise. The `title_and_tag` prompt then gives a list of titles and tags
-for you to apply in Ardoise.
+**only read**: list and search notes, read their content (recognised handwriting, typed text, equations, bookmarks),
+see them as images and look closely at their strokes (`get_strokes`, `ink_lines`). Ardoise then gives it **no other
+tool**: it can neither create, rename, file, trash, merge, split or export notes, nor store a corrected transcription,
+nor try or make a retouching, nor read Ardoise's state or the last live session, nor drive Ardoise. The
+`title_and_tag` prompt then gives a list of titles and tags for you to apply in Ardoise; `clean_up` works without
+`export_note` (the drawings are then for you to export from the app); `improve_note` does not exist.
 
 **Recommended whenever the assistant only needs to read** (summarising, finding a note, preparing a document from
 your notes).
@@ -99,12 +139,85 @@ Ardoise offers ready-made prompts. In Claude Code, type `/`: they appear as `/ar
 
 | In French | In English | Purpose |
 |---|---|---|
-| `mettre_au_propre` | `clean_up` | a note cleaned up as Markdown, Word or LaTeX |
-| `titrer_et_etiqueter` | `title_and_tag` | titles and tags for untitled notes |
-| `resume_seance` | `lesson_summary` | a lesson summary for the class log |
-| `ameliorer_note` | `improve_note` | a note improved on a copy (tidier writing, straightened diagram, spelling corrected); not there in read-only mode |
+| `mettre_au_propre` | `clean_up` | a note cleaned up as Markdown, Word or LaTeX (arguments: the note, the format) |
+| `titrer_et_etiqueter` | `title_and_tag` | titles and tags for untitled notes (argument: a binder) |
+| `resume_seance` | `lesson_summary` | a lesson summary for the class log (arguments: the day, the class's binder) |
+| `ameliorer_note` | `improve_note` | a note improved on a copy (tidier writing, straightened diagram, spelling corrected); not there in read-only mode (arguments: the note, what you want improved) |
+
+With no note given, `clean_up` and `improve_note` take the last note of live mode (see "Driving Ardoise while it is
+open" below).
 
 You can also simply ask in your own words, without a prompt: the assistant picks Ardoise's tools by itself.
+
+## Ardoise's tools, by what you ask for
+
+You do not need to know them: the assistant picks. This list says what is possible, and helps you understand what it
+shows when it asks permission to use a tool. A note is named by its identifier or by its path in the library;
+positions are in millimetres from the top-left corner of the page.
+
+**Read, search, look** (the only tools left in read-only mode):
+
+| You want… | A request | Tools |
+|---|---|---|
+| to browse the library | "Which notes did I write this week in the binder *Class 8B*?" | `list_notes` (by binder, tag, favourite, dates; sorting), `list_binders`, `list_tags` |
+| to find a note | "Find the note where I wrote Ohm's law." | `search_notes` |
+| to read a note | "What does my note *Optics* say?" | `get_note` (paper, layers, text frames, equations, bookmarks; strokes on request), `get_note_text` (recognised handwriting and typed text) |
+| it to look at a note | "Look at the diagram at the bottom of *Series circuit*." | `render_note` (the whole page or a region, with or without the strokes' numbers) |
+| fine work on the ink | "Tell me where the written lines of this page are." | `get_strokes` (the points of a stroke), `ink_lines` (the written lines, their slope, their height) |
+
+**Create, title, file** (the ink is never changed in the note itself):
+
+| You want… | A request | Tools |
+|---|---|---|
+| a new note | "Create a squared note in the binder *Chemistry/Year 9*."; "Create a note on page 3 of this PDF." | `create_note` (blank, or on an image or a page of a PDF) |
+| to title, tag, mark as favourite | "Give a title to my untitled notes." | `update_note` (the title changes the file's name; the old title and tags are not kept) |
+| to file | "File the chemistry notes in *Chemistry/Year 9*." | `move_note` (the binder is created if missing; a note of the same name is never overwritten) |
+| to delete | "Put the test note in the trash." | `trash_note` (restorable from Ardoise's trash, 30 days) |
+| to merge | "Merge these three notes one after the other." | `merge_notes` (on one page or end to end; the original notes do not change) |
+| to split | "Split this note in two at this point." | `split_note` (at an instant or around a zone; see "Retouching a note on a copy") |
+
+**Export**:
+
+| You want… | A request | Tool |
+|---|---|---|
+| files | "Export the dilution method sheet as a PDF to my Documents folder." | `export_note` |
+
+`export_note` makes the same exports as the app: PNG, JPG, WebP, SVG, PDF (one page per note), `.txt`, Markdown and
+Word, and the replay of the writing of **one** note as GIF, WebM or MP4 (a few seconds to several minutes). It never
+overwrites a file: a name that is taken gets " (2)". A few details:
+
+- The **PDF of a single note** has the note's bookmarks as its outline (the bookmarks panel of your PDF reader). The
+  PDF of several notes has none: for a binder's PDF, with its outline and its summary page, use **Export the binder as
+  a PDF** in Ardoise.
+- The **images** do not have the bookmarks (they serve the editor).
+- The `.txt`, Markdown and Word files hold **the text of the recognised handwriting** (with its drawings for Markdown
+  and Word), like the app's; typed text and equations are not in them: an assistant writing a complete document reads
+  them separately and adds them itself.
+
+**Correct the transcription**:
+
+| You want… | A request | Tool |
+|---|---|---|
+| search and the text exports to use a right text | "Windows read *ohn* instead of *Ohm*: correct my note's transcription." | `set_note_text` |
+
+The correction stays in the handwriting memory of **this PC**, never in the note, and only holds while the note's ink
+does not change; an empty text removes it. It only concerns handwriting, not typed text.
+
+**Retouch the ink, on a copy** (next chapter):
+
+| You want… | A request | Tools |
+|---|---|---|
+| to tidy the writing, redraw a diagram, correct mistakes | "Tidy the handwriting of my note *Report*." | `revision_orders` (the list of possible retouchings), `preview_revision` (try without writing anything), `create_revision` (write the copy), `edit_revision` (retouch a copy again) |
+| clean shapes | "Straighten the shapes of my physics note." | `straighten_shapes` |
+
+**Drive Ardoise while it is open** (see below; none of these tools exists in read-only mode):
+
+| You want… | A request | Tool |
+|---|---|---|
+| to know what Ardoise shows | "Which note is open?" | `app_state` |
+| to open a note | "Open the answers note." | `open_note` |
+| to project in class | "Project the page.", "Next page." | `presentation` |
+| to find what was just written | "Make a clean version of the note I just wrote." | `last_live_note` |
 
 ## Retouching a note on a copy
 
@@ -123,6 +236,9 @@ tell it) and what is **only asked of the assistant** (it may fall short).
   the copy or the retouching: the assistant has to look again.
 - **A retouching can only name strokes of the note it retouches**, never those of another note. The strokes of a hidden
   layer are only touched if the assistant names them expressly.
+- **Retouchings only act on strokes**: the page's typed text, equations and bookmarks are never changed; the copy
+  keeps them as they are, and a split gives them to the part they belong to according to the instant or the zone chosen
+  (a typed text goes to the second part if it was written from that instant on, or if its centre is inside the zone).
 - **Nothing is deleted for good**: the version before a retouching goes to the trash (see "Privacy").
 
 **What is only asked of the assistant**, by the prompt `improve_note` (`ameliorer_note` in French), and which Ardoise
@@ -205,7 +321,8 @@ to try, `create_revision` to make the copy, `edit_revision` to retouch a copy, `
 
 ## Driving Ardoise while it is open
 
-Four tools act on Ardoise **while it is open** (they do nothing when it is closed):
+Four tools act on Ardoise **while it is open** (they do nothing when it is closed, and do not exist in read-only
+mode). None deletes anything, changes a setting or touches the tablet:
 
 - **state** (`app_state`): what Ardoise shows — the library, the editor (which note, unsaved changes or not), live
   mode (current page, presentation open or not);
@@ -213,7 +330,7 @@ Four tools act on Ardoise **while it is open** (they do nothing when it is close
   unsaved changes, while live mode is on screen or while a dialog is open: nothing is ever lost;
 - **presentation** (`presentation`): project the live page on the screen chosen in the live window, stop
   projecting, next, previous or a given page. **You start live mode** (tablet panel > Live mode): the assistant never
-  touches the tablet;
+  touches the tablet. "Next page" from the last page adds a blank one, like the `→` key;
 - **last live note** (`last_live_note`): the notes written during the current or last live session (one note per
   page), to offer a clean version at the end of a lesson. Ardoise remembers it on this PC even after it was closed.
 
@@ -229,6 +346,9 @@ The assistant must use **the same copy** of Ardoise as the one you open (same fo
 | `appNotResponding` | Ardoise is busy (an export, a dialog) or still starting: try again. |
 | `appBusy` | First finish in Ardoise what is under way (save the note, close the dialog, finish live mode). |
 | `liveNotRunning` | Start live mode in Ardoise before asking for the presentation. |
+| `noteConflict` | The note changed since the assistant looked at it (you retouched it, or another computer did): ask it to look at it again, then start over. |
+| `notARevision` | The assistant tried to retouch an ordinary note "in place": Ardoise refuses, because the ink of an ordinary note never changes. Ask it to make a copy first. |
+| The assistant says it can neither create, file, export nor drive Ardoise | Ardoise is declared **read only**: untick **Read only** in Settings > Assistant, copy the declaration again and restart the assistant. |
 | Ardoise does not appear in the assistant | Check the path (folder moved?), `claude mcp list`, Claude Desktop's log; restart the assistant. |
 
 ## Privacy: read this first
@@ -243,9 +363,12 @@ The assistant must use **the same copy** of Ardoise as the one you open (same fo
 - **The assistant usually asks for your consent before changing anything**: Claude Code and Claude Desktop ask for
   permission before using a tool that writes, and you can refuse. But that depends on their settings: a tool you
   "always allowed", or a mode that accepts everything, asks nothing any more. Ardoise flags the tools that change or
-  remove notes (move to the trash, change the title or tags, split, retouch or straighten a copy, move) as **destructive**,
-  which prompts the assistant to ask. To be sure nothing changes, declare Ardoise **read only** (`--read-only`).
+  remove notes (move to the trash, change the title, tags or favourite mark, move, split, straighten shapes, retouch a
+  copy that was already made) as **destructive**, which prompts the assistant to ask. To be sure nothing changes, declare Ardoise **read only** (`--read-only`).
 - **Nothing is ever deleted for good**: a note the assistant deletes goes to Ardoise's trash (kept 30 days), where you
   can restore it. When it retouches a copy that was already made (or straightens its shapes, or splits it), the version before
   goes there too, as "`title` (before retouching)", "`title` (before straightening)" or "`title` (before splitting)". The assistant never writes the ink of an ordinary
-  note: it only retouches a copy, next to it. Exports never overwrite an existing file.
+  note: it only retouches a copy, next to it. Merging notes makes a new one without changing the original notes; exports
+  never overwrite an existing file; a corrected transcription stays in this PC's handwriting memory, never in the
+  note. On the other hand, **changing a note's title or tags** (`update_note`) does not keep the old ones: it is one
+  of the changes to look at before allowing it.

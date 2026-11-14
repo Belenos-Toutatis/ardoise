@@ -421,6 +421,8 @@ Choix faits pendant la construction, confirmés par l'utilisateur le 2026-11-13 
 
 - [ ] [matériel] Avec la vraie Xiaomi : l'ajouter, lire ses informations, récupérer puis effacer une page d'essai, trente secondes de direct ; dire ce que fait le bouton d'effacement de l'écran pendant le direct.
 
+Signalé par l'utilisateur le 2026-11-14 : « ça marche » pour la tablette Xiaomi (essais des 13 et 14 novembre), sans détail des étapes. La case reste décochée : ce compte rendu ne dit pas lesquelles des étapes ci-dessus ont été faites, ni ce que fait le bouton d'effacement de l'écran pendant le direct. Le même jour, signalés sans détail et hors H8 : l'impression, le clavier tactile de Windows (cadre de texte, équation, signet), le plan et les liens d'un PDF dans son lecteur PDF, le clic droit, le bouton Guide.
+
 ---
 
 ## Lancer une étape avec `/goal`

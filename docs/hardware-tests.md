@@ -286,6 +286,8 @@ La première session avec la vraie tablette a montré que la synchronisation ét
 | Si le doigt dessine quand l'option est cochée | B3 |
 | Si les annotations de la présentation s'effacent et ne s'enregistrent pas | C2 |
 
+**Compte rendu du 2026-11-14** (signalé par l'utilisateur, sans détail) : le clic droit est « ok » (menus du clic droit, y compris dans un champ de texte ; le bouton du stylet n'en ouvre aucun, A3), et le clavier tactile de Windows « marche » dans un cadre de texte, une équation et un signet (ce point n'a pas de procédure ici). Les autres points de cette procédure ne sont pas concernés par ce compte rendu.
+
 ---
 
 ## H4 — Montrer la feuille sur un autre ordinateur du réseau
@@ -719,6 +721,8 @@ Ce qui ne revient pas tout seul :
 
 Ce test vérifie SPEC §4.1 « Tablette Xiaomi » et §4.2 « Avec la tablette Xiaomi » (`docs/questions.md` Q14, `docs/design/blackboard.md`) avec la vraie tablette : rien n'a été essayé dessus par Ardoise avant (seules des captures de Mi Home ont été étudiées). Les libellés ci-dessous sont ceux de la fenêtre.
 
+**Compte rendu du 2026-11-14** (signalé par l'utilisateur, sans détail des étapes) : la tablette a été essayée à la main les 13 et 14 novembre 2026 et « ça marche ». On ne sait pas quelles parties de cette procédure ont été faites : les points de « À me signaler » ci-dessous restent sans réponse, et la case de H8 de `ROADMAP.md` reste décochée.
+
 ### À la maison, avant
 
 1. Fermer Ardoise sur tous les PC, puis remplacer `ardoise.exe` dans le dossier Nextcloud par la nouvelle version.
@@ -845,3 +849,13 @@ Ce qui ne revient pas tout seul :
 | Le texte exact du refus quand la tablette ne convient pas à la feuille, et s'il arrive tout de suite ou à la connexion | D bis 2 |
 | Ce que fait Ardoise quand la **Bamboo Slate** s'allume alors que la Xiaomi est connectée (hors direct, puis pendant un direct) | E2, E3 |
 | Toute phrase incompréhensible, tout message d'erreur nouveau | tout le test |
+
+---
+
+## Essais à la main sans procédure écrite
+
+Signalés par l'utilisateur le 2026-11-14, sans détail des étapes :
+
+- **Impression** : « ça marche ». Il n'a pas dit sur quelle imprimante (vraie ou « Microsoft Print to PDF »), ni avec combien de notes par feuille.
+- **Plan (signets) et liens d'un PDF**, ouvert dans son lecteur PDF : « ça marche ». Le lecteur n'a pas été nommé ; on ne sait pas si c'était le PDF d'une note ou celui d'un classeur avec sa page de sommaire.
+- **Bouton Guide** : il ouvre le guide local dans le navigateur ; la page locale supprimée, il ouvre celle de GitHub.
