@@ -350,6 +350,55 @@ fn split_by_zone_ignores_hidden_layers_and_follows_missing_ones() {
 }
 
 #[test]
+fn a_bookmark_is_no_content_for_the_clocks_nor_for_a_split() {
+    use crate::note::PageObject;
+
+    // Its time does not stretch the note's time range.
+    let mut note = note_with(
+        "A",
+        vec![stroke(0, &[(10.0, 10.0, 100), (20.0, 20.0, 200)])],
+    );
+    note.objects = vec![PageObject::bookmark("b", 0, 9_000, 600.0, 600.0, "Fin")];
+    assert_eq!(time_range(&note), Some((100, 200)));
+    note.strokes.clear();
+    assert_eq!(time_range(&note), None);
+
+    // A zone holding a bookmark and nothing else does not split; one holding ink takes it along, whatever
+    // its layer shows (a bookmark is not hidden with its layer).
+    let mark = PageObject::bookmark("b", 1, 0, 40.0, 40.0, "Dedans");
+    let [cx, cy] = mark.page_centre();
+    let around = [
+        [cx - 50.0, cy - 50.0],
+        [cx + 50.0, cy - 50.0],
+        [cx + 50.0, cy + 50.0],
+        [cx - 50.0, cy + 50.0],
+    ];
+    let mut source = note_with(
+        "Z",
+        vec![
+            stroke(0, &[(cx, cy, 10)]),
+            stroke(0, &[(cx + 5_000.0, cy, 20)]),
+        ],
+    );
+    source.layers = vec![layer("Visible", true), layer("Cachée", false)];
+    source.objects = vec![mark.clone()];
+    let split = split_by_zone(&source, &around, new_note("B")).unwrap();
+    assert_eq!(split.extracted.objects, std::slice::from_ref(&mark));
+    assert!(split.kept.objects.is_empty());
+    // The same zone with no ink in it: nothing to split.
+    let only = {
+        let mut note = note_with("H", vec![stroke(0, &[(cx + 5_000.0, cy, 5)])]);
+        note.layers = source.layers.clone();
+        note.objects = vec![mark];
+        note
+    };
+    assert_eq!(
+        split_by_zone(&only, &around, new_note("B")).unwrap_err(),
+        OpsError::NothingToSplit
+    );
+}
+
+#[test]
 fn split_by_zone_refuses_an_empty_side() {
     let source = zone_note();
     // Nothing inside.

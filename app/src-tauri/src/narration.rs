@@ -1081,14 +1081,19 @@ fn writing_target(library: Library, path: &str) -> CommandResult<WritingTarget> 
 }
 
 /// Note time at which a writing recording on `note` begins (§3.2, `writingOrigin` of the
-/// editor): its last sample or page object (a text frame), hidden layers included, plus
-/// [`WRITING_GAP_MS`]; 0 without either.
+/// editor): its last sample or page object (a text frame; a bookmark is not part of the writing),
+/// hidden layers included, plus [`WRITING_GAP_MS`]; 0 without either.
 fn writing_origin(note: &Note) -> i64 {
     note.strokes
         .iter()
         .flat_map(|stroke| stroke.points.iter())
         .map(|point| point.t)
-        .chain(note.objects.iter().map(|object| object.t))
+        .chain(
+            note.objects
+                .iter()
+                .filter(|object| !object.is_bookmark())
+                .map(|object| object.t),
+        )
         .max()
         .map_or(0, |last| i64::from(last) + i64::from(WRITING_GAP_MS))
 }

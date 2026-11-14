@@ -8,8 +8,9 @@
 //! - `strokes.bin` (required): the strokes, see [`strokes`].
 //! - `original.bin`, `original.ardoise`, `thumb.png`, `audio.opus`, `background.<ext>`,
 //!   `text.json` (optional): opaque bytes.
-//! - page objects (format 1.4): the `objects` key of `note.json`, see [`crate::objects`]; a list
-//!   that cannot be read stays an unknown key, and the note reads without objects.
+//! - page objects (format 1.4, bookmarks 1.6): the `objects` key of `note.json`, see
+//!   [`crate::objects`]; a list that cannot be read stays an unknown key, and the note reads without
+//!   objects.
 //! - `revision.json` (optional, format 1.3): the note is a retouched copy of another, see
 //!   [`RevisionInfo`]. A damaged one (or one over [`MAX_REVISION_JSON_BYTES`]) is kept verbatim as
 //!   an unknown member and the note is not a revision.
@@ -95,7 +96,7 @@ pub struct FormatVersion {
 
 impl FormatVersion {
     /// The version this code writes, and the newest it reads.
-    pub const CURRENT: FormatVersion = FormatVersion { major: 1, minor: 4 };
+    pub const CURRENT: FormatVersion = FormatVersion { major: 1, minor: 6 };
 }
 
 impl fmt::Display for FormatVersion {

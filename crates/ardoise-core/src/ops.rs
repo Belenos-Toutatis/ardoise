@@ -60,13 +60,19 @@ pub enum MergeLayout {
 }
 
 /// First and last time of the note's content, in milliseconds since `created`: its samples and
-/// the times its page objects appear at; `None` without either.
+/// the times its page objects appear at (bookmarks, which no replay shows, do not count); `None`
+/// without either.
 pub fn time_range(note: &Note) -> Option<(u32, u32)> {
     let mut times = note
         .strokes
         .iter()
         .flat_map(|stroke| stroke.points.iter().map(|p| p.t))
-        .chain(note.objects.iter().map(|o| o.t));
+        .chain(
+            note.objects
+                .iter()
+                .filter(|o| !o.is_bookmark())
+                .map(|o| o.t),
+        );
     let first = times.next()?;
     Some(times.fold((first, first), |(lo, hi), t| (lo.min(t), hi.max(t))))
 }
@@ -124,7 +130,12 @@ pub fn split_at_time(note: &Note, at_ms: u32, new: NewNote) -> Result<Split, Ops
         .strokes
         .iter()
         .flat_map(|s| s.points.iter().map(|p| p.t))
-        .chain(note.objects.iter().map(|o| o.t))
+        .chain(
+            note.objects
+                .iter()
+                .filter(|o| !o.is_bookmark())
+                .map(|o| o.t),
+        )
         .filter(|&t| t >= at_ms)
         .min()
         .ok_or(OpsError::NothingToSplit)?;
@@ -194,8 +205,10 @@ fn in_polygon(polygon: &[[f32; 2]], x: f64, y: f64) -> bool {
 /// samples (and at least one) are inside `polygon` — the rule of the editor's lasso
 /// (`selectInLasso`, `app/ui/src/lib/editor/hit.ts`), so that what the user sees highlighted is
 /// what moves; a page object on a visible layer goes when the centre of its box is inside (the
-/// lasso's rule for objects, `objectsInLasso` in `app/ui/src/lib/editor/objects.ts`). Positions
-/// and times are unchanged, and so is `created`.
+/// lasso's rule for objects, `objectsInLasso` in `app/ui/src/lib/editor/objects.ts`; a bookmark is
+/// not hidden with its layer, so it goes with the zone whatever its layer shows, but it is not
+/// content: a zone holding nothing else does not split). Positions and times are unchanged, and so
+/// is `created`.
 ///
 /// Refused with [`OpsError::NothingToSplit`] when nothing moves (also for a polygon of fewer
 /// than three points), or when nothing would stay.
@@ -230,10 +243,11 @@ pub fn split_by_zone(note: &Note, polygon: &[[f32; 2]], new: NewNote) -> Result<
     let (moved_objects, kept_objects): (Vec<PageObject>, Vec<PageObject>) =
         note.objects.iter().cloned().partition(|o| {
             let [x, y] = o.page_centre();
-            visible(o.layer) && in_polygon(polygon, f64::from(x), f64::from(y))
+            (visible(o.layer) || o.is_bookmark()) && in_polygon(polygon, f64::from(x), f64::from(y))
         });
-    if (!has_points(&moved) && moved_objects.is_empty())
-        || (!has_points(&kept) && kept_objects.is_empty())
+    let drawn = |objects: &[PageObject]| objects.iter().any(|o| !o.is_bookmark());
+    if (!has_points(&moved) && !drawn(&moved_objects))
+        || (!has_points(&kept) && !drawn(&kept_objects))
     {
         return Err(OpsError::NothingToSplit);
     }

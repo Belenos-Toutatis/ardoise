@@ -298,14 +298,20 @@ pub fn time_base(note: &Note, audio: Option<&[u8]>) -> u32 {
     }
 }
 
-/// Time of the note's last point or page object, hidden layers included; `None` without either.
+/// Time of the note's last point or page object (not a bookmark: no replay shows it), hidden layers
+/// included; `None` without either.
 /// From the note's own data (not the replay's end, which has rules of its own).
 fn last_content_time(note: &Note) -> Option<u32> {
     note.strokes
         .iter()
         .flat_map(|stroke| &stroke.points)
         .map(|point| point.t)
-        .chain(note.objects.iter().map(|object| object.t))
+        .chain(
+            note.objects
+                .iter()
+                .filter(|object| !object.is_bookmark())
+                .map(|object| object.t),
+        )
         .max()
 }
 

@@ -8,9 +8,21 @@
 
 use ardoise_ink::{Rgba, Stroke};
 
-pub use crate::objects::{ObjectBody, PageObject, TextBody};
+pub use crate::objects::{BookmarkBody, ObjectBody, PageObject, TextBody};
 /// The families of a text frame, for the crates that build notes and do not depend on the fonts.
 pub use ardoise_text::FontFamily;
+
+/// A bookmark as the library's listing gives it (`BookmarkRef` in `note.ts`): enough for the binder's
+/// summary and the search, and to open the note at its spot, without reading anything but `note.json`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct BookmarkRef {
+    /// The object's id: what the editor finds it by.
+    pub id: String,
+    pub label: String,
+    /// The centre of the bookmark's box on the page, device units, rounded.
+    pub x: i32,
+    pub y: i32,
+}
 
 /// Page sizes of the Bamboo Slate Large (A4) in device units.
 pub const A4_LANDSCAPE: PageSize = PageSize {
@@ -232,9 +244,11 @@ pub struct Note {
 }
 
 impl Note {
-    /// Whether the page holds anything to draw: a stroke with a sample, or an object.
+    /// Whether the page holds anything to draw: a stroke with a sample, or an object that is not a
+    /// bookmark (a bookmark is a mark on the page, drawn in the editor only).
     pub fn has_content(&self) -> bool {
-        !self.objects.is_empty() || self.strokes.iter().any(|s| !s.points.is_empty())
+        self.objects.iter().any(|o| !o.is_bookmark())
+            || self.strokes.iter().any(|s| !s.points.is_empty())
     }
 
     /// Whether `layer` is shown (a layer the note does not have is not).
@@ -258,6 +272,40 @@ impl Note {
             a[1].total_cmp(&b[1]).then(a[0].total_cmp(&b[0]))
         });
         frames
+    }
+
+    /// The bookmarks of the page that say something (a blank label is not listed), in reading order
+    /// (top to bottom, then left to right, by the top-left corner of their box on the page), every
+    /// layer: a bookmark is not hidden with its layer (SPEC §4.4 « Signets »).
+    pub fn bookmark_objects(&self) -> Vec<(&PageObject, &BookmarkBody)> {
+        let mut found: Vec<(&PageObject, &BookmarkBody)> = self
+            .objects
+            .iter()
+            .filter_map(|object| Some((object, object.as_bookmark()?)))
+            .filter(|(_, body)| !body.label.trim().is_empty())
+            .collect();
+        found.sort_by(|(a, _), (b, _)| {
+            let (a, b) = (a.page_bounds(), b.page_bounds());
+            a[1].total_cmp(&b[1]).then(a[0].total_cmp(&b[0]))
+        });
+        found
+    }
+
+    /// [`Note::bookmark_objects`] as the listing gives them: the position is the centre of the
+    /// bookmark's box on the page, in device units, where the editor goes to show it.
+    pub fn bookmarks(&self) -> Vec<BookmarkRef> {
+        self.bookmark_objects()
+            .into_iter()
+            .map(|(object, body)| {
+                let [x, y] = object.page_centre();
+                BookmarkRef {
+                    id: object.id.clone(),
+                    label: body.label.trim().to_owned(),
+                    x: x.round() as i32,
+                    y: y.round() as i32,
+                }
+            })
+            .collect()
     }
 
     /// What the library search reads of the page's typed text: the text of the frames of the
@@ -347,6 +395,42 @@ mod tests {
         assert_eq!(ids, ["left", "right", "hidden", "blank", "low"]);
         assert!(note.layer_visible(0) && !note.layer_visible(1) && !note.layer_visible(2));
         assert_eq!(crate::testutil::blank_note("m", "").typed_text(), "");
+    }
+
+    fn bookmark(id: &str, layer: u32, x: f32, y: f32, label: &str) -> PageObject {
+        PageObject::bookmark(id, layer, 0, x, y, label)
+    }
+
+    #[test]
+    fn bookmarks_are_listed_in_reading_order_whatever_the_layer_shows() {
+        let mut note = crate::testutil::blank_note("n", "Signets");
+        note.layers.push(Layer {
+            name: "Cachée".into(),
+            visible: false,
+        });
+        note.objects = vec![
+            bookmark("low", 0, 100.0, 5_000.0, "Bas"),
+            bookmark("right", 0, 9_000.0, 1_000.0, "  Droite "),
+            bookmark("left", 0, 100.0, 1_000.0, "Gauche"),
+            bookmark("hidden", 1, 100.0, 3_000.0, "Calque caché"),
+            bookmark("blank", 0, 100.0, 4_000.0, "   "),
+            frame("text", 0, 100.0, 100.0, "Pas un signet"),
+        ];
+        let refs = note.bookmarks();
+        let labels: Vec<&str> = refs.iter().map(|b| b.label.as_str()).collect();
+        assert_eq!(labels, ["Gauche", "Droite", "Calque caché", "Bas"]);
+        assert_eq!(refs[0].id, "left");
+        // The spot is the centre of the box, rounded.
+        let [x, y] = note.objects[2].page_centre();
+        assert_eq!((refs[0].x, refs[0].y), (x.round() as i32, y.round() as i32));
+        // Bookmarks are not typed text, and make no content to draw.
+        assert_eq!(note.typed_text(), "Pas un signet");
+        let mut only = crate::testutil::blank_note("m", "");
+        assert!(!only.has_content());
+        only.objects = vec![bookmark("a", 0, 0.0, 0.0, "Seul")];
+        assert!(!only.has_content());
+        only.objects.push(frame("t", 0, 0.0, 0.0, "x"));
+        assert!(only.has_content());
     }
 
     #[test]
