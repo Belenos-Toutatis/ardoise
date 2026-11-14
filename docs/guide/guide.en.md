@@ -1080,7 +1080,8 @@ Save*; when you leave with changes, Ardoise asks: **Save and go back**, **Go bac
 and redo have no limit while the note is open.
 
 **The `Esc` key, in steps.** Each press does the smallest thing that applies: first it drops the gesture under way (a
-stroke, a shape, a lasso, a move, a question Ardoise is asking on screen, the equation being written); otherwise it closes the panel or the tool that is
+stroke, a shape, a lasso, a move, a question Ardoise is asking on screen) or ends the typing of a text, a bookmark or an
+equation, keeping what is written (an equation with incorrect code stays in its panel); otherwise it closes the panel or the tool that is
 open (the split, the replay, the manual crop, the setting of **Straighten shapes**); otherwise it clears the selection;
 otherwise it **saves the note and goes back to the library**, like the **Library** button but without asking about the
 changes: the save is the answer. If saving fails (the note was changed elsewhere meanwhile, a full disk), the note stays
@@ -1249,10 +1250,11 @@ in live mode keeps its texts.
 
 The **Equation** tool (the `M` key) puts on the page a formula written in LaTeX, in math mode, as between `$…$` in a LaTeX
 document: tap or click the page where you want it (with the pen, the mouse or a finger). A panel opens next to it: type the
-code in **LaTeX code**; the **preview** shows, as you type, what will be placed. **Place** (or `Enter`) puts the equation on the
-page, where you tapped, and selects it; `Shift + Enter` starts a new line in the code; **Cancel** (or `Esc`, or another tool)
-closes the panel without changing anything. Until the equation is placed, the page does not change; once placed, one
-`Ctrl + Z` takes it away. While you type, the keys go to the code, never to the editor's shortcuts. The first time, the tool
+code in **LaTeX code**; the **preview** shows, as you type, what will be placed. **Place** (or `Enter`, or `Esc` as for a
+text) puts the equation on the page, where you tapped, and selects it; `Shift + Enter` starts a new line in the code. With an
+empty field, `Esc` closes the panel without placing anything; with incorrect code, the panel stays open, the code and its error
+in it, for you to correct it: nothing is lost. **Cancel** (or another tool) closes the panel without changing anything. Until
+the equation is placed, the page does not change; once placed, one `Ctrl + Z` takes it away. While you type, the keys go to the code, never to the editor's shortcuts. The first time, the tool
 takes a second to load.
 
 If the code is not correct, the preview says so with MathJax's message (for example "Missing close brace" for a forgotten
@@ -1276,12 +1278,16 @@ A few examples:
 | `\begin{cases} x = 1 \\ y = 2 \end{cases}` | a system (`\\`: next line) |
 
 To change an equation, tap it with the **Equation** tool, or double-click it with the **Select** tool: its code comes back in
-the panel; **Update** draws it again in the same place (its top-left corner does not move). While its panel is open, the
-equation stays selected: the colours and the sizes apply to it.
+the panel; **Update** (or `Enter`, or `Esc`) draws it again in the same place (its top-left corner does not move). While its
+panel is open, the equation stays selected: the colours and the sizes apply to it.
 
 Under the toolbar, with the **Equation** tool or when equations are selected: the **Size**, **Small** (4 mm), **Medium** (6 mm)
 or **Large** (9 mm), the height of a letter as for a text of that size; it applies to the selected equations and to the next
-ones. The colour is the tool's.
+ones.
+
+The **Colour** swatches of the toolbar (and **Choose another colour**) colour the whole equation: the one you are writing,
+whose preview takes the colour at once while the cursor stays in the code, the one you are changing, and the ones you select,
+alone or with strokes and texts (one `Ctrl + Z` per change of colour).
 
 An equation lives with the strokes, like a text: it is selected, moved, resized, duplicated, copied and pasted, deleted, turned
 with the page and follows its layer; the eraser does not erase it. Ardoise draws it itself in every export (images, SVG, vector
@@ -1913,7 +1919,7 @@ These shortcuts do nothing while you are typing in a text field, except those of
 | `Ctrl + A` | Select everything (the chosen layer's strokes and texts) |
 | `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copy, cut, paste strokes and texts |
 | `Delete` or `Backspace` | Delete the selection |
-| `Esc` | In steps, one press per step: drop the gesture under way, end the typing of a text (the text stays) or drop the equation being written; close the split, the replay, the crop or the **Straighten shapes** setting; deselect; save the note and go back to the library (never while a narration is being recorded) |
+| `Esc` | In steps, one press per step: drop the gesture under way, end the typing of a text or an equation (what is written stays; an equation with incorrect code stays in its panel); close the split, the replay, the crop or the **Straighten shapes** setting; deselect; save the note and go back to the library (never while a narration is being recorded) |
 | `Shift`, `Alt` (held while drawing a shape) | Invert **Regular shape** (`Shift`) or **From the centre** (`Alt`) for that stroke |
 | `Alt + ←`, `Alt + →` | **Previous page**, **Next page** (the note before, the note after in the library) |
 | `V`, `P`, `E`, `T`, `M`, `B`, `H` | Tools **Select**, **Pen**, **Eraser**, **Text**, **Equation**, **Bookmark**, **Move the page** |

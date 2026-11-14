@@ -1148,7 +1148,8 @@ modifications, Ardoise demande : **Enregistrer et revenir**, **Revenir sans enre
 rétablir n'ont pas de limite pendant que la note est ouverte.
 
 **La touche `Échap`, par étapes.** Chaque appui fait la plus petite chose qui s'applique : d'abord il abandonne le geste en
-cours (un trait, une forme, un lasso, un déplacement, la question qu'Ardoise pose à l'écran, l'équation en cours d'écriture) ; sinon il ferme le panneau ou
+cours (un trait, une forme, un lasso, un déplacement, la question qu'Ardoise pose à l'écran) ou termine la saisie d'un texte, d'un signet ou
+d'une équation en gardant ce qui est écrit (une équation au code incorrect reste dans son panneau) ; sinon il ferme le panneau ou
 l'outil ouvert (la découpe, la relecture, le recadrage à la main, le réglage de **Redresser les formes**) ; sinon il enlève
 la sélection ; sinon il **enregistre la note et revient à la bibliothèque**, comme le bouton **Bibliothèque** mais sans poser
 la question des modifications : l'enregistrement est la réponse. Si l'enregistrement échoue (note modifiée ailleurs entre-temps,
@@ -1331,10 +1332,12 @@ trouve. L'outil **Texte** n'est pas dans le mode direct, mais une feuille repris
 
 L'outil **Équation** (la touche `M`) pose sur la page une formule écrite en LaTeX, en mode mathématique, comme dans un document
 LaTeX entre `$…$` : touchez ou cliquez la page à l'endroit voulu (au stylet, à la souris ou au doigt). Un panneau s'ouvre à côté :
-tapez le code dans **Code LaTeX** ; l'**aperçu** montre au fur et à mesure ce qui sera posé. **Poser** (ou `Entrée`) met
-l'équation sur la page, à l'endroit touché, et la sélectionne ; `Maj + Entrée` commence une nouvelle ligne dans le code ;
-**Annuler** (ou `Échap`, ou un autre outil) ferme le panneau sans rien changer. Tant que l'équation n'est pas posée, la page ne
-change pas ; une fois posée, un seul `Ctrl + Z` la retire. Pendant que vous tapez, les touches vont au code, jamais aux raccourcis
+tapez le code dans **Code LaTeX** ; l'**aperçu** montre au fur et à mesure ce qui sera posé. **Poser** (ou `Entrée`, ou `Échap`
+comme pour un texte) met l'équation sur la page, à l'endroit touché, et la sélectionne ; `Maj + Entrée` commence une nouvelle
+ligne dans le code. Avec un champ vide, `Échap` ferme le panneau sans rien poser ; avec un code incorrect, le panneau reste
+ouvert, le code et son erreur dedans, pour que vous le corrigiez : rien n'est perdu. **Annuler** (ou un autre outil) ferme le
+panneau sans rien changer. Tant que l'équation n'est pas posée, la page ne change pas ; une fois posée, un seul `Ctrl + Z` la
+retire. Pendant que vous tapez, les touches vont au code, jamais aux raccourcis
 de l'éditeur. La première fois, l'outil met une seconde à se charger.
 
 Si le code n'est pas correct, l'aperçu le dit avec le message de MathJax (en anglais, par exemple « Missing close brace » pour
@@ -1358,12 +1361,16 @@ Quelques exemples :
 | `\begin{cases} x = 1 \\ y = 2 \end{cases}` | un système (`\\` : ligne suivante) |
 
 Pour modifier une équation, touchez-la avec l'outil **Équation**, ou double-cliquez dessus avec l'outil **Sélection** : son code
-revient dans le panneau ; **Mettre à jour** la redessine à la même place (le coin en haut à gauche ne bouge pas). Tant que son
-panneau est ouvert, l'équation reste sélectionnée : les couleurs et les tailles s'y appliquent.
+revient dans le panneau ; **Mettre à jour** (ou `Entrée`, ou `Échap`) la redessine à la même place (le coin en haut à gauche
+ne bouge pas). Tant que son panneau est ouvert, l'équation reste sélectionnée : les couleurs et les tailles s'y appliquent.
 
 Sous la barre d'outils, avec l'outil **Équation** ou quand des équations sont sélectionnées : la **Taille**, **Petit** (4 mm),
 **Moyen** (6 mm) ou **Grand** (9 mm), la hauteur d'une lettre comme pour un texte de cette taille ; elle s'applique aux
-équations sélectionnées et aux prochaines. La couleur est celle de l'outil.
+équations sélectionnées et aux prochaines.
+
+Les pastilles de **Couleur** de la barre d'outils (et **Choisir une autre couleur**) colorent toute l'équation : celle que vous
+écrivez, dont l'aperçu prend aussitôt la couleur sans que le curseur quitte le code, celle que vous modifiez, et celles que vous
+sélectionnez, seules ou avec des traits et des textes (un `Ctrl + Z` par changement de couleur).
 
 Une équation vit avec les traits, comme un texte : elle se sélectionne, se déplace, se redimensionne, se duplique, se copie et se
 colle, se supprime, tourne avec la page et suit son calque ; la gomme ne l'efface pas. Elle est dessinée par Ardoise elle-même
@@ -2025,7 +2032,7 @@ comparent aux touches que la fenêtre traite vraiment.
 | `Ctrl + A` | Tout sélectionner (les traits et les textes du calque choisi) |
 | `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copier, couper, coller des traits et des textes |
 | `Suppr` ou `Retour arrière` | Supprimer la sélection |
-| `Échap` | Par étapes, un appui par étape : abandonner le geste en cours, terminer la saisie d'un texte (le texte reste) ou abandonner l'équation en cours d'écriture ; fermer la découpe, la relecture, le recadrage ou le réglage de **Redresser les formes** ; désélectionner ; enregistrer la note et revenir à la bibliothèque (jamais pendant l'enregistrement d'une narration) |
+| `Échap` | Par étapes, un appui par étape : abandonner le geste en cours, terminer la saisie d'un texte ou d'une équation (ce qui est écrit reste ; une équation au code incorrect reste dans son panneau) ; fermer la découpe, la relecture, le recadrage ou le réglage de **Redresser les formes** ; désélectionner ; enregistrer la note et revenir à la bibliothèque (jamais pendant l'enregistrement d'une narration) |
 | `Maj`, `Alt` (tenues pendant le tracé d'une forme) | Inverser **Forme régulière** (`Maj`) ou **Depuis le centre** (`Alt`) pour ce tracé |
 | `Alt + ←`, `Alt + →` | **Page précédente**, **Page suivante** (la note d'avant, la note d'après dans la bibliothèque) |
 | `V`, `P`, `E`, `T`, `M`, `B`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Texte**, **Équation**, **Signet**, **Déplacer la page** |

@@ -61,9 +61,12 @@ describe('what Escape does', () => {
 });
 
 describe('Escape and the equation being written', () => {
-  it('drops the equation from its own field, after a gesture and before the panels and the selection', () => {
-    expect(step({ editingEquation: true, typing: true, selected: 1 })).toBe('cancelEquation');
-    expect(step({ editingEquation: true, split: true })).toBe('cancelEquation');
+  it('ends the equation from its own field as Enter does, after a gesture and before the panels and the selection', () => {
+    expect(step({ editingEquation: true, typing: true, selected: 1 })).toBe('endEquation');
+    expect(step({ editingEquation: true, split: true })).toBe('endEquation');
+    // At the same step as the text frame being typed: the selection it leaves is the next press's.
+    expect(step({ editingText: true, typing: true, selected: 1 })).toBe('endText');
+    expect(step({ selected: 1 })).toBe('deselect');
     expect(step({ editingEquation: true, dragging: true })).toBe('cancelDrag');
     expect(step({ editingEquation: true, owned: true })).toBe('ignore');
     expect(step({ editingEquation: false, typing: true })).toBe('ignore');
