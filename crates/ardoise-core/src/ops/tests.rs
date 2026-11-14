@@ -1035,3 +1035,57 @@ fn merge_carries_the_objects_with_their_note() {
     assert_eq!((stacked.objects[1].x, stacked.objects[1].y), (10.0, 2020.0));
     assert_eq!(stacked.objects[1].layer, 1);
 }
+
+/// An equation (format 1.5) is moved by the operations like a text frame, through its placement:
+/// its source and drawing come out untouched.
+#[test]
+fn equations_go_through_splits_and_merges_whole() {
+    let equation = |id: &str, t: u32, x: f32| {
+        PageObject::equation(
+            id,
+            0,
+            t,
+            [x, 1000.0],
+            0.6,
+            crate::note::EquationBody {
+                latex: r"\ce{H2O}".to_owned(),
+                path: "M0 0L500 0L500 300Z".to_owned(),
+                color: Rgba::rgb(0, 0, 200),
+            },
+        )
+    };
+    let mut note = note_with("A", vec![stroke(0, &[(0.0, 0.0, 100), (1.0, 1.0, 200)])]);
+    note.objects = vec![
+        equation("early", 150, 1000.0),
+        equation("late", 900, 20_000.0),
+    ];
+    let at = split_at_time(&note, 500, new_note("B")).unwrap();
+    assert_eq!(
+        (ids(&at.kept), ids(&at.extracted)),
+        (vec!["early"], vec!["late"])
+    );
+    assert_eq!(
+        at.extracted.objects[0].as_equation(),
+        note.objects[1].as_equation()
+    );
+    let zone = [[0.0, 0.0], [8000.0, 0.0], [8000.0, 8000.0], [0.0, 8000.0]];
+    let by_zone = split_by_zone(&note, &zone, new_note("C")).unwrap();
+    assert_eq!(ids(&by_zone.extracted), ["early"]);
+    let mut second = note_with("D", vec![stroke(0, &[(0.0, 0.0, 0), (1.0, 1.0, 100)])]);
+    second.page = page(29_700, 21_600);
+    second.objects = vec![equation("early", 0, 500.0)];
+    let merged = merge(
+        &[note.clone(), second],
+        MergeLayout::EndToEnd,
+        new_note("M"),
+    )
+    .unwrap();
+    assert_eq!(merged.objects.len(), 3);
+    assert!(
+        merged
+            .objects
+            .iter()
+            .all(|o| o.as_equation() == note.objects[0].as_equation())
+    );
+    assert_eq!(ids(&merged)[..2], ["early", "late"]);
+}

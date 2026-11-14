@@ -9,8 +9,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use super::*;
 use crate::note::{
-    A4_PORTRAIT, Background, BackgroundImage, ImageRect, Layer, ObjectBody, Origin, PageObject,
-    Paper, Template, TextBody, Timing,
+    A4_PORTRAIT, Background, BackgroundImage, EquationBody, ImageRect, Layer, ObjectBody, Origin,
+    PageObject, Paper, Template, TextBody, Timing,
 };
 use crate::testutil::{Lcg, blank_note};
 use ardoise_text::FontFamily;
@@ -1047,7 +1047,74 @@ fn fixture_objects_1_4() -> NoteFile {
     NoteFile::new(note)
 }
 
-fn fixtures() -> [(&'static str, NoteFile, FormatVersion); 6] {
+/// The path data of the 1.5 fixture's first equation: a bar, a curved glyph (quadratic and cubic
+/// curves) and a second contour, as the editor writes it (absolute commands, one decimal).
+const FIXTURE_EQUATION_PATH: &str =
+    "M0 220L729 220L729 280L0 280ZM120.5 0Q300 0 330.2 80C340 120 300 150 250 150L120.5 150Z";
+
+/// Format 1.5: equations. One in chemistry on the first layer, one turned and scaled with a key of
+/// a later version on the second, beside a text frame; one whose drawing this version cannot read
+/// (relative commands), kept as it is.
+fn fixture_objects_1_5() -> NoteFile {
+    let mut note = blank_note("00000000-0000-4000-8000-000000000007", "Équations");
+    note.layers.push(Layer {
+        name: "Calque 2".to_owned(),
+        visible: true,
+    });
+    let water = PageObject::equation(
+        "00000000-0000-4000-8000-0000000000b1",
+        0,
+        1200,
+        [1500.0, 2500.0],
+        0.6,
+        EquationBody {
+            latex: r"\ce{2H2 + O2 -> 2H2O}".to_owned(),
+            path: FIXTURE_EQUATION_PATH.to_owned(),
+            color: Rgba::rgb(0x1a, 0x3a, 0x8a),
+        },
+    );
+    let mut speed = PageObject::equation(
+        "00000000-0000-4000-8000-0000000000b2",
+        1,
+        2400,
+        [20_000.0, 6000.5],
+        0.9,
+        EquationBody {
+            latex: "v = \\dfrac{d}{t}\n\\text{(vitesse moyenne, en m·s⁻¹)}".to_owned(),
+            path: FIXTURE_EQUATION_PATH.to_owned(),
+            color: Rgba::BLACK,
+        },
+    );
+    speed.quarter_turns = 3;
+    speed
+        .extra
+        .insert("later".to_owned(), json!({"baseline": 500}));
+    let label = PageObject::text(
+        "00000000-0000-4000-8000-0000000000b3",
+        1,
+        2500,
+        1000.0,
+        12_000.0,
+        TextBody {
+            text: "Bilan".to_owned(),
+            font: FontFamily::Andika,
+            bold: false,
+            size: 600.0,
+            color: Rgba::BLACK,
+        },
+    );
+    let unreadable = PageObject::from_value(json!({
+        "kind": "equation", "id": "00000000-0000-4000-8000-0000000000b4", "layer": 0,
+        "t": 3000, "x": 4000.0, "y": 15000.0, "scale": 0.6, "quarterTurns": 0,
+        "width": 500.0, "height": 400.0, "latex": "x^2", "path": "m0 0l500 0l0 400z",
+        "color": {"r": 0, "g": 0, "b": 0, "a": 255}
+    }))
+    .unwrap();
+    note.objects = vec![water, speed, label, unreadable];
+    NoteFile::new(note)
+}
+
+fn fixtures() -> [(&'static str, NoteFile, FormatVersion); 7] {
     [
         (
             "minimal.ardoise",
@@ -1078,6 +1145,11 @@ fn fixtures() -> [(&'static str, NoteFile, FormatVersion); 6] {
             "objects-1.4.ardoise",
             fixture_objects_1_4(),
             FormatVersion { major: 1, minor: 4 },
+        ),
+        (
+            "equations-1.5.ardoise",
+            fixture_objects_1_5(),
+            FormatVersion { major: 1, minor: 5 },
         ),
     ]
 }
@@ -1202,6 +1274,44 @@ fn v1_fixtures_are_read() {
     assert_eq!(list[3].body.kind(), "text");
     let rewritten = read_from_bytes(&to_bytes(&objects).unwrap()).unwrap();
     assert_eq!(rewritten, objects);
+
+    // Format 1.5: the equations, checked against values written out by hand.
+    let equations = read_note(&dir.join("equations-1.5.ardoise")).unwrap();
+    let list = &equations.note.objects;
+    assert_eq!(list.len(), 4);
+    let water = list[0].as_equation().unwrap();
+    assert_eq!(water.latex, r"\ce{2H2 + O2 -> 2H2O}");
+    assert_eq!(water.path, FIXTURE_EQUATION_PATH);
+    assert_eq!(water.color, Rgba::rgb(0x1a, 0x3a, 0x8a));
+    assert_eq!(
+        (
+            list[0].x,
+            list[0].y,
+            list[0].scale,
+            list[0].t,
+            list[0].layer
+        ),
+        (1500.0, 2500.0, 0.6, 1200, 0)
+    );
+    assert_eq!((list[0].width, list[0].height), (729.0, 280.0));
+    let speed = list[1].as_equation().unwrap();
+    assert!(speed.latex.contains("vitesse moyenne") && speed.latex.contains('\n'));
+    assert_eq!((list[1].quarter_turns, list[1].scale), (3, 0.9));
+    assert_eq!(list[1].extra["later"], json!({"baseline": 500}));
+    assert_eq!(list[2].as_text().map(|t| t.text.as_str()), Some("Bilan"));
+    assert!(list[3].as_equation().is_none(), "relative commands");
+    assert_eq!(list[3].body.kind(), "equation");
+    assert_eq!((list[3].width, list[3].height), (500.0, 400.0));
+    assert_eq!(
+        equations.note.typed_text(),
+        "\\ce{2H2 + O2 -> 2H2O}\nv = \\dfrac{d}{t}\n\\text{(vitesse moyenne, en m·s⁻¹)}\nBilan"
+    );
+    let rewritten = read_from_bytes(&to_bytes(&equations).unwrap()).unwrap();
+    assert_eq!(rewritten, equations);
+    // A reader of 1.4 sees the same objects: the kind it does not know is kept, not drawn.
+    let json = note_json_value(&equations);
+    assert_eq!(json["format"]["minor"], 5);
+    assert_eq!(json["objects"][3]["path"], "m0 0l500 0l0 400z");
 
     let future = read_note(&dir.join("future-minor.ardoise")).unwrap();
     assert_eq!(future.unknown_fields["stickers"][0]["kind"], "star");
@@ -1755,4 +1865,101 @@ fn an_object_of_an_unknown_kind_survives_a_rewrite_with_all_its_keys() {
         serde_json::from_slice(&member_bytes(&to_bytes(&read).unwrap(), NOTE_JSON).unwrap())
             .unwrap();
     assert_eq!(value["objects"], objects);
+}
+
+// --- Equations (format 1.5) -------------------------------------------------------------------
+
+fn equation(id: &str, path: &str) -> PageObject {
+    PageObject::equation(
+        id,
+        0,
+        10,
+        [500.0, 700.0],
+        0.6,
+        EquationBody {
+            latex: r"\frac{1}{2}".to_owned(),
+            path: path.to_owned(),
+            color: Rgba::BLACK,
+        },
+    )
+}
+
+#[test]
+fn an_equation_is_written_with_its_source_and_drawing_and_read_back() {
+    let mut note = blank_note("a", "b");
+    note.objects.push(equation("e1", "M0 0L400.5 0L400.5 60Z"));
+    let file = NoteFile::new(note);
+    let value = note_json_value(&file);
+    assert_eq!(value["format"]["minor"], 5);
+    let object = &value["objects"][0];
+    assert_eq!(object["kind"], "equation");
+    assert_eq!(object["latex"], r"\frac{1}{2}");
+    assert_eq!(object["path"], "M0 0L400.5 0L400.5 60Z");
+    assert_eq!(
+        (object["width"].clone(), object["height"].clone()),
+        (json!(400.5), json!(60.0))
+    );
+    let read = read_from_bytes(&to_bytes(&file).unwrap()).unwrap();
+    assert_eq!(read, file);
+    assert!(read.unknown_fields.is_empty());
+    assert_eq!(
+        read_header_from_bytes(&to_bytes(&file).unwrap())
+            .unwrap()
+            .note
+            .typed_text(),
+        r"\frac{1}{2}"
+    );
+}
+
+#[test]
+fn a_hostile_equation_is_kept_drawn_nowhere_and_never_breaks_the_note() {
+    let long = format!(
+        "M0 0{}",
+        "L1 1".repeat(crate::objects::EQUATION_MAX_PATH_BYTES / 4)
+    );
+    for path in [
+        json!("M0 0L1e30 0Z"),
+        json!("M0 0 L 5"),
+        json!("<svg onload=alert(1)>"),
+        json!(long),
+        json!(42),
+    ] {
+        let objects = json!([
+            {"kind": "equation", "id": "e", "layer": 0, "width": 30.0, "height": 40.0, "latex": "x", "path": path},
+            {"kind": "text", "id": "t", "layer": 0, "text": "ok"}
+        ]);
+        let read = read_from_bytes(&file_with_objects(objects, 1)).unwrap();
+        let list = &read.note.objects;
+        assert_eq!(list.len(), 2);
+        assert!(list[0].as_equation().is_none());
+        assert!(list[1].as_text().is_some(), "the other objects are read");
+        assert_eq!((list[0].width, list[0].height), (30.0, 40.0));
+        let rewritten = read_from_bytes(&to_bytes(&read).unwrap()).unwrap();
+        assert_eq!(rewritten, read);
+    }
+}
+
+#[test]
+fn an_equation_the_reader_would_not_read_back_is_not_written() {
+    for path in ["M0 0 l1 1", "Z", ""] {
+        let mut note = blank_note("a", "b");
+        note.objects.push(equation("e", path));
+        let result = to_bytes(&NoteFile::new(note));
+        if path.is_empty() {
+            // Empty data is in the grammar: an equation that draws nothing.
+            assert!(result.is_ok());
+        } else {
+            assert!(matches!(result, Err(FormatError::InvalidNote(_))), "{path}");
+        }
+    }
+    let mut note = blank_note("a", "b");
+    let mut long = equation("e", "M0 0L1 1Z");
+    if let ObjectBody::Equation(body) = &mut long.body {
+        body.latex = "x".repeat(crate::objects::EQUATION_MAX_SOURCE_CHARS + 1);
+    }
+    note.objects.push(long);
+    assert!(matches!(
+        to_bytes(&NoteFile::new(note)),
+        Err(FormatError::InvalidNote(_))
+    ));
 }

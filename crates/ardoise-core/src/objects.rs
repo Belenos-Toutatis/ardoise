@@ -8,10 +8,11 @@
 //! [`PageObject::page_point`]. A kind this version does not know is kept with all its keys
 //! ([`ObjectBody::Unknown`]), moved with the page like the others, and drawn nowhere.
 //!
-//! Kinds today: `text` ([`TextBody`], SPEC §4.4 « Texte tapé au clavier »).
+//! Kinds today: `text` ([`TextBody`], SPEC §4.4 « Texte tapé au clavier »), `equation`
+//! ([`EquationBody`], format 1.5, SPEC §4.4 « Équation », `docs/design/equations.md`).
 
 use ardoise_ink::Rgba;
-use ardoise_text::{FontFamily, Layout, TextStyle};
+use ardoise_text::{FontFamily, Layout, Path, TextStyle};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
@@ -38,6 +39,62 @@ const TEXT_KEYS: [&str; 5] = ["text", "font", "bold", "size", "color"];
 
 /// Sizes the text tool offers, in device units (the size of the font, its em): 4, 6 and 9 mm.
 pub const TEXT_SIZES: [f32; 3] = [400.0, 600.0, 900.0];
+
+/// The kind of an equation (`"kind": "equation"`, format 1.5).
+pub const EQUATION_KIND: &str = "equation";
+
+/// Keys of an equation's body.
+const EQUATION_KEYS: [&str; 3] = ["latex", "path", "color"];
+
+/// Units of an equation's content per em of its type (MathJax's): the placement's `scale` is the
+/// em on the page divided by this (0.6 for the 6 mm of the tool's middle size).
+pub const EQUATION_UNITS_PER_EM: f32 = 1000.0;
+
+/// Longest LaTeX source of an equation, in characters (Unicode scalar values). A system of a few
+/// lines is a few hundred; beyond, the body is not read (kept, not drawn).
+pub const EQUATION_MAX_SOURCE_CHARS: usize = 4000;
+
+/// Largest path data of an equation, bytes. A line of chemistry is about 10 KB; the editor refuses
+/// to put down an equation whose drawing is larger, and a reader keeps one it finds without
+/// drawing it (so that `note.json`, at most 16 MiB, holds dozens of the largest).
+pub const EQUATION_MAX_PATH_BYTES: usize = 256 * 1024;
+
+/// Largest coordinate of an equation's path, in its units (a thousand ems).
+pub const EQUATION_MAX_COORDINATE: f32 = 1.0e6;
+
+/// An equation (SPEC §4.4 « Équation »): the LaTeX source the user typed, which the editor turns
+/// into a drawing with MathJax, and that drawing as filled outlines, so that every output draws it
+/// without MathJax. Its content's units are 1/1000 em ([`EQUATION_UNITS_PER_EM`]), y down, origin
+/// at the top-left corner of the drawing's box.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EquationBody {
+    /// The source, in TeX's math mode (chemistry with `\ce{…}`); never read by Rust but to keep it.
+    pub latex: String,
+    /// SVG path data: absolute `M`, `L`, `Q`, `C`, `Z` ([`Path::from_svg`]), to fill with the
+    /// non-zero rule.
+    pub path: String,
+    pub color: Rgba,
+}
+
+impl EquationBody {
+    /// The drawing, in the object's units; empty when the path data cannot be read (a body read
+    /// from a file always can: one that cannot is not an equation to this version).
+    pub fn outline(&self) -> Path {
+        read_equation_path(&self.path).unwrap_or_default()
+    }
+
+    /// Whether this version reads the body: a source and a path within the limits, the path in
+    /// the grammar.
+    pub fn is_readable(&self) -> bool {
+        self.latex.chars().count() <= EQUATION_MAX_SOURCE_CHARS
+            && read_equation_path(&self.path).is_ok()
+    }
+}
+
+/// An equation's path data read with its limits.
+fn read_equation_path(data: &str) -> Result<Path, ardoise_text::PathDataError> {
+    Path::from_svg(data, EQUATION_MAX_PATH_BYTES, EQUATION_MAX_COORDINATE)
+}
 
 /// A text frame: one line of the page per line of `text`, in one style (SPEC §4.4: two families,
 /// three sizes, a colour, bold or not, no formatting inside a frame).
@@ -70,6 +127,7 @@ impl TextBody {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ObjectBody {
     Text(TextBody),
+    Equation(EquationBody),
     /// A kind this version does not know (or an object of a known kind it cannot read: a value it
     /// does not know, a wrong type): every key but the placement's, kept verbatim and written back.
     Unknown {
@@ -83,8 +141,24 @@ impl ObjectBody {
     pub fn kind(&self) -> &str {
         match self {
             ObjectBody::Text(_) => TEXT_KIND,
+            ObjectBody::Equation(_) => EQUATION_KIND,
             ObjectBody::Unknown { kind, .. } => kind,
         }
+    }
+
+    /// What every output draws of the body, in the object's own units, and its colour: a text
+    /// frame's glyphs, an equation's drawing; `None` for a kind this version does not draw.
+    pub fn outline(&self) -> Option<(Path, Rgba)> {
+        match self {
+            ObjectBody::Text(body) => Some((ardoise_text::outline(&body.layout()), body.color)),
+            ObjectBody::Equation(body) => Some((body.outline(), body.color)),
+            ObjectBody::Unknown { .. } => None,
+        }
+    }
+
+    /// Whether every output draws the body (a kind this version knows and reads).
+    pub fn is_drawn(&self) -> bool {
+        !matches!(self, ObjectBody::Unknown { .. })
     }
 }
 
@@ -221,21 +295,66 @@ impl PageObject {
         object
     }
 
+    /// An equation at `(x, y)` (the top-left corner of its drawing), `scale` page units per unit
+    /// of its content ([`EQUATION_UNITS_PER_EM`]), its box measured.
+    pub fn equation(
+        id: impl Into<String>,
+        layer: u32,
+        t: u32,
+        [x, y]: [f32; 2],
+        scale: f32,
+        body: EquationBody,
+    ) -> Self {
+        let mut object = PageObject {
+            id: id.into(),
+            layer,
+            t,
+            x,
+            y,
+            scale,
+            quarter_turns: 0,
+            width: 0.0,
+            height: 0.0,
+            body: ObjectBody::Equation(body),
+            extra: Map::new(),
+        };
+        object.measure();
+        object
+    }
+
     /// The text of a text frame.
     pub fn as_text(&self) -> Option<&TextBody> {
         match &self.body {
             ObjectBody::Text(body) => Some(body),
-            ObjectBody::Unknown { .. } => None,
+            _ => None,
+        }
+    }
+
+    /// The source and drawing of an equation.
+    pub fn as_equation(&self) -> Option<&EquationBody> {
+        match &self.body {
+            ObjectBody::Equation(body) => Some(body),
+            _ => None,
         }
     }
 
     /// Sets `width` and `height` from the content, for the kinds this version can measure (the
-    /// others keep the box they were written with).
+    /// others keep the box they were written with): a text frame's lines; an equation's drawing,
+    /// from its origin to the farthest point of its outline (control points included, as the
+    /// editor measures it).
     pub fn measure(&mut self) {
-        if let ObjectBody::Text(body) = &self.body {
-            let laid = body.layout();
-            self.width = laid.width;
-            self.height = laid.height;
+        match &self.body {
+            ObjectBody::Text(body) => {
+                let laid = body.layout();
+                self.width = laid.width;
+                self.height = laid.height;
+            }
+            ObjectBody::Equation(body) => {
+                let [_, _, right, bottom] = body.outline().bounds().unwrap_or([0.0; 4]);
+                self.width = right.max(0.0);
+                self.height = bottom.max(0.0);
+            }
+            ObjectBody::Unknown { .. } => {}
         }
     }
 
@@ -353,18 +472,24 @@ impl Serialize for PageObject {
         map.insert("quarterTurns".into(), Value::from(self.quarter_turns % 4));
         map.insert("width".into(), number(self.width));
         map.insert("height".into(), number(self.height));
-        if let ObjectBody::Text(body) = &self.body {
-            map.insert("text".into(), Value::String(body.text.clone()));
-            map.insert(
-                "font".into(),
-                serde_json::to_value(body.font).map_err(serde::ser::Error::custom)?,
-            );
-            map.insert("bold".into(), Value::Bool(body.bold));
-            map.insert("size".into(), number(body.size));
-            map.insert(
-                "color".into(),
-                serde_json::to_value(body.color).map_err(serde::ser::Error::custom)?,
-            );
+        let color = |c: Rgba| serde_json::to_value(c).map_err(serde::ser::Error::custom);
+        match &self.body {
+            ObjectBody::Text(body) => {
+                map.insert("text".into(), Value::String(body.text.clone()));
+                map.insert(
+                    "font".into(),
+                    serde_json::to_value(body.font).map_err(serde::ser::Error::custom)?,
+                );
+                map.insert("bold".into(), Value::Bool(body.bold));
+                map.insert("size".into(), number(body.size));
+                map.insert("color".into(), color(body.color)?);
+            }
+            ObjectBody::Equation(body) => {
+                map.insert("latex".into(), Value::String(body.latex.clone()));
+                map.insert("path".into(), Value::String(body.path.clone()));
+                map.insert("color".into(), color(body.color)?);
+            }
+            ObjectBody::Unknown { .. } => {}
         }
         map.serialize(serializer)
     }
@@ -426,6 +551,21 @@ fn text_body(map: &Map<String, Value>) -> Option<TextBody> {
     })
 }
 
+/// An equation's body from its keys, or `None` when this version cannot read it: a source or a
+/// path that is not a string, beyond its limit, or path data outside the grammar (a hostile or
+/// damaged note: kept as it is, drawn nowhere).
+fn equation_body(map: &Map<String, Value>) -> Option<EquationBody> {
+    let body = EquationBody {
+        latex: map.get("latex")?.as_str()?.to_owned(),
+        path: map.get("path")?.as_str()?.to_owned(),
+        color: match map.get("color") {
+            None => Rgba::BLACK,
+            Some(value) => serde_json::from_value(value.clone()).ok()?,
+        },
+    };
+    body.is_readable().then_some(body)
+}
+
 impl PageObject {
     /// Reads one object. An error means its placement cannot be read (the caller then keeps the
     /// whole list verbatim, see [`deserialize_objects`]); a body that cannot be read makes an
@@ -454,14 +594,21 @@ impl PageObject {
         let quarter_turns = (take_u32(&mut map, "quarterTurns")? % 4) as u8;
         let width = take_f32(&mut map, "width", 0.0)?.max(0.0);
         let height = take_f32(&mut map, "height", 0.0)?.max(0.0);
-        let body = match (kind.as_str(), text_body(&map)) {
-            (TEXT_KIND, Some(body)) => {
-                for key in TEXT_KEYS {
-                    map.remove(key);
-                }
-                ObjectBody::Text(body)
+        let known = match kind.as_str() {
+            TEXT_KIND => text_body(&map).map(|body| (ObjectBody::Text(body), &TEXT_KEYS[..])),
+            EQUATION_KIND => {
+                equation_body(&map).map(|body| (ObjectBody::Equation(body), &EQUATION_KEYS[..]))
             }
-            _ => ObjectBody::Unknown {
+            _ => None,
+        };
+        let body = match known {
+            Some((body, keys)) => {
+                for key in keys {
+                    map.remove(*key);
+                }
+                body
+            }
+            None => ObjectBody::Unknown {
                 kind,
                 fields: std::mem::take(&mut map),
             },
@@ -506,7 +653,9 @@ pub fn deserialize_objects<'de, D: Deserializer<'de>>(
 /// Whether `key` is one of the keys a page object of `kind` owns (the placement's and the
 /// body's), for the tests of the format.
 pub fn is_known_key(kind: &str, key: &str) -> bool {
-    PLACEMENT_KEYS.contains(&key) || (kind == TEXT_KIND && TEXT_KEYS.contains(&key))
+    PLACEMENT_KEYS.contains(&key)
+        || (kind == TEXT_KIND && TEXT_KEYS.contains(&key))
+        || (kind == EQUATION_KIND && EQUATION_KEYS.contains(&key))
 }
 
 #[cfg(test)]
@@ -540,18 +689,133 @@ mod tests {
     #[test]
     fn an_unknown_kind_keeps_every_key() {
         let value = json!({
-            "kind": "equation", "id": "e", "layer": 0, "t": 3, "x": 10, "y": 20, "scale": 2,
-            "quarterTurns": 5, "width": 30, "height": 40, "latex": "x^2", "paths": ["M0 0Z"]
+            "kind": "stamp", "id": "e", "layer": 0, "t": 3, "x": 10, "y": 20, "scale": 2,
+            "quarterTurns": 5, "width": 30, "height": 40, "label": "x^2", "paths": ["M0 0Z"]
         });
         let object: PageObject = serde_json::from_value(value).unwrap();
-        assert_eq!(object.body.kind(), "equation");
+        assert_eq!(object.body.kind(), "stamp");
+        assert!(!object.body.is_drawn() && object.body.outline().is_none());
         assert_eq!(object.quarter_turns, 1);
         assert_eq!(object.scale, 2.0);
         let back = serde_json::to_value(&object).unwrap();
-        assert_eq!(back["latex"], "x^2");
+        assert_eq!(back["label"], "x^2");
         assert_eq!(back["paths"], json!(["M0 0Z"]));
         assert_eq!(back["quarterTurns"], 1);
         assert_eq!(back["x"], 10.0);
+    }
+
+    fn fraction() -> EquationBody {
+        // A bar and a small triangle, in MathJax units (1/1000 em).
+        EquationBody {
+            latex: r"\frac{1}{2}".into(),
+            path: "M0 220L729 220L729 280L0 280ZM100 0L300 0Q350 100 200 150Z".into(),
+            color: Rgba::rgb(0, 0, 200),
+        }
+    }
+
+    #[test]
+    fn an_equation_round_trips_and_is_measured_from_its_drawing() {
+        let mut object = PageObject::equation("e", 0, 40, [500.0, 600.0], 0.6, fraction());
+        assert_eq!((object.width, object.height), (729.0, 280.0));
+        assert_eq!(
+            object.page_bounds(),
+            [500.0, 600.0, 500.0 + 729.0 * 0.6, 600.0 + 280.0 * 0.6]
+        );
+        object.extra.insert("later".into(), json!(1));
+        let value = serde_json::to_value(&object).unwrap();
+        assert_eq!(value["kind"], "equation");
+        assert_eq!(value["latex"], r"\frac{1}{2}");
+        assert_eq!(value["color"], json!({"r": 0, "g": 0, "b": 200, "a": 255}));
+        assert_eq!(value["scale"], 0.6);
+        let back: PageObject = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(back, object);
+        let (outline, color) = back.body.outline().unwrap();
+        assert_eq!(outline.segments.len(), 9);
+        assert_eq!(color, Rgba::rgb(0, 0, 200));
+        // A box written by another version is measured again.
+        let mut moved = value;
+        moved["width"] = json!(5);
+        let read: PageObject = serde_json::from_value(moved).unwrap();
+        let mut measured = read.clone();
+        measured.measure();
+        assert_eq!((measured.width, measured.height), (729.0, 280.0));
+        for key in ["latex", "path", "color", "kind", "scale"] {
+            assert!(is_known_key(EQUATION_KIND, key), "{key}");
+        }
+        assert!(!is_known_key(EQUATION_KIND, "text") && !is_known_key(TEXT_KIND, "latex"));
+    }
+
+    #[test]
+    fn an_equation_this_version_cannot_read_is_kept_and_not_drawn() {
+        let base = json!({
+            "kind": "equation", "id": "e", "layer": 0, "t": 0, "x": 1, "y": 2,
+            "width": 30, "height": 40, "latex": "x", "path": "M0 0L1 0L1 1Z"
+        });
+        let read = |change: &dyn Fn(&mut Value)| {
+            let mut value = base.clone();
+            change(&mut value);
+            let object: PageObject = serde_json::from_value(value.clone()).unwrap();
+            (object, value)
+        };
+        let (fine, _) = read(&|_| {});
+        assert!(fine.as_equation().is_some() && fine.body.is_drawn());
+        let hostile: [(&str, &dyn Fn(&mut Value)); 9] = [
+            ("no path", &|v| {
+                v.as_object_mut().unwrap().remove("path");
+            }),
+            ("no source", &|v| {
+                v.as_object_mut().unwrap().remove("latex");
+            }),
+            ("paths of a guess", &|v| v["path"] = json!(["M0 0Z"])),
+            ("script", &|v| {
+                v["path"] = json!("<script>alert(1)</script>")
+            }),
+            ("arc", &|v| v["path"] = json!("M0 0A5 5 0 0 1 10 10")),
+            ("relative", &|v| v["path"] = json!("m0 0l5 5z")),
+            ("far", &|v| v["path"] = json!("M0 0L99999999 0Z")),
+            ("long", &|v| {
+                v["path"] = json!(format!(
+                    "M0 0{}",
+                    "L1 1".repeat(EQUATION_MAX_PATH_BYTES / 4)
+                ));
+            }),
+            ("long source", &|v| {
+                v["latex"] = json!("x".repeat(EQUATION_MAX_SOURCE_CHARS + 1));
+            }),
+        ];
+        for (what, change) in hostile {
+            let (object, value) = read(change);
+            assert!(object.as_equation().is_none(), "{what}");
+            assert!(!object.body.is_drawn(), "{what}");
+            assert_eq!(object.body.kind(), EQUATION_KIND, "{what}");
+            // Kept as it was, box included (not measured: this version cannot).
+            let mut measured = object.clone();
+            measured.measure();
+            assert_eq!((measured.width, measured.height), (30.0, 40.0), "{what}");
+            let back = serde_json::to_value(&object).unwrap();
+            assert_eq!(back.get("path"), value.get("path"), "{what}");
+            assert_eq!(back.get("latex"), value.get("latex"), "{what}");
+        }
+        // A source of the largest length is read; a colour of a wrong type is not.
+        let (longest, _) = read(&|v| v["latex"] = json!("é".repeat(EQUATION_MAX_SOURCE_CHARS)));
+        assert!(longest.as_equation().is_some());
+        let (grey, _) = read(&|v| v["color"] = json!("grey"));
+        assert!(grey.as_equation().is_none());
+    }
+
+    #[test]
+    fn an_equation_moves_with_the_page_by_its_placement() {
+        let mut object = PageObject::equation("e", 0, 0, [1000.0, 500.0], 0.6, fraction());
+        let corner = object.page_point([object.width, object.height]);
+        let cw = Affine::quarter_cw(2000.0);
+        object.transform(&cw);
+        assert_eq!(object.quarter_turns, 1);
+        let turned = object.page_point([object.width, object.height]);
+        let expected = cw.apply(corner);
+        assert!((turned[0] - expected[0]).abs() < 0.01 && (turned[1] - expected[1]).abs() < 0.01);
+        object.transform(&Affine::scaling(2.0, 0.0, 0.0, 0.0, 0.0));
+        assert!((object.scale - 1.2).abs() < 1e-6);
+        assert_eq!(object.as_equation(), Some(&fraction()));
     }
 
     #[test]

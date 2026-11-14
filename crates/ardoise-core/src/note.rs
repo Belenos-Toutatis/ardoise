@@ -8,7 +8,7 @@
 
 use ardoise_ink::{Rgba, Stroke};
 
-pub use crate::objects::{ObjectBody, PageObject, TextBody};
+pub use crate::objects::{EquationBody, ObjectBody, PageObject, TextBody};
 /// The families of a text frame, for the crates that build notes and do not depend on the fonts.
 pub use ardoise_text::FontFamily;
 
@@ -253,27 +253,52 @@ impl Note {
             .iter()
             .filter_map(|object| Some((object, object.as_text()?)))
             .collect();
-        frames.sort_by(|(a, _), (b, _)| {
-            let (a, b) = (a.page_bounds(), b.page_bounds());
-            a[1].total_cmp(&b[1]).then(a[0].total_cmp(&b[0]))
-        });
+        frames.sort_by(|(a, _), (b, _)| reading_order(a, b));
         frames
     }
 
-    /// What the library search reads of the page's typed text: the text of the frames of the
-    /// visible layers, in reading order, joined by a line break; a frame with nothing but white
-    /// space says nothing. Empty when the page has no text frame. Hidden layers are left out like
-    /// they are for the recognised handwriting: the search finds what the page shows.
+    /// The equations this version can read, in reading order (as [`Note::text_frames`]), with
+    /// their source and drawing. Every layer.
+    pub fn equations(&self) -> Vec<(&PageObject, &EquationBody)> {
+        let mut equations: Vec<_> = self
+            .objects
+            .iter()
+            .filter_map(|object| Some((object, object.as_equation()?)))
+            .collect();
+        equations.sort_by(|(a, _), (b, _)| reading_order(a, b));
+        equations
+    }
+
+    /// What the library search reads of the page's typed text: the text of the frames and the
+    /// LaTeX source of the equations of the visible layers, in reading order, joined by a line
+    /// break (an equation reads as its source: `\ce{H2O}` is found by « H2O »); one with nothing
+    /// but white space says nothing. Empty when the page has neither. Hidden layers are left out
+    /// like they are for the recognised handwriting: the search finds what the page shows.
     pub fn typed_text(&self) -> String {
-        self.text_frames()
-            .into_iter()
-            .filter(|(object, body)| {
-                self.layer_visible(object.layer) && !body.text.trim().is_empty()
+        let mut typed: Vec<(&PageObject, &str)> = self
+            .objects
+            .iter()
+            .filter(|object| self.layer_visible(object.layer))
+            .filter_map(|object| match &object.body {
+                ObjectBody::Text(body) => Some((object, body.text.as_str())),
+                ObjectBody::Equation(body) => Some((object, body.latex.as_str())),
+                ObjectBody::Unknown { .. } => None,
             })
-            .map(|(_, body)| body.text.as_str())
+            .filter(|(_, text)| !text.trim().is_empty())
+            .collect();
+        typed.sort_by(|(a, _), (b, _)| reading_order(a, b));
+        typed
+            .into_iter()
+            .map(|(_, text)| text)
             .collect::<Vec<_>>()
             .join("\n")
     }
+}
+
+/// Top to bottom, then left to right, by the top-left corner of the objects' boxes on the page.
+fn reading_order(a: &PageObject, b: &PageObject) -> std::cmp::Ordering {
+    let (a, b) = (a.page_bounds(), b.page_bounds());
+    a[1].total_cmp(&b[1]).then(a[0].total_cmp(&b[0]))
 }
 
 #[cfg(test)]
@@ -347,6 +372,48 @@ mod tests {
         assert_eq!(ids, ["left", "right", "hidden", "blank", "low"]);
         assert!(note.layer_visible(0) && !note.layer_visible(1) && !note.layer_visible(2));
         assert_eq!(crate::testutil::blank_note("m", "").typed_text(), "");
+    }
+
+    #[test]
+    fn equations_read_as_their_source_among_the_typed_text() {
+        let equation = |id: &str, layer: u32, x: f32, y: f32, latex: &str| {
+            PageObject::equation(
+                id,
+                layer,
+                0,
+                [x, y],
+                0.6,
+                EquationBody {
+                    latex: latex.to_owned(),
+                    path: "M0 0L100 0L100 100Z".to_owned(),
+                    color: Rgba::BLACK,
+                },
+            )
+        };
+        let mut note = crate::testutil::blank_note("n", "Chimie");
+        note.layers.push(Layer {
+            name: "Cachée".into(),
+            visible: false,
+        });
+        note.objects = vec![
+            frame("title", 0, 100.0, 500.0, "Combustion"),
+            equation("ce", 0, 100.0, 2_000.0, r"\ce{CH4 + 2O2 -> CO2 + 2H2O}"),
+            equation("hidden", 1, 100.0, 1_000.0, r"\ce{H2}"),
+            equation("blank", 0, 100.0, 3_000.0, " "),
+            equation("first", 0, 5_000.0, 500.0, "E = mc^2"),
+        ];
+        assert_eq!(
+            note.typed_text(),
+            "Combustion\nE = mc^2\n\\ce{CH4 + 2O2 -> CO2 + 2H2O}"
+        );
+        let ids: Vec<&str> = note
+            .equations()
+            .iter()
+            .map(|(object, _)| object.id.as_str())
+            .collect();
+        assert_eq!(ids, ["first", "hidden", "ce", "blank"]);
+        // The text frames alone stay what they were.
+        assert_eq!(note.text_frames().len(), 1);
     }
 
     #[test]

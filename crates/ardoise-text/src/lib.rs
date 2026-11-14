@@ -12,7 +12,8 @@
 //!   the glyphs drawn). A character missing from the family is taken from the other one.
 //! - [`Path`]: the glyphs' outlines with their curves, in the frame's own coordinates (origin at
 //!   the top-left corner of the text, y down, the units of the text's size), to fill with the
-//!   non-zero rule.
+//!   non-zero rule. Also the drawing of an equation (page objects of kind `equation`), read from
+//!   its stored path data by [`Path::from_svg`].
 
 mod fonts;
 mod layout;
@@ -22,4 +23,4 @@ pub use fonts::{FONT_FILES, FontFamily, FontFile, font_file};
 pub use layout::{
     LINE_HEIGHT, Layout, Line, PlacedGlyph, TAB_SPACES, TextStyle, layout, outline, text_outline,
 };
-pub use path::{Path, Segment};
+pub use path::{Path, PathDataError, Segment};
