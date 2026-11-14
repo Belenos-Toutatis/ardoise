@@ -290,31 +290,56 @@ export const textJourneys = [
       await check('une longue phrase tapée revient à la ligne : le champ a les lignes du cadre, aux avances du navigateur', async () => {
         await app.type(LONG);
         await app.waitFor(
-          `document.querySelector(${j(FIELD)})?.value.replace(/\n/g, '') === ${j(LONG)}`,
+          `document.querySelector(${j(FIELD)})?.value.replace(/\\n/g, '') === ${j(LONG)}`,
           'the sentence typed',
           30_000,
         );
+        // Each line of the field laid out by the browser as the field lays it out (a copy of its font settings, in spans:
+        // the same text engine), measured in the frame's units (the field's font size is 600 units).
         measured = await app.evaluate(`(() => {
           const field = document.querySelector(${j(FIELD)});
           const style = getComputedStyle(field);
-          const ctx = document.createElement('canvas').getContext('2d');
-          ctx.font = style.fontWeight + ' ' + style.fontSize + ' ' + style.fontFamily;
-          ctx.fontKerning = 'none';
-          ctx.textRendering = 'optimizeSpeed';
-          const px = parseFloat(style.fontSize) / 600;
-          const lines = field.value.split('\n');
-          return { lines, widths: lines.map((line) => [ctx.measureText(line.trimEnd()).width / px, ctx.measureText(line).width / px]) };
+          const box = document.createElement('div');
+          for (const key of ['fontFamily', 'fontWeight', 'fontKerning', 'fontVariantLigatures', 'fontFeatureSettings', 'fontSynthesis', 'letterSpacing', 'wordSpacing', 'tabSize']) {
+            box.style[key] = style[key];
+          }
+          box.style.fontSize = field.style.fontSize;
+          box.style.whiteSpace = 'pre';
+          box.style.position = 'fixed';
+          box.style.left = '-100000px';
+          box.style.top = '0';
+          document.body.append(box);
+          const px = parseFloat(field.style.fontSize) / 600;
+          const width = (text) => {
+            const span = document.createElement('span');
+            span.textContent = text;
+            box.append(span);
+            const w = span.getBoundingClientRect().width / px;
+            span.remove();
+            return w;
+          };
+          const lines = field.value.split('\\n');
+          const widths = lines.map((line) => [width(line.trimEnd()), width(line)]);
+          box.remove();
+          return { lines, widths, px };
         })()`);
         if (measured.lines.length < 2) throw new Error(`the field has one line: ${j(measured.lines)}`);
         if (measured.lines.slice(0, -1).some((line) => !line.endsWith(' '))) throw new Error(`a wrapped line does not end with its space: ${j(measured.lines)}`);
       });
 
-      await check(`la palette « ${l('editor.text.greek.button')} » : Entrée, puis α Δ ϵ ν τ Σ touchés, le curseur reste dans le cadre`, async () => {
-        await app.key('Enter');
+      await check(`la palette « ${l('editor.text.greek.button')} » : une nouvelle ligne, puis α Δ ϵ ν τ Σ touchés, le curseur reste dans le cadre`, async () => {
+        // A line break of the text (the protocol's Enter key carries no text: the field would get nothing).
+        await app.type('\n');
+        await app.waitFor(`document.querySelector(${j(FIELD)})?.value.endsWith('\\n')`, 'the line break typed');
         await app.click('[data-action="text-greek"]');
         await app.waitFor(`document.querySelector('[data-slot="greek-palette"]') !== null`, 'the Greek palette');
         for (const c of GREEK) await app.click(`[data-slot="greek-palette"] button[data-char="${c}"]`);
-        await app.waitFor(`document.querySelector(${j(FIELD)})?.value.endsWith(${j(`\n${GREEK}`)})`, 'the Greek letters typed');
+        try {
+          await app.waitFor(`document.querySelector(${j(FIELD)})?.value.endsWith(${j(`\n${GREEK}`)})`, 'the Greek letters typed');
+        } catch (error) {
+          const value = await app.evaluate(`document.querySelector(${j(FIELD)})?.value ?? null`);
+          throw new Error(`${error.message}: the field holds ${j(value)}`);
+        }
         if (!(await app.evaluate(`document.activeElement?.matches(${j(FIELD)}) === true`))) throw new Error('the field lost the focus');
         if (await app.evaluate(`document.querySelector('[data-slot="text-missing"]') !== null`)) throw new Error('a Greek letter is named as missing');
         // Escape closes the palette, the typing goes on; the next one ends it.
@@ -334,10 +359,13 @@ export const textJourneys = [
         if (Math.abs(mine.wrapWidth - (file.note.page.width - 1000 - 12_000)) > 1) throw new Error(`wrap width ${mine.wrapWidth}`);
         if (!(mine.height >= 4 * 600 * 1.25)) throw new Error(`the frame is ${mine.height} high: it did not wrap`);
         // The frame's width is its widest line's ink (white space counting up to the wrap width): the browser's advances
-        // give the same, to a hundredth of a millimetre per character.
-        // The Greek line was added after the measure: it is shorter than the sentence's lines.
+        // give the same, within half a screen pixel (the caret falls on the glyphs drawn). The Greek line was added after
+        // the measure: it is shorter than the sentence's lines.
         const widest = Math.max(...measured.widths.map(([ink, full]) => Math.max(ink, Math.min(full, mine.wrapWidth))));
-        if (Math.abs(widest - mine.width) > 1 + 0.01 * LONG.length) throw new Error(`browser ${widest.toFixed(2)} vs frame ${mine.width.toFixed(2)} units`);
+        const tolerance = Math.max(2, 0.5 / measured.px);
+        if (Math.abs(widest - mine.width) > tolerance) {
+          throw new Error(`browser ${widest.toFixed(2)} vs frame ${mine.width.toFixed(2)} units (tolerance ${tolerance.toFixed(2)})`);
+        }
       });
 
       await check('SVG : le grec est dans le fichier, en tracés et dans le titre du cadre', async () => {
@@ -356,7 +384,8 @@ export const textJourneys = [
         await app.waitFor(`document.querySelector('button[data-action="text-md"]:not([disabled])') !== null`, 'the text export buttons', 30_000);
         await app.click('button[data-action="text-md"]');
         await app.waitFor(`document.querySelector('.text-export .export-result code')?.textContent === ${j(markdown)}`, 'the Markdown export result', 60_000);
-        await app.click('[role="dialog"] .actions button', l('common.close'));
+        // The image export did not run: the dialog closes with Escape.
+        await app.key('Escape');
         await app.waitFor(`document.querySelector('[role="dialog"]') === null`, 'the export dialog closed');
         const content = readFileSync(markdown, 'utf8');
         const at = (needle) => {
