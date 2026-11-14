@@ -892,7 +892,8 @@ mod tests {
         };
         let (fine, _) = read(&|_| {});
         assert!(fine.as_equation().is_some() && fine.body.is_drawn());
-        let hostile: [(&str, &dyn Fn(&mut Value)); 11] = [
+        type Change = dyn Fn(&mut Value);
+        let hostile: [(&str, &Change); 11] = [
             ("no path", &|v| {
                 v.as_object_mut().unwrap().remove("path");
             }),
