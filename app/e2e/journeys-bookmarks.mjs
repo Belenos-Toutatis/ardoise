@@ -1,5 +1,5 @@
 // Journeys of the bookmarks and of the summary of a binder (SPEC §4.4 « Signets », §4.3 « Sommaire du classeur », §4.6;
-// docs/questions.md Q20 item 5; design: docs/design/page-objects.md §7): in the demo note « Cours de physique » (binder
+// docs/questions.md Q20 item 5; design: docs/design/page-objects.md §7): in the demo note « Cours d'optique » (binder
 // `Classe/3e B`) a bookmark is put on the page with a click and typed with real key events, ended with Enter, saved (format
 // 1.6), found by the library's search, absent from the SVG, present in the PDF's outline, listed in the summary of the binder,
 // and the note opens at it; then renamed with a double click, removed by emptying its label, and the steps undone.
@@ -25,7 +25,7 @@ const text = (language, key) => key.split('.').reduce((node, part) => node?.[par
 const fill = (template, params) => template.replace(/\{(\w+)\}/g, (match, name) => (name in params ? String(params[name]) : match));
 const j = JSON.stringify;
 
-const NOTE = 'Cours de physique';
+const NOTE = "Cours d'optique";
 const BINDER = 'Classe/3e B';
 const MARKS = '.editor svg.canvas g.bookmark';
 const FIELD = '[data-slot="bookmark-field"]';
