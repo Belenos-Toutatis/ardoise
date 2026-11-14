@@ -41,7 +41,10 @@ An Ardoise page can hold handwriting, typed text, equations and bookmarks. The a
 
 - **Handwriting**: the picture of the page (`render_note`) and the text Windows recognised, line by line, with its
   position in millimetres (`get_note_text`). The recognition makes mistakes, especially on formulas and diagrams: the
-  assistant should compare with the picture.
+  assistant should compare with the picture. If the handwriting cannot be recognised on this PC (no handwriting module
+  for the language), `get_note_text` still answers for a page that holds typed text: `lines` is empty, the structure
+  holds the typed text only and `recognition` is `{"available": false, …}` with the code and the reason; for a page
+  without typed text it is an error.
 - **Typed text** (the **Text** tool): its text is **exact**, nothing is guessed; the assistant also has its font, bold,
   size, colour and place on the page, in reading order (`get_note` and `get_note_text`). `get_note_text` gives every
   frame, saying for each whether its layer is visible; the overall "typed text" it returns only holds those of the
@@ -65,7 +68,7 @@ that it is found next time.
   PC).
 - For the assistant to read **your handwriting**, Windows' handwriting recognition must be installed for the
   language: Windows Settings > Time & language > Language & region > (the language) > Language options >
-  Handwriting. Without it, the assistant still sees your notes as images.
+  Handwriting. Without it, the assistant still sees your notes as images and reads their typed text and equations.
 - In Ardoise, **Settings > Assistant (MCP)** shows the exact text to copy, with the path of *your* `ardoise.exe`.
   Copy it from there rather than typing it: that is the safest. That page also has the **Read only** box, the **Link
   with the open Ardoise** line and the button that opens this guide.
@@ -190,9 +193,10 @@ overwrites a file: a name that is taken gets " (2)". A few details:
   PDF of several notes has none: for a binder's PDF, with its outline and its summary page, use **Export the binder as
   a PDF** in Ardoise.
 - The **images** do not have the bookmarks (they serve the editor).
-- The `.txt`, Markdown and Word files hold **the text of the recognised handwriting** (with its drawings for Markdown
-  and Word), like the app's; typed text and equations are not in them: an assistant writing a complete document reads
-  them separately and adds them itself.
+- The `.txt`, `.md` and `.docx` files made by `export_note` hold the recognised handwriting (or its correction) and the
+  text typed on the page, in reading order: text frames as entered, equations as their LaTeX source (between `$…$` in
+  Markdown, a plain paragraph in Word). Drawings are added in `.md` and `.docx`, except for notes whose handwriting
+  cannot be recognised on this PC: they then give the typed text only.
 
 **Correct the transcription**:
 
@@ -341,7 +345,7 @@ The assistant must use **the same copy** of Ardoise as the one you open (same fo
 | The assistant says… | What to do |
 |---|---|
 | `noLibrary`: no library | Open Ardoise on this PC and choose the library. |
-| `handwritingNoRecognizer` / `handwritingUnsupported` | Install Windows' handwriting for the language (see above). Images stay readable. |
+| `handwritingNoRecognizer` / `handwritingUnsupported` | Install Windows' handwriting for the language (see above). Images stay readable, and `get_note_text` still reads the typed text of a page that holds some (`recognition.available` is then `false`); on a page without typed text it gives this error. |
 | `appNotRunning`: "Ardoise is not open" | Open Ardoise — the copy whose path is declared. If it is open already, look at the "Link with the open Ardoise" line in Settings > Assistant: it says whether this window can be driven. |
 | `appNotResponding` | Ardoise is busy (an export, a dialog) or still starting: try again. |
 | `appBusy` | First finish in Ardoise what is under way (save the note, close the dialog, finish live mode). |

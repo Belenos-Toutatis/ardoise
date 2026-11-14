@@ -44,7 +44,10 @@ reçoit chacun à sa façon :
 
 - **L'écriture à la main** : l'image de la page (`render_note`) et le texte reconnu par Windows, ligne par ligne, avec sa
   position en millimètres (`get_note_text`). La reconnaissance se trompe, surtout sur les formules et les schémas :
-  l'assistant doit comparer avec l'image.
+  l'assistant doit comparer avec l'image. Si l'écriture ne peut pas être reconnue sur ce PC (pas de module d'écriture
+  pour la langue), `get_note_text` répond quand même pour une page qui porte du texte tapé : `lines` est vide, la
+  structure ne contient que le texte tapé et `recognition` vaut `{"available": false, …}` avec le code et la raison ;
+  pour une page sans texte tapé, c'est une erreur.
 - **Les textes tapés** (outil **Texte**) : leur texte est **exact**, rien n'est deviné ; l'assistant en a aussi la
   police, le gras, la taille, la couleur et la place sur la page, dans l'ordre de lecture (`get_note` et
   `get_note_text`). `get_note_text` donne tous les cadres, en disant pour chacun si son calque est visible ; le « texte
@@ -69,7 +72,7 @@ trouvée ensuite.
   propre à chaque PC).
 - Pour que l'assistant lise **votre écriture**, il faut la reconnaissance d'écriture manuscrite de Windows en
   français : Paramètres Windows > Heure et langue > Langue et région > Français > Options de langue > Écriture
-  manuscrite. Sans elle, l'assistant voit quand même vos notes en image.
+  manuscrite. Sans elle, l'assistant voit quand même vos notes en image et lit leurs textes tapés et leurs équations.
 - Dans Ardoise, **Réglages > Assistant (MCP)** affiche le texte exact à copier, avec le chemin de *votre*
   `ardoise.exe`. Copiez-le de là plutôt que de le retaper : c'est le plus sûr. Cette page a aussi la case
   **Lecture seule**, la ligne **Liaison avec Ardoise ouverte** et le bouton qui ouvre ce guide.
@@ -198,9 +201,11 @@ minutes). Il n'écrase jamais un fichier : un nom déjà pris reçoit « (2) ».
   plusieurs notes n'en a pas : pour le PDF d'un classeur, avec son plan et sa page de sommaire, utilisez **Exporter le
   classeur en PDF** dans Ardoise.
 - Les **images** n'ont pas les signets (ils sont à l'usage de l'éditeur).
-- Les fichiers `.txt`, Markdown et Word reprennent **le texte de l'écriture reconnue** (avec ses dessins pour Markdown
-  et Word), comme ceux de l'application ; les textes tapés et les équations n'y figurent pas : un assistant qui rédige
-  un document complet les lit à part et les ajoute lui-même.
+- Les fichiers `.txt`, `.md` et `.docx` produits par `export_note` contiennent l'écriture manuscrite reconnue (ou sa
+  correction) et le texte tapé sur la page, dans l'ordre de lecture : cadres de texte tels qu'ils ont été saisis,
+  équations sous forme de source LaTeX (entre `$…$` en Markdown, en simple paragraphe dans Word). Les dessins s'y
+  ajoutent en `.md` et `.docx`, sauf pour les notes dont l'écriture ne peut pas être reconnue sur ce PC : elles ne
+  donnent alors que le texte tapé.
 
 **Corriger la transcription** :
 
@@ -358,7 +363,7 @@ L'assistant doit utiliser **la même copie** d'Ardoise que celle que vous ouvrez
 | L'assistant dit… | Que faire |
 |---|---|
 | `noLibrary` : aucune bibliothèque | Ouvrez Ardoise sur ce PC et choisissez la bibliothèque. |
-| `handwritingNoRecognizer` / `handwritingUnsupported` | Installez l'écriture manuscrite française de Windows (voir plus haut). Les images restent lisibles. |
+| `handwritingNoRecognizer` / `handwritingUnsupported` | Installez l'écriture manuscrite française de Windows (voir plus haut). Les images restent lisibles, et `get_note_text` lit encore le texte tapé d'une page qui en porte (`recognition.available` vaut alors `false`) ; sur une page sans texte tapé, il rend cette erreur. |
 | `appNotRunning` : « Ardoise is not open » | Ouvrez Ardoise — la copie dont le chemin est déclaré. Si elle est déjà ouverte, regardez la ligne « Liaison avec Ardoise ouverte » dans Réglages > Assistant : elle dit si cette fenêtre peut être pilotée. |
 | `appNotResponding` | Ardoise est occupée (export, fenêtre de dialogue) ou démarre encore : réessayez. |
 | `appBusy` | Terminez d'abord dans Ardoise ce qui est en cours (enregistrer la note, fermer la fenêtre de dialogue, finir le mode direct). |

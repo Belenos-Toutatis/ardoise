@@ -78,7 +78,8 @@ Un dossier ordinaire, une note = un fichier `.ardoise`. Ardoise y écrit toujour
 en conflit, ce qui lui permet de fonctionner avec Nextcloud sur plusieurs ordinateurs.
 
 - **Classeurs** et sous-classeurs (des sous-dossiers), **ordre libre** des notes d'un classeur (glisser-déposer ou
-  `Alt` + flèches), **étiquettes** en huit couleurs, **favoris**, corbeille avec « Annuler ».
+  `Alt` + flèches), **étiquettes** en huit couleurs, **favoris**, corbeille avec « Annuler » ; `Ctrl + Z` annule aussi un
+  rangement des cartes d'un classeur.
 - **Recherche** dans les titres, les étiquettes, les signets, les textes tapés, le code des équations et l'**écriture
   manuscrite** (reconnaissance d'écriture de Windows, hors connexion).
 - Dupliquer une note, **changer sa date**, tourner ou assembler plusieurs notes, créer une note depuis un PDF ou une
@@ -91,7 +92,9 @@ en conflit, ce qui lui permet de fonctionner avec Nextcloud sur plusieurs ordina
 - Sept **encres** sensibles à la pression, gomme, lasso, **calques**, papiers et modèles de page (ligné, Seyès, quadrillé,
   millimétré, pointillé, portées), lignes, rectangles et ellipses (qui peuvent s'aimanter au quadrillage), redressement
   des formes, découpe et assemblage de notes, retour à l'original de la tablette.
-- **Texte tapé** au clavier, en Latin Modern ou en Andika, au milieu de l'écriture à la main.
+- **Texte tapé** au clavier, en Latin Modern ou en Andika, au milieu de l'écriture à la main : il revient à la ligne
+  tout seul au bord de la page (deux poignées sur les côtés d'un cadre en règlent la largeur), et une palette « αβγ »
+  insère l'alphabet grec et les symboles de physique-chimie d'un clic.
 - **Équations en LaTeX**, chimie comprise (`\ce{2H2 + O2 -> 2H2O}`, `E_c = \dfrac{1}{2} m v^2`), avec un aperçu qui se
   dessine pendant la frappe, dessinées par Ardoise elle-même dans tous les exports.
 - **Signets** (un mot ou une courte phrase posés sur la page) pour le sommaire du classeur, la recherche et le plan du PDF.
@@ -131,7 +134,8 @@ La relecture rejoue le tracé comme il a été écrit (de 0,25× à 16×, temps 
 - **PNG, JPG, WebP, SVG, PDF** (SVG et PDF peuvent garder les calques séparés), copie dans le presse-papiers, impression
   (1, 2 ou 4 notes par feuille), glisser une note vers l'Explorateur ou Word.
 - **Texte, Markdown et Word** à partir de la reconnaissance d'écriture de Windows, avec la structure (titres, listes,
-  dessins).
+  dessins) ; le texte tapé et les équations (en code LaTeX, entre `$…$` en Markdown) y figurent à leur place, parmi
+  l'écriture.
 - **Un classeur en un seul PDF**, dans l'ordre du classeur, avec ses signets et, au choix, une **page de sommaire** au
   début (numéros de page, chaque ligne est un lien). Les mêmes trois choix, « Dans le sommaire », règlent le sommaire du
   classeur, le plan du PDF et cette page.
@@ -162,21 +166,26 @@ La relecture rejoue le tracé comme il a été écrit (de 0,25× à 16×, temps 
 
 ## État du projet
 
-Version 0.1.0 en préparation. Le code est public ; aucune version n'est encore proposée en téléchargement.
+La version 0.1.0 est publiée sur la page [Releases](https://github.com/Belenos-Toutatis/ardoise/releases), avec l'archive
+pour Windows. Le code est public. Les essais ci-dessous disent honnêtement ce qui a été vérifié, et comment.
 
 - **Bamboo Slate** : essayée à la main par l'auteur, avec une vraie Slate A4 (procédures H1 à H7 de
   [docs/hardware-tests.md](docs/hardware-tests.md), cochées dans la feuille de route) : enregistrement, synchronisation,
   mode direct, vidéoprojecteur, partage sur le réseau, reprise d'une feuille, correction au stylet d'une Surface, papier et
   fiche en direct, son pendant l'écriture. Les captures du protocole prises avec cette tablette servent aux tests. Les
   autres modèles (Slate A5, Spark, Folio, Intuos Pro Paper) ne sont pas essayés.
-- **Tablette Xiaomi** : de premiers essais avec la vraie tablette ont eu lieu le 2026-11-13 ; ils ont fait corriger
-  plusieurs défauts (import d'une page enregistrée en cours de connexion, effacement de l'écran pendant le direct, copie de
-  secours des pages). La procédure complète d'essai (H8) n'est pas terminée, et le mode direct avec la Xiaomi est surtout
-  vérifié par une tablette simulée.
+- **Tablette Xiaomi** : essayée à la main avec la vraie tablette les 13 et 14 novembre 2026. Les essais du 13 ont fait
+  corriger plusieurs défauts (import d'une page enregistrée en cours de connexion, effacement de l'écran pendant le
+  direct, copie de secours des pages) ; le 14, l'auteur signale que ça marche, sans compte rendu pas à pas. Plusieurs
+  points (copies de secours, sens des quatre positions, deux tablettes allumées ensemble…) ne sont établis que par une
+  tablette simulée.
+- **Essayés à la main le 14 novembre 2026**, sans compte rendu détaillé : l'impression (sans préciser l'imprimante), le
+  plan et les liens d'un PDF dans un lecteur PDF, le clavier tactile de Windows dans un cadre de texte, une équation et
+  un signet, les menus du clic droit et le bouton **Guide**.
 - **Le reste** (bibliothèque, édition, relecture, exports, import d'Inkspace) est vérifié sous Windows par des tests
-  automatiques sur le vrai exécutable, en français et en anglais. Quelques essais à la main restent à faire : impression sur
-  une vraie imprimante, export Word ouvert dans Word, import avec Inkspace ouvert, fermeture de session de Windows avec une
-  note non enregistrée.
+  automatiques sur le vrai exécutable, en français et en anglais. Jamais essayés à la main : l'export Word ouvert dans
+  Word, l'import avec Inkspace ouvert, la fermeture de session de Windows avec une note non enregistrée. Windows 10 n'a
+  pas été essayé.
 
 Voir [les notes de version](docs/notes-de-version.md), [le journal des modifications](CHANGELOG.md) et
 [la feuille de route](ROADMAP.md).
@@ -192,7 +201,8 @@ Voir [les notes de version](docs/notes-de-version.md), [le journal des modificat
 
 Ardoise est **portable** : il n'y a pas d'installateur.
 
-1. Décompressez l'archive de distribution `ardoise-<version>-windows-x64.zip` dans un dossier de votre choix (le dossier
+1. Téléchargez l'archive de distribution `ardoise-<version>-windows-x64.zip` sur la page
+   [Releases](https://github.com/Belenos-Toutatis/ardoise/releases), puis décompressez-la dans un dossier de votre choix (le dossier
    Nextcloud convient). Elle crée un dossier `ardoise-<version>` qui contient :
    - `ardoise.exe` : le programme, seul fichier indispensable ;
    - `LISEZMOI.txt` : l'essentiel, en français et en anglais ;
@@ -235,8 +245,9 @@ tiers et de leurs licences est dans [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).
   son code.
 - **[MathJax](https://www.mathjax.org/)** (Apache 2.0) : la mise en forme des équations LaTeX, fournie avec Ardoise et
   chargée seulement au premier usage de l'outil Équation, sans accès au réseau.
-- **Latin Modern** (GUST, licence GUST Font License) et **Andika** (SIL International, SIL Open Font License 1.1) : les
-  deux polices du texte tapé, fournies avec Ardoise.
+- **Latin Modern** et **Latin Modern Math** (GUST, licence GUST Font License) et **Andika** (SIL International, SIL Open
+  Font License 1.1) : les polices du texte tapé (Latin Modern Math fournit le grec et les symboles), fournies avec
+  Ardoise.
 - **OpenH264** (Cisco Systems, Inc.) : « OpenH264 Video Codec provided by Cisco Systems, Inc. ». Il n'est **jamais
   fourni** avec Ardoise : l'utilisateur le télécharge chez Cisco, seulement s'il en a besoin (MP4 sans l'encodeur de
   Windows).
@@ -326,23 +337,28 @@ is in French and English. The pictures below show the demo library and simulated
 ![Live mode with the teacher's correction on a layer of its own](docs/guide/images/fr/direct.webp)
 
 - **Library and editor**: binders, free order, coloured tags, favourites, search (titles, tags, bookmarks, typed text,
-  handwriting through Windows' offline recognition); seven pressure-sensitive inks, layers, shapes, typed text (Latin
-  Modern or Andika), LaTeX equations with chemistry (MathJax), bookmarks, PDF or image backgrounds, replay and narration.
-- **Exports**: PNG, JPG, WebP, SVG, PDF (layers kept apart on request), text, Markdown, Word, MP4, GIF, WebP, WebM,
-  clipboard, printing; a whole binder in one PDF with its outline and an optional summary page. It can import Inkspace
+  handwriting through Windows' offline recognition), `Ctrl + Z` also undoing a rearrangement of a binder's cards; seven
+  pressure-sensitive inks, layers, shapes, typed text (Latin Modern or Andika; it wraps by itself, with a Greek alphabet
+  palette), LaTeX equations with chemistry (MathJax), bookmarks, PDF or image backgrounds, replay and narration.
+- **Exports**: PNG, JPG, WebP, SVG, PDF (layers kept apart on request), text, Markdown, Word (with the typed text and
+  the equations as LaTeX), MP4, GIF, WebP, WebM, clipboard, printing; a whole binder in one PDF with its outline and an optional summary page. It can import Inkspace
   notes and can be driven by an assistant such as Claude Code or Claude Desktop through MCP.
 
 ![A binder summary and the PDF export of a binder with its summary page](docs/guide/images/fr/export-classeur.webp)
 
-- **Status**: version 0.1.0 in preparation; the source is public; no release is offered for download yet. The
-  author tried the Bamboo Slate by hand with a real Slate A4 (registration, sync, live mode, the projector, network
-  sharing, resuming a sheet, correcting with a pen). The Xiaomi tablet has had its first trials with the real device
-  (several faults fixed); its full test procedure is not finished and its live mode is mostly checked with a simulated
-  tablet. Everything else is
-  checked on Windows by automated tests on the production executable, in French and English; a few hands-on checks remain
-  (printing on a real printer, Word export opened in Word, Inkspace import with Inkspace open, a real Windows logoff).
+- **Status**: version 0.1.0 is published on the [Releases](https://github.com/Belenos-Toutatis/ardoise/releases) page,
+  with the Windows archive; the source is public. The author tried the Bamboo Slate by hand with a real Slate A4
+  (registration, sync, live mode, the projector, network sharing, resuming a sheet, correcting with a pen). The Xiaomi
+  tablet was tried by hand with the real device on 13 and 14 November 2026 (the first trials led to several fixes; on the
+  14th the author reports that it works, without a step-by-step report), and several points are established by a
+  simulated tablet only. Also tried by hand on 14 November 2026, without a detailed report: printing (the printer is not
+  specified), a PDF's outline and links in a PDF reader, Windows' touch keyboard in a text frame, an equation and a
+  bookmark, the right-click menus and the **Guide** button. Everything else is checked on Windows by automated tests on
+  the production executable, in French and English; never tried by hand: a Word export opened in Word, an Inkspace
+  import with Inkspace open, a real Windows logoff with unsaved work; Windows 10 not tried.
 - **Requirements**: Windows 11 (Windows 10 not tried), WebView2, and Bluetooth LE for a tablet. No administrator rights.
-- **Installation**: unzip the portable archive `ardoise-<version>-windows-x64.zip` anywhere; the `ardoise-<version>`
+- **Installation**: download the portable archive `ardoise-<version>-windows-x64.zip` from the
+  [Releases](https://github.com/Belenos-Toutatis/ardoise/releases) page and unzip it anywhere; the `ardoise-<version>`
   folder holds `ardoise.exe` (the only essential file), `LICENSE`, `THIRD-PARTY-NOTICES`, `LISEZMOI.txt` and the guides
   as HTML pages in `guide\`. Run `ardoise.exe` (unsigned: Windows SmartScreen may show a warning, choose *More info* then
   *Run anyway*). Settings are kept in `ardoise.toml` next to the executable.
@@ -354,7 +370,7 @@ is in French and English. The pictures below show the demo library and simulated
   (or `F1`) when the `guide` folder is missing next to `ardoise.exe`, which then opens the guide on GitHub. No personal notes are
   in the repository.
 - **Licence**: GPL-3.0-or-later. Credits: the [Tuhi](https://github.com/tuhiproject/tuhi) project for its documentation
-  of the Wacom protocol; MathJax (Apache 2.0); the Latin Modern (GUST Font License) and Andika (SIL OFL 1.1) fonts;
+  of the Wacom protocol; MathJax (Apache 2.0); the Latin Modern and Latin Modern Math (GUST Font License) and Andika (SIL OFL 1.1) fonts;
   OpenH264 by Cisco Systems, Inc., downloaded by the user and never shipped with Ardoise.
 - **Neighbouring projects**: [Tuhi](https://github.com/tuhiproject/tuhi), a GTK application that fetches the data of
   the Wacom ink range (Spark, Slate, Folio, Intuos Paper…) and saves it as SVG;
