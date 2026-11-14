@@ -150,7 +150,7 @@ Ces points n'ont été vérifiés que par des tests automatiques, ou pas du tout
 
 ### Performances
 
-Mesurées le 12 novembre 2026 sur un portable au repos (Intel Core i5-1235U, 16 Go), avant les ajouts des 13 et 14 novembre : démarrage en 0,62 s, bibliothèque de 1 000 notes affichée en 1,63 s (en cache) et défilée à 60 images/s, mode direct à 60 images/s, projection de l'éditeur à 46 ms de retard (50 ms acceptés), export MP4 1080p d'une relecture de 2 min en 15 s. **Un objectif n'est pas atteint** : le trait écrit au stylet de l'ordinateur arrive au vidéoprojecteur avec 40 ms de retard médian, pour 30 ms visés. L'exécutable reste sous la limite de 40 Mo que le projet s'est fixée (25,2 Mo mesurés le 13 novembre, avant l'ajout des polices et de MathJax). Détails : [performances](performance.md).
+Mesurées le 12 novembre 2026 sur un portable au repos (Intel Core i5-1235U, 16 Go), avant les ajouts des 13 et 14 novembre : démarrage en 0,62 s, bibliothèque de 1 000 notes affichée en 1,63 s (en cache) et défilée à 60 images/s, mode direct à 60 images/s, projection de l'éditeur à 46 ms de retard (50 ms acceptés), export MP4 1080p d'une relecture de 2 min en 15 s. **Un objectif n'est pas atteint** : le trait écrit au stylet de l'ordinateur arrive au vidéoprojecteur avec 40 ms de retard médian, pour 30 ms visés. L'exécutable reste sous la limite de 40 Mo que le projet s'est fixée (28,3 Mo mesurés le 14 novembre, polices et MathJax compris). Détails : [performances](performance.md).
 
 ## Limites connues
 
@@ -286,7 +286,7 @@ These points were checked by automated tests only, or not at all:
 
 ### Performance
 
-Measured on 12 November 2026 on an idle laptop (Intel Core i5-1235U, 16 GB), before the additions of 13 and 14 November: start in 0.62 s, a 1,000-note library shown in 1.63 s (cached) and scrolled at 60 fps, live mode at 60 fps, the editor projection at 46 ms delay (50 ms accepted), MP4 1080p export of a 2-min replay in 15 s. **One target is not met**: a stroke written with the computer's pen reaches the projector with a median delay of 40 ms, against 30 ms aimed for. The executable stays under the 40 MB limit the project has set (25.2 MB measured on 13 November, before the fonts and MathJax were added). Details: [performance](performance.md) (in French).
+Measured on 12 November 2026 on an idle laptop (Intel Core i5-1235U, 16 GB), before the additions of 13 and 14 November: start in 0.62 s, a 1,000-note library shown in 1.63 s (cached) and scrolled at 60 fps, live mode at 60 fps, the editor projection at 46 ms delay (50 ms accepted), MP4 1080p export of a 2-min replay in 15 s. **One target is not met**: a stroke written with the computer's pen reaches the projector with a median delay of 40 ms, against 30 ms aimed for. The executable stays under the 40 MB limit the project has set (28.3 MB measured on 14 November, fonts and MathJax included). Details: [performance](performance.md) (in French).
 
 ## Known limits
 
