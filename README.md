@@ -241,6 +241,15 @@ tiers et de leurs licences est dans [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).
   fourni** avec Ardoise : l'utilisateur le télécharge chez Cisco, seulement s'il en a besoin (MP4 sans l'encodeur de
   Windows).
 
+## Projets voisins
+
+- **[Tuhi](https://github.com/tuhiproject/tuhi)** : application GTK qui récupère les données des tablettes Wacom de la
+  gamme Ink (Spark, Slate, Folio, Intuos Paper…) et les enregistre en SVG. Ardoise lui doit déjà la documentation du
+  protocole (voir les crédits ci-dessus).
+- **[PandaInk](https://danielemarsico.github.io/pandaink/)** : présenté comme un portage Windows natif de Tuhi, qui
+  récupère par Bluetooth LE les dessins faits hors connexion avec les Bamboo Spark, Slate et Folio et les exporte en
+  SVG.
+
 ## Développement
 
 Les consignes de travail du projet sont dans [CLAUDE.md](CLAUDE.md) ; le cahier des charges est
@@ -347,6 +356,10 @@ is in French and English. The pictures below show the demo library and simulated
 - **Licence**: GPL-3.0-or-later. Credits: the [Tuhi](https://github.com/tuhiproject/tuhi) project for its documentation
   of the Wacom protocol; MathJax (Apache 2.0); the Latin Modern (GUST Font License) and Andika (SIL OFL 1.1) fonts;
   OpenH264 by Cisco Systems, Inc., downloaded by the user and never shipped with Ardoise.
+- **Neighbouring projects**: [Tuhi](https://github.com/tuhiproject/tuhi), a GTK application that fetches the data of
+  the Wacom ink range (Spark, Slate, Folio, Intuos Paper…) and saves it as SVG;
+  [PandaInk](https://danielemarsico.github.io/pandaink/), described as a native Windows port of Tuhi that syncs, over
+  Bluetooth LE, the drawings made offline with the Bamboo Spark, Slate and Folio and exports them as SVG.
 - **Development**: Rust (stable, 1.90 or later) with the `wasm32-unknown-unknown` target, Node.js 24, and `nasm`
   (portable zip under `%LOCALAPPDATA%\ArdoiseDev`). Run `cargo xtask check` (ends with `CHECK OK`), then
   `cargo xtask selftest` and `cargo xtask e2e`; also `cargo xtask licenses`, `cargo xtask privacy`, `cargo xtask perf`
