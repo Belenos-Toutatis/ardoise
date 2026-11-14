@@ -73,6 +73,23 @@ async function realKey(app, keys) {
   await sleep(500);
 }
 
+/**
+ * A real key, then its effect: sent again (three times at most) when nothing came of it, because the web view sometimes
+ * has not its keyboard focus back yet when the window has just closed a dialog. A second Ctrl + P under an open dialog
+ * does nothing, so a late effect is not doubled.
+ */
+async function realKeyUntil(app, keys, expression, what) {
+  for (let attempt = 0; ; attempt++) {
+    await realKey(app, keys);
+    try {
+      await app.waitFor(expression, what, 4000);
+      return;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+    }
+  }
+}
+
 /** A key through the protocol with its Windows key code. */
 async function rawKey(app, key, { code = key, vk, ctrl = false, shift = false } = {}) {
   const modifiers = (ctrl ? 2 : 0) | (shift ? 8 : 0);
@@ -116,8 +133,7 @@ export const keysMenusJourneys = [
       await check('Ctrl + P avec une note cochée : la boîte « Imprimer » d’Ardoise s’ouvre, la page répond, aucune autre page', async () => {
         await app.click(`${CARD} .card-check input`);
         await app.waitFor(`document.querySelector('.selection-bar') !== null`, 'the selection bar');
-        await realKey(app, '^p');
-        await app.waitFor(`document.querySelector(${j(PRINT)}) !== null`, 'Ardoise’s print dialog');
+        await realKeyUntil(app, '^p', `document.querySelector(${j(PRINT)}) !== null`, 'Ardoise’s print dialog');
         await sleep(800);
         const seen = await app.evaluate(`window.__keys.find((k) => k.key === 'p' && k.ctrl)`);
         if (!seen?.prevented) throw new Error(`the key was not cancelled: ${j(seen)}`);
@@ -130,8 +146,7 @@ export const keysMenusJourneys = [
       });
 
       await check('Ctrl + Maj + P fait la même chose', async () => {
-        await realKey(app, '^+p');
-        await app.waitFor(`document.querySelector(${j(PRINT)}) !== null`, 'Ardoise’s print dialog');
+        await realKeyUntil(app, '^+p', `document.querySelector(${j(PRINT)}) !== null`, 'Ardoise’s print dialog');
         await sleep(500);
         const now = await pages(app);
         if (j(now) !== j(baseline)) throw new Error(`another page appeared: ${j(now)}`);
@@ -142,8 +157,7 @@ export const keysMenusJourneys = [
       await check('sans sélection, Ctrl + P ne devine pas : un message dit quoi faire', async () => {
         await app.click(`${CARD} .card-check input`);
         await app.waitFor(`document.querySelector('.selection-bar') === null`, 'the selection to go');
-        await realKey(app, '^p');
-        await app.waitFor(`document.querySelector('.library-main .notice') !== null`, 'the notice');
+        await realKeyUntil(app, '^p', `document.querySelector('.library-main .notice') !== null`, 'the notice');
         if (await app.evaluate(`document.querySelector(${j(PRINT)}) !== null`)) throw new Error('a dialog opened');
         const now = await pages(app);
         if (j(now) !== j(baseline)) throw new Error(`another page appeared: ${j(now)}`);

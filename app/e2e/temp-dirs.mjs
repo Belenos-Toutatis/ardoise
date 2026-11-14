@@ -10,6 +10,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const made = new Set();
+/** The process ids of the apps the run started: each leaves its simulated tablets in `ardoise-simulation-<pid>-…`. */
+const apps = new Set();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** A new temporary folder whose name starts with `prefix` (`ardoise-e2e-…`, `ardoise-mcp-…`), removed at the end of the run. */
@@ -17,6 +19,25 @@ export function makeTemp(prefix) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   made.add(dir);
   return dir;
+}
+
+/** An app the run started: the folders of its simulated tablets go at the end of the run. */
+export function trackApp(pid) {
+  if (pid) apps.add(pid);
+}
+
+function removeSimulations() {
+  if (apps.size === 0) return;
+  let names = [];
+  try {
+    names = readdirSync(tmpdir());
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const pid = /^ardoise-simulation-(\d+)-/.exec(name)?.[1];
+    if (pid && apps.has(Number(pid))) remove(join(tmpdir(), name));
+  }
 }
 
 /** `dir` is kept after the run: a failed journey's folder, with its capture. */
@@ -44,6 +65,7 @@ export async function removeTemps() {
     for (const dir of [...made]) if (remove(dir)) made.delete(dir);
     if (made.size > 0) await sleep(1000);
   }
+  removeSimulations();
   if (made.size > 0) console.log(`  (${made.size} dossier(s) temporaire(s) encore retenu(s) par Windows : ${[...made].join(', ')})`);
 }
 

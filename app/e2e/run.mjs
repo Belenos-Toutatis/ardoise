@@ -12,7 +12,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, wr
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { keepTemp, makeTemp, removeStaleTemps, removeTemp, removeTemps } from './temp-dirs.mjs';
+import { keepTemp, makeTemp, removeStaleTemps, removeTemp, removeTemps, trackApp } from './temp-dirs.mjs';
 import { fileURLToPath } from 'node:url';
 import { journeys as mainJourneys } from './journeys.mjs';
 import { backgroundJourneys } from './journeys-m7-background.mjs';
@@ -124,6 +124,7 @@ async function startApp(language, port, args = [], { settings = '', env = {}, br
     },
     stdio: 'ignore',
   });
+  trackApp(child.pid);
 
   // Up to 40 s: a fresh WebView2 profile on a busy PC can take more than 20 s to listen.
   let target;
