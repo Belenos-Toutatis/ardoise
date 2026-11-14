@@ -809,6 +809,72 @@ fn a_viewer_gets_the_text_frames_of_the_layers_that_show_only() {
     assert_eq!(ids, ["consigne", "réponse"]);
 }
 
+/// An equation of a layer that shows reaches the viewers with its source, its drawing and its
+/// colour (they fill the drawing: no MathJax there), without a key of a later version; one of a
+/// hidden layer, or one whose drawing this version cannot read, does not.
+#[test]
+fn a_viewer_gets_the_equations_of_the_layers_that_show() {
+    let mut note = note_with(vec![pen_stroke(1000.0, 3)]);
+    note.layers.push(Layer {
+        name: "Corrigé".into(),
+        visible: false,
+    });
+    let equation = |id: &str, layer: u32, latex: &str| {
+        PageObject::equation(
+            id,
+            layer,
+            0,
+            [1000.0, 2000.0],
+            0.6,
+            ardoise_core::note::EquationBody {
+                latex: latex.into(),
+                path: "M0 0L100 0L100 50Z".into(),
+                color: ardoise_ink::Rgba::rgb(0, 0, 200),
+            },
+        )
+    };
+    let mut shown = equation("eq", 0, r"\ce{H2O}");
+    shown.extra.insert("keyOfTheFuture".into(), json!("Léa's"));
+    let unreadable: PageObject = serde_json::from_value(json!({
+        "kind": "equation", "id": "bad", "latex": "Léa", "path": "m0 0l1 1z"
+    }))
+    .unwrap();
+    note.objects = vec![shown, equation("hidden", 1, "Léa"), unreadable];
+    let batch = LiveBatch {
+        events: vec![LiveEvent::Snapshot {
+            snapshot: Arc::new(snapshot_of(note)),
+        }],
+        sent_at: 1.0,
+    };
+    let text = batch_json(&batch).unwrap();
+    assert!(!text.contains("Léa"), "{text}");
+    let value: Value = serde_json::from_str(&text).unwrap();
+    let objects = value["events"][0]["snapshot"]["page"]["objects"]
+        .as_array()
+        .unwrap();
+    assert_eq!(objects.len(), 1);
+    assert_eq!(objects[0]["latex"], r"\ce{H2O}");
+    assert_eq!(objects[0]["path"], "M0 0L100 0L100 50Z");
+    assert_eq!(
+        keys(&objects[0]),
+        [
+            "color",
+            "height",
+            "id",
+            "kind",
+            "latex",
+            "layer",
+            "path",
+            "quarterTurns",
+            "scale",
+            "t",
+            "width",
+            "x",
+            "y"
+        ]
+    );
+}
+
 /// The text frames of the editor's note go to the viewers with its page (the layers that show
 /// only); a frame added, moved or gone sends the whole page again (without its paper), a stroke
 /// added still goes alone, and a change of a hidden frame sends nothing.

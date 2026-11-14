@@ -31,11 +31,12 @@ pub fn is_drawn(layers: &[Layer], stroke: &Stroke) -> bool {
 }
 
 /// Whether the viewer draws page object `object`: its layer is not hidden (the strokes' rule: the
-/// text of a hidden layer never leaves the PC either), and it is a text frame this version reads
-/// (a kind it does not know, or a frame in a font it does not know, is drawn nowhere: sent, it
-/// would only carry what nobody sees).
+/// text of a hidden layer never leaves the PC either), and it is a text frame or an equation this
+/// version reads (a kind it does not know, or a frame in a font it does not know, is drawn
+/// nowhere: sent, it would only carry what nobody sees). An equation goes with its LaTeX source
+/// and its drawing, which the viewer fills (`live-render.ts`; no MathJax there).
 pub fn is_object_drawn(layers: &[Layer], object: &PageObject) -> bool {
-    layer_drawn(layers, object.layer) && object.as_text().is_some()
+    layer_drawn(layers, object.layer) && object.body.is_drawn()
 }
 
 /// The page objects a viewer gets of a page with `layers`: those it draws ([`is_object_drawn`]),

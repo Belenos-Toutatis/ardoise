@@ -438,6 +438,9 @@ enum Shown {
 /// `widths`), each over its glyphs: one text object per line, so that extractors end each line.
 fn invisible_text(content: &mut Content, text: &TextFill, font: usize, widths: &[f32]) {
     let size = text.size();
+    let Some(layout) = text.layout.as_ref() else {
+        return;
+    };
     if !(size.is_finite() && size > 0.0) {
         return;
     }
@@ -449,7 +452,7 @@ fn invisible_text(content: &mut Content, text: &TextFill, font: usize, widths: &
     }
     let name = font_name(font);
     let [a, b, c, d, _, _] = text.placement;
-    for line in &text.layout.lines {
+    for line in &layout.lines {
         let mut shown: Vec<Shown> = Vec::new();
         // Where the first character shown starts on the line, and where the next one will go.
         let mut start: Option<f32> = None;
@@ -813,7 +816,10 @@ fn write_page(
         }
         for text in &layer.texts {
             painter.text(text);
-            let style = text.layout.style;
+            // An equation is its drawing alone: no invisible text (its source is LaTeX).
+            let Some(style) = text.layout.as_ref().map(|layout| layout.style) else {
+                continue;
+            };
             let font = fonts.number(style.family, style.bold, next);
             if !used_fonts.contains(&font) {
                 used_fonts.push(font);

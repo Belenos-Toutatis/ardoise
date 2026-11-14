@@ -1055,6 +1055,58 @@ fn text_frames_appear_whole_at_their_time_in_drawing_order() {
     }
 }
 
+/// An equation (drawn from the outlines it stores) appears whole at its time, in the drawing order
+/// of its layer, and the replay waits for it; one this version cannot read is never waited for.
+#[test]
+fn equations_appear_whole_at_their_time() {
+    let strokes = vec![line(
+        Tool::Ballpoint,
+        0,
+        (300.0, 600.0),
+        (5700.0, 700.0),
+        0,
+        1000,
+    )];
+    let equation = PageObject::equation(
+        "e",
+        0,
+        2500,
+        [800.0, 1300.0],
+        2.0,
+        ardoise_core::note::EquationBody {
+            latex: r"\frac{1}{2}".into(),
+            path: "M0 0L1000 0L1000 300L0 300ZM200 500C200 400 800 400 800 500C800 600 200 600 200 500Z"
+                .into(),
+            color: RED,
+        },
+    );
+    let mut unreadable = equation.clone();
+    unreadable.t = 9000;
+    unreadable.body = ObjectBody::Unknown {
+        kind: "equation".into(),
+        fields: Default::default(),
+    };
+    let mut n = note(strokes, &[true]);
+    n.objects = vec![equation, unreadable];
+    let t = Timeline::new(&n, &ReplayOptions::default()).unwrap();
+    assert_eq!(t.duration(), ms(2500));
+    assert_eq!(t.items(), [DrawItem::Stroke(0), DrawItem::Object(0)]);
+    assert!(!t.object_shown(0, 2499.0) && t.object_shown(0, 2500.0));
+    assert!(!t.object_shown(1, 1e9));
+    let mut frames = FrameRenderer::new(t, &settings(240, 160)).unwrap();
+    for k in 0..frames.frame_count() {
+        let at = frames.frame_time(k);
+        let expected = render_note(&frames.timeline().note_at(at), &opts(0.04)).unwrap();
+        let frame = frames.render_frame(k).unwrap();
+        assert_same_image(frame, &expected, &format!("frame {k} at {at:?}"));
+        if at < ms(2500) {
+            assert_eq!(reds(frame), 0, "frame {k} at {at:?}");
+        } else {
+            assert!(reds(frame) > 50, "frame {k} at {at:?}: {}", reds(frame));
+        }
+    }
+}
+
 #[test]
 fn a_note_ending_with_a_text_frame_replays_until_it_appears() {
     let mut n = note(

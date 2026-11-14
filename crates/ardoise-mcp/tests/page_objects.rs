@@ -433,3 +433,103 @@ async fn the_search_finds_a_note_by_the_text_of_its_frames() {
         .await;
     assert_eq!(none["total"], 0);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Equations (format 1.5)
+
+const CHIMIE: &str = "77777777-7777-4777-8777-777777777777";
+
+fn equation(id: &str, layer: u32, (x, y): (f32, f32), latex: &str) -> PageObject {
+    PageObject::equation(
+        id,
+        layer,
+        100,
+        [x, y],
+        0.6,
+        ardoise_core::note::EquationBody {
+            latex: latex.into(),
+            path: "M0 0L1000 0L1000 500L0 500Z".into(),
+            color: Rgba::rgb(200, 0, 0),
+        },
+    )
+}
+
+fn add_chimie(session: &Session) {
+    let mut note = make_note(CHIMIE, "Combustion", 4);
+    note.objects = vec![
+        equation(
+            "bilan",
+            0,
+            (2_000.0, 3_000.0),
+            r"\ce{CH4 + 2O2 -> CO2 + 2H2O}",
+        ),
+        equation("cache", 1, (2_000.0, 6_000.0), r"\ce{H2}"),
+    ];
+    session
+        .harness
+        .library()
+        .create(Path::new("Chimie"), &NoteFile::new(note))
+        .unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_read_tools_give_an_equations_latex_and_the_search_finds_it() {
+    let session = session().await;
+    add_chimie(&session);
+    let note = session.ok("get_note", json!({ "note": CHIMIE })).await;
+    let equations = note["equations"].as_array().unwrap();
+    assert_eq!(equations.len(), 2);
+    let bilan = &equations[0];
+    assert_eq!(bilan["latex"], r"\ce{CH4 + 2O2 -> CO2 + 2H2O}");
+    assert_eq!(bilan["size_mm"], 6.0);
+    assert_eq!(bilan["color"], "#c80000");
+    assert_eq!(bilan["visible"], true);
+    assert_eq!(bilan["bounds_mm"]["x"], 20.0);
+    assert_eq!(bilan["bounds_mm"]["width"], 6.0);
+    assert_eq!(bilan["bounds_mm"]["height"], 3.0);
+    assert_eq!(equations[1]["visible"], false);
+    // Equations are a kind this version knows: not « other objects ».
+    assert!(note.get("other_objects").is_none(), "{note}");
+    assert_eq!(note["text_frames"], json!([]));
+
+    let text = session.ok("get_note_text", json!({ "note": CHIMIE })).await;
+    assert_eq!(text["typed_text"], r"\ce{CH4 + 2O2 -> CO2 + 2H2O}");
+    let listed = text["equations"].as_array().unwrap();
+    assert_eq!(listed.len(), 2);
+    assert!(listed.iter().all(|e| e["source"] == "equation"));
+
+    // Found by what the source says; not by an equation of a hidden layer.
+    let found = session.ok("search_notes", json!({ "query": "CO2" })).await;
+    assert_eq!(found["total"], 1, "{found}");
+    assert_eq!(found["notes"][0]["matched_in"], json!(["typed_text"]));
+    let hidden = session
+        .ok("search_notes", json!({ "query": "ce{H2}" }))
+        .await;
+    assert_eq!(hidden["total"], 0, "{hidden}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn rewriting_tools_keep_the_equations_as_they_are() {
+    let session = session().await;
+    add_chimie(&session);
+    let source = note_of(&session, CHIMIE);
+    let made = session
+        .ok(
+            "create_revision",
+            json!({ "note": CHIMIE, "orders": [recolor(0)], "summary": "Couleur" }),
+        )
+        .await;
+    let copy_id = made["note"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(note_of(&session, &copy_id).objects, source.objects);
+    session
+        .ok(
+            "update_note",
+            json!({ "note": CHIMIE, "title": "Combustion du méthane" }),
+        )
+        .await;
+    assert_eq!(note_of(&session, CHIMIE).objects, source.objects);
+    session
+        .ok("move_note", json!({ "note": CHIMIE, "binder": "Archives" }))
+        .await;
+    assert_eq!(note_of(&session, CHIMIE).objects, source.objects);
+}

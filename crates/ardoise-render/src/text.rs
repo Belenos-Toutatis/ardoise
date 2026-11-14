@@ -1,43 +1,45 @@
-//! Text frames (page objects of kind `text`, SPEC §4.4 « Texte tapé au clavier ») in every
-//! output. A frame draws the glyph outlines of `ardoise-text` (the ones the editor draws, from
-//! the same layout), placed on the page by the frame's placement
-//! ([`PageObject::page_point`]: scale, quarter turns, origin), which maps the control points and so
-//! keeps the curves exact. They are filled with the non-zero rule in the frame's colour, its alpha
-//! as the opacity, normal blending and no grain: in pixels by [`crate::PageCanvas::draw_object`],
-//! as paths by the SVG and PDF writers ([`TextFill`]).
+//! Page objects in every output: text frames (kind `text`, SPEC §4.4 « Texte tapé au clavier »)
+//! and equations (kind `equation`, « Équation »). A text frame draws the glyph outlines of
+//! `ardoise-text` (the ones the editor draws, from the same layout); an equation draws the
+//! outlines it stores, made by MathJax in the editor (`docs/design/equations.md`): no MathJax runs
+//! here. Both are placed on the page by the object's placement ([`PageObject::page_point`]: scale,
+//! quarter turns, origin), which maps the control points and so keeps the curves exact. They are
+//! filled with the non-zero rule in the object's colour, its alpha as the opacity, normal blending
+//! and no grain: in pixels by [`crate::PageCanvas::draw_object`], as paths by the SVG and PDF
+//! writers ([`TextFill`]).
 //!
-//! Only kinds this version knows are drawn: an [`ObjectBody::Unknown`](ardoise_core::note::ObjectBody)
-//! (a newer kind, or a text frame this version cannot read) draws nothing.
+//! Only kinds this version knows are drawn: an [`ObjectBody::Unknown`] (a newer kind, or an
+//! object this version cannot read) draws nothing.
 
-use ardoise_core::note::PageObject;
+use ardoise_core::note::{ObjectBody, PageObject};
 use ardoise_ink::Rgba;
 use ardoise_text::{LINE_HEIGHT, Layout, Path, outline};
 
-/// Whether this version draws `object` (a text frame it can read).
+/// Whether this version draws `object` (a text frame or an equation it can read).
 pub(crate) fn is_drawn(object: &PageObject) -> bool {
-    object.as_text().is_some()
+    object.body.is_drawn()
 }
 
-/// The glyphs of a text frame on the page (device units, y down) and its colour; `None` for a
-/// kind this version does not draw.
+/// What `object` draws on the page (device units, y down) and its colour; `None` for a kind this
+/// version does not draw.
 pub(crate) fn page_outline(object: &PageObject) -> Option<(Path, Rgba)> {
-    let body = object.as_text()?;
-    let path = outline(&body.layout()).map(|p| object.page_point(p));
-    Some((path, body.color))
+    let (path, color) = object.body.outline()?;
+    Some((path.map(|p| object.page_point(p)), color))
 }
 
-/// A text frame ready for the vector formats.
+/// A page object ready for the vector formats: a text frame or an equation.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TextFill {
-    /// The frame's text: the words the file carries besides the outlines (SVG `<title>`, PDF
-    /// invisible text).
+    /// The words the file carries besides the outlines (SVG `<title>`; for a text frame, the PDF's
+    /// invisible text too): a frame's text, an equation's LaTeX source.
     pub text: String,
-    /// Its lines, in the frame's own units.
-    pub layout: Layout,
-    /// Frame units to page units: the content point `(u, v)` is at
+    /// A text frame's lines, in its own units (the PDF lays its invisible text on them); `None`
+    /// for an equation, which has no text to search in a PDF.
+    pub layout: Option<Layout>,
+    /// Object units to page units: the content point `(u, v)` is at
     /// `(a u + c v + e, b u + d v + f)` for `[a, b, c, d, e, f]`.
     pub placement: [f32; 6],
-    /// The glyphs' outlines on the page; never empty.
+    /// The outlines on the page; never empty.
     pub path: Path,
     pub rgb: [u8; 3],
     /// 0..1, the colour's alpha.
@@ -45,36 +47,44 @@ pub(crate) struct TextFill {
 }
 
 impl TextFill {
-    /// The frame `object` as the vector formats draw it; `None` for a kind this version does not
-    /// draw, or a frame without any outline (blank text).
+    /// The object as the vector formats draw it; `None` for a kind this version does not draw, or
+    /// an object without any outline (blank text).
     pub(crate) fn of(object: &PageObject) -> Option<TextFill> {
-        let body = object.as_text()?;
-        let layout = body.layout();
-        let path = outline(&layout).map(|p| object.page_point(p));
+        let (text, layout, outline, color) = match &object.body {
+            ObjectBody::Text(body) => {
+                let layout = body.layout();
+                let path = outline(&layout);
+                (body.text.clone(), Some(layout), path, body.color)
+            }
+            ObjectBody::Equation(body) => (body.latex.clone(), None, body.outline(), body.color),
+            ObjectBody::Unknown { .. } => return None,
+        };
+        let path = outline.map(|p| object.page_point(p));
         if path.is_empty() {
             return None;
         }
         let [e, f] = object.page_point([0.0, 0.0]);
         let [ux, uy] = object.page_point([1.0, 0.0]);
         let [vx, vy] = object.page_point([0.0, 1.0]);
-        let c = body.color;
         Some(TextFill {
-            text: body.text.clone(),
+            text,
             layout,
             placement: [ux - e, uy - f, vx - e, vy - f, e, f],
             path,
-            rgb: [c.r, c.g, c.b],
-            opacity: f32::from(c.a) / 255.0,
+            rgb: [color.r, color.g, color.b],
+            opacity: f32::from(color.a) / 255.0,
         })
     }
 
-    /// The size the text was laid out at (its em, frame units), as the layout used it: clamped,
-    /// zero when not usable.
+    /// The size a text frame was laid out at (its em, frame units), as the layout used it:
+    /// clamped, zero when not usable or for an equation.
     pub(crate) fn size(&self) -> f32 {
-        self.layout.line_height / LINE_HEIGHT
+        self.layout
+            .as_ref()
+            .map_or(0.0, |layout| layout.line_height / LINE_HEIGHT)
     }
 
-    /// Where the frame point `(u, v)` is on the page.
+    /// Where the object point `(u, v)` is on the page.
     pub(crate) fn page_point(&self, [u, v]: [f32; 2]) -> [f32; 2] {
         let [a, b, c, d, e, f] = self.placement;
         [a * u + c * v + e, b * u + d * v + f]
@@ -84,7 +94,7 @@ impl TextFill {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ardoise_core::note::{ObjectBody, TextBody};
+    use ardoise_core::note::{EquationBody, TextBody};
     use ardoise_text::FontFamily;
 
     fn frame(quarter_turns: u8, scale: f32) -> PageObject {
@@ -133,10 +143,35 @@ mod tests {
     }
 
     #[test]
+    fn an_equation_draws_its_stored_outline_at_its_place() {
+        let mut object = PageObject::equation(
+            "e",
+            0,
+            0,
+            [1000.0, 2000.0],
+            0.5,
+            EquationBody {
+                latex: r"\ce{H2O}".into(),
+                path: "M0 0L100 0L100 40Z".into(),
+                color: Rgba::rgb(200, 0, 0),
+            },
+        );
+        object.quarter_turns = 1;
+        let fill = TextFill::of(&object).unwrap();
+        assert_eq!(fill.text, r"\ce{H2O}");
+        assert!(fill.layout.is_none() && fill.size() == 0.0);
+        assert_eq!(fill.rgb, [200, 0, 0]);
+        // A clockwise quarter turn: right becomes down.
+        assert_eq!(fill.path.bounds(), Some([980.0, 2000.0, 1000.0, 2050.0]));
+        assert_eq!(page_outline(&object).unwrap().0, fill.path);
+        assert!(is_drawn(&object));
+    }
+
+    #[test]
     fn unknown_kinds_and_blank_text_draw_nothing() {
         let mut object = frame(0, 1.0);
         object.body = ObjectBody::Unknown {
-            kind: "equation".into(),
+            kind: "stamp".into(),
             fields: Default::default(),
         };
         assert!(!is_drawn(&object));

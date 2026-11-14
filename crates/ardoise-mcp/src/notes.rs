@@ -5,7 +5,8 @@ use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 use ardoise_core::library::{FileStamp, Library, LoadedNote, NoteEntry};
-use ardoise_core::note::{Note, PageObject, PageSize, TextBody};
+use ardoise_core::note::{EquationBody, Note, PageObject, PageSize, TextBody};
+use ardoise_core::objects::EQUATION_UNITS_PER_EM;
 use ardoise_hwr::Bounds;
 use ardoise_ink::Rgba;
 use chrono::{
@@ -255,13 +256,35 @@ pub fn text_frame_json(note: &Note, object: &PageObject, body: &TextBody) -> ser
     })
 }
 
+/// An equation as the assistant reads it: its LaTeX source (what was typed, exact; chemistry in
+/// `\ce{…}`), its colour, the size of its type (its em) and its box on the page in millimetres.
+pub fn equation_json(note: &Note, object: &PageObject, body: &EquationBody) -> serde_json::Value {
+    let [left, top, right, bottom] = object.page_bounds();
+    serde_json::json!({
+        "id": object.id,
+        "layer": object.layer,
+        "visible": note.layer_visible(object.layer),
+        "latex": body.latex,
+        "size_mm": mm(object.scale * EQUATION_UNITS_PER_EM),
+        "color": hex(body.color),
+        "bounds_mm": RectMm {
+            x: mm(left),
+            y: mm(top),
+            width: mm(right - left),
+            height: mm(bottom - top),
+        },
+        "quarter_turns": object.quarter_turns % 4,
+        "t_ms": object.t,
+    })
+}
+
 /// The page objects this version cannot read (a kind of a later version): how many, and their
 /// kinds. `None` when there is none.
 pub fn other_objects_json(note: &Note) -> Option<serde_json::Value> {
     let mut kinds: Vec<&str> = note
         .objects
         .iter()
-        .filter(|object| object.as_text().is_none())
+        .filter(|object| !object.body.is_drawn())
         .map(|object| object.body.kind())
         .collect();
     if kinds.is_empty() {
