@@ -14,6 +14,7 @@ import {
   arrangeByBinderOrder,
   binderChain,
   binderPathBelow,
+  binderSummary,
   buildBinderTree,
   displayTitle,
   isInBinder,
@@ -33,6 +34,7 @@ import {
   type MoveStep,
   type OrderChange,
   type SortOrder,
+  type SummaryNote,
 } from './library-logic';
 import type { ExportSource, FileStamp, LibraryListing, MergeLayout, NoteSummary, TrashEntry } from './note';
 
@@ -77,6 +79,8 @@ export class LibraryState {
   dialog = $state<{ kind: 'export' | 'print' | 'assemble'; notes: NoteSummary[]; binder?: string } | null>(null);
   /** « Changer la date… » is open on this note. */
   dateNote = $state<NoteSummary | null>(null);
+  /** The summary of this binder is open (`''` never: only a binder has one). */
+  summaryBinder = $state<string | null>(null);
   /** The place between two cards a drag would drop at, and the one a screen reader was last told about. */
   insertion = $state<DropSpot | null>(null);
   /** What a screen reader is told after a card moved (an `aria-live` region of the grid). */
@@ -603,6 +607,23 @@ export class LibraryState {
       notes.map((note) => ({ path: note.path, title: displayTitle(note, currentLocale()) })),
       t('library.duplicate.word'),
     );
+  }
+
+  /**
+   * The summary of `binder` (SPEC §4.3): its notes that have bookmarks, in the binder's order with those of its sub-binders
+   * after (`binderNotes`), each with its bookmarks in reading order.
+   */
+  binderSummary(binder: string): SummaryNote[] {
+    return binderSummary(this.binderNotes(binder, true), binder);
+  }
+
+  /** Opens the summary of `binder`. */
+  openSummary(binder: string): void {
+    this.summaryBinder = binder;
+  }
+
+  closeSummary(): void {
+    this.summaryBinder = null;
   }
 
   /** Opens « Changer la date… » on `note`. */

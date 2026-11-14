@@ -206,6 +206,7 @@
           label={t('library.binder.menu', { name: node.name })}
           items={[
             { id: 'rename', label: t('library.binder.rename'), onselect: () => (editing = { path: node.path, mode: 'rename' }) },
+            { id: 'summary', label: t('library.binder.summary'), onselect: () => lib.openSummary(node.path) },
             {
               id: 'export-pdf',
               label: t('library.binder.exportPdf'),

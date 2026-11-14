@@ -11,7 +11,7 @@
   import { share } from '../lib/share-state.svelte';
   import { isBusy, tablet } from '../lib/tablet-state.svelte';
   import { workInProgress } from '../lib/work';
-  import type { NoteSummary } from '../lib/note';
+  import type { BookmarkRef, NoteSummary } from '../lib/note';
   import Diagnostic from './Diagnostic.svelte';
   import LiveView from './live/LiveView.svelte';
   import TabletPanel from './tablet/TabletPanel.svelte';
@@ -26,6 +26,7 @@
   import NewFromFileDialog from './library/NewFromFileDialog.svelte';
   import NoteGrid from './library/NoteGrid.svelte';
   import Sidebar from './library/Sidebar.svelte';
+  import SummaryDialog from './library/SummaryDialog.svelte';
   import TrashView from './library/TrashView.svelte';
   import Logo from './Logo.svelte';
   import Modal, { modalOpen } from './Modal.svelte';
@@ -49,6 +50,8 @@
   let liveOpen = $state(false);
   /** Path of the note being edited; the editor then takes the whole window. */
   let openPath = $state<string | null>(null);
+  /** The bookmark the editor shows when it opens the note (the binder's summary): its id. */
+  let openFocus = $state<{ id: string } | null>(null);
   /** Live mode resumes this note (M12) instead of starting on a blank page; null for a new session. */
   let resumePath = $state<string | null>(null);
   /** Live mode was asked from the tablet panel's « Live mode » button: where the focus goes back if the user gives up. */
@@ -175,6 +178,15 @@
 
   function open(note: NoteSummary) {
     leaveLibrary(note.path);
+    openFocus = null;
+    openPath = note.path;
+  }
+
+  /** A bookmark of the binder's summary is chosen: the note opens at it. */
+  function openAtBookmark(note: NoteSummary, bookmark: BookmarkRef) {
+    lib.closeSummary();
+    leaveLibrary(note.path);
+    openFocus = { id: bookmark.id };
     openPath = note.path;
   }
 
@@ -266,6 +278,7 @@
   function closeEditor() {
     if (returnTo && openPath) returnTo.path = openPath;
     openPath = null;
+    openFocus = null;
     void lib.refresh();
     void backToLibrary();
   }
@@ -351,6 +364,7 @@
     {app}
     {onchange}
     onclose={closeEditor}
+    focus={openFocus}
     onsaved={(path) => {
       // A rename moves the file: keep following the note under its new name, unless the
       // editor was closed meanwhile (a late result must not reopen it).
@@ -393,6 +407,17 @@
         <option value={order}>{t(`library.sortOptions.${order}`)}</option>
       {/each}
     </select>
+    {#if lib.view.kind === 'binder'}
+      <button
+        type="button"
+        class="button"
+        data-action="binder-summary"
+        title={t('library.summary.hint')}
+        onclick={() => lib.view.kind === 'binder' && lib.openSummary(lib.view.binder)}
+      >
+        {t('library.summary.button')}
+      </button>
+    {/if}
     <button type="button" class="button primary" onclick={newNote}>{t('library.newNote')}</button>
     <button type="button" class="button" data-action="new-from-file" title={t('background.library.openHint')} onclick={() => (fromFile = true)}>
       {t('background.library.open')}
@@ -481,6 +506,9 @@
   />
 {:else if lib.dialog?.kind === 'assemble'}
   <AssembleDialog {lib} notes={lib.dialog.notes} onclose={() => lib.closeDialog()} />
+{/if}
+{#if lib.summaryBinder !== null}
+  <SummaryDialog {lib} binder={lib.summaryBinder} onopen={openAtBookmark} onclose={() => lib.closeSummary()} />
 {/if}
 {#if lib.dateNote}
   <DateDialog {lib} note={lib.dateNote} onclose={() => lib.closeDate()} />

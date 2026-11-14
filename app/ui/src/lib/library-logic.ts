@@ -1,6 +1,6 @@
 /** Pure helpers of the library screen: search, sort, binder tree, display text. */
 import type { HandwritingHit } from './handwriting';
-import type { NoteSummary, TagCount } from './note';
+import type { BookmarkRef, NoteSummary, TagCount } from './note';
 
 /** What the content area shows. */
 export type LibraryView =
@@ -46,8 +46,11 @@ export function queryWords(query: string): string[] {
 export function matchesSearch(note: NoteSummary, query: string, hit?: HandwritingHit | null): boolean {
   const words = queryWords(query);
   if (words.length === 0) return true;
-  // The typed text of the note's text frames (`typedText`, from `note.json`) is found like its title.
-  const haystack = normalize([note.title, ...note.tags, note.binder, note.typedText ?? ''].join('\n'));
+  // The typed text of the note's text frames (`typedText`) and its bookmarks' labels (`bookmarks`), both from `note.json`,
+  // are found like its title.
+  const haystack = normalize(
+    [note.title, ...note.tags, note.binder, note.typedText ?? '', ...(note.bookmarks ?? []).map((b) => b.label)].join('\n'),
+  );
   return words.every((word) => haystack.includes(word) || (hit?.words.includes(word) ?? false));
 }
 
@@ -188,6 +191,45 @@ export function arrangeByBinderOrder(
   // A note of a binder the tree does not know (cannot happen: the tree holds every note's binder): by date, last.
   out.push(...sortNotes(shown.filter((n) => !known.has(n.binder)), 'date-asc', locale));
   return out;
+}
+
+// --- The summary of a binder (SPEC §4.3 « Sommaire du classeur ») ---------------------------------
+
+/** One note of a binder's summary: the note, where it is below the summarised binder, and its bookmarks in reading order. */
+export interface SummaryNote {
+  note: NoteSummary;
+  /** The binders it is in below the summarised one (none for a note of that binder itself). */
+  below: string[];
+  bookmarks: BookmarkRef[];
+}
+
+/**
+ * The summary of `binder`: the notes of `notes` (the binder's notes in its order, those of its sub-binders after, what
+ * `LibraryState.binderNotes` gives) that have bookmarks, each with them. The order of the notes is the one given; the
+ * bookmarks of a note are in reading order (the listing's).
+ */
+export function binderSummary(notes: NoteSummary[], binder: string): SummaryNote[] {
+  return notes
+    .filter((note) => (note.bookmarks?.length ?? 0) > 0)
+    .map((note) => ({ note, below: binderPathBelow(binder, note.binder), bookmarks: note.bookmarks ?? [] }));
+}
+
+/**
+ * `summary` narrowed to the bookmarks whose label has every word of `query` (case and accents ignored); a note whose title
+ * has them all keeps every bookmark. A blank query keeps everything.
+ */
+export function filterSummary(summary: SummaryNote[], query: string): SummaryNote[] {
+  const words = queryWords(query);
+  if (words.length === 0) return summary;
+  const has = (text: string) => {
+    const folded = normalize(text);
+    return words.every((word) => folded.includes(word));
+  };
+  return summary.flatMap((entry) => {
+    if (has(entry.note.title)) return [entry];
+    const bookmarks = entry.bookmarks.filter((b) => has(b.label));
+    return bookmarks.length > 0 ? [{ ...entry, bookmarks }] : [];
+  });
 }
 
 /** The binders a note is in below the exported binder `binder` (none for a note of that binder itself). */
