@@ -2,7 +2,7 @@
 
 > Developer document (English). Requirements: SPEC §4.4 (« Texte tapé au clavier », « Équation », « Signets »), §4.3
 > (« Sommaire du classeur »); decisions: `docs/questions.md` Q20, items 5 to 7. Bytes: `docs/file-format.md` §2.2.
-> Code: `crates/ardoise-core/src/objects.rs` (model, placement, JSON), `crates/ardoise-text` (fonts, layout, glyphs),
+> Bookmarks: §7. Code: `crates/ardoise-core/src/objects.rs` (model, placement, JSON), `crates/ardoise-text` (fonts, layout, glyphs),
 > `crates/ardoise-render` (`draw_items`, `text.rs`), `crates/ardoise-media/src/replay` (replay), `app/ui/src/lib/editor/objects.ts`
 > and `app/ui/src/lib/text.ts` (interface), `app/ui/src/components/editor/TextField.svelte` (typing).
 
@@ -10,8 +10,8 @@
 
 A note's page held strokes only. It now holds **page objects** too (`Note.objects`, format 1.4): things placed on the page that
 are not ink. Text frames are the first kind; equations (format 1.5: an object that keeps its LaTeX source and the vector drawing
-made from it, `docs/design/equations.md`) the second; bookmarks (a short label at a point, shown in the editor only) are
-planned as the next. The layer was designed so that they are added as kinds, not as new mechanisms (§6).
+made from it, `docs/design/equations.md`) the second; bookmarks (a short label at a spot, shown in the editor only: §7, format
+1.6) the third. The layer was designed so that they are added as kinds, not as new mechanisms (§6).
 
 Every object is two parts:
 
@@ -58,7 +58,9 @@ Rule: nothing that rewrites a note may drop an object; wherever strokes move wit
 | Live mode on a resumed sheet | `live/session.rs`, `hub.rs`, `resume.rs` | kept and written; turned with the page; layer moves and merges follow; « Effacer la page » leaves them; new live strokes start after their times |
 | Xiaomi update of an unedited note | `ardoise-device` `pages.rs` | a note with objects counts as edited: never overwritten |
 | Assistant (MCP) | `ardoise-mcp` | every write tool keeps them (revisions, straightening, split, merge); revision orders touch strokes only |
-| Writing clock (M17) | `writing-clock.ts`, `narration.rs` | a recording, and a new stroke, start after the last object's time too |
+| Writing clock (M17) | `writing-clock.ts`, `narration.rs` | a recording, and a new stroke, start after the last object's time too (a bookmark's time does not count) |
+| Layers: hide | `state.ts`, `objects.ts` | a bookmark is not hidden with its layer (§7); it stays selectable and drawn |
+| Back to the original | `original.ts`, `original.rs` | a bookmark is not ink: not part of the first version kept, and it stays when going back (§7) |
 
 ## 3. Drawing
 
@@ -131,7 +133,7 @@ Rule: nothing that rewrites a note may drop an object; wherever strokes move wit
 
 ## 6. How to add a kind
 
-The equation and bookmark lots plug in here. For a kind `k`:
+The equation lot plugs in here (the bookmark lot did: §7). For a kind `k`:
 
 1. **Model** (`crates/ardoise-core/src/objects.rs`): a body struct, a variant of `ObjectBody`, its keys (`*_KEYS`), its reading
    in `PageObject::from_value` (return `Unknown` for anything this version cannot read, never an error: an error drops nothing
@@ -151,12 +153,56 @@ The equation and bookmark lots plug in here. For a kind `k`:
    of contents and the search; an equation's source), and to the MCP read tools (`crates/ardoise-mcp/src/read.rs`).
 5. **Docs**: `docs/file-format.md` §2.2 (its keys), this document (§2 if it moves differently, §4-like section for the kind).
 
-Notes for the two planned kinds:
+Notes for the planned kind:
 
 - **Equation** (done, format 1.5: `docs/design/equations.md`): the LaTeX source and the drawing made from it by MathJax in the
   interface (path data in 1/1000 em, its box measured from it), drawn by Rust like a text frame's glyphs without MathJax;
   `scale` is its size; a double click reopens the source. The drawing stays in `note.json` (at most 256 KiB each); a member of
   its own (`objects/<id>.svg`) remains possible later, as another minor version.
-- **Bookmark**: a label at a point (`width`/`height` the label's box on screen, `scale` 1, its point the origin); drawn in the
-  editor only, never in image or video exports nor the replay's clock; a PDF of a binder makes them PDF bookmarks; the listing
-  gives them to the binder's table of contents (no note to open), as it gives the typed text.
+
+## 7. Bookmarks (SPEC §4.4 « Signets », §4.3 « Sommaire du classeur », format 1.6)
+
+A bookmark is a word or a short phrase, one line, at a spot of the page: a label to find one's way in a binder (« Chapitre 3 »,
+« Corrigé de l'exercice 2 »). The user's reason: a search inside one note is useless (a note is one page), what helps is to look in a
+whole binder. It is a page object of the kind `bookmark` (`ObjectBody::Bookmark(BookmarkBody { label })`, bytes in
+`docs/file-format.md` §2.2), so every operation of §2 carries it with no code of its own, except the few places below.
+
+- **Content and box.** Drawn like a small text frame: a flag, then the label in Andika at 5 mm, on a chip, with room around them
+  (`BOOKMARK_*` in `objects.rs`, mirrored by `BOOKMARK` in `objects.ts`: the same numbers, so that Rust and the interface measure the
+  same box, `PageObject::measure` and `bookmarkLook`). The size is the page's, not the screen's: it is a label in the margin that
+  shrinks with the zoom, like the text frames, and a resize of the selection scales it. The label is cut at 60 characters and kept as
+  one line (`clean_bookmark_label`, `cleanBookmarkLabel`: the same rules).
+- **Only the editor shows it.** `draw_items` (every export: PNG, JPEG, WebP, SVG, PDF page, print, clipboard image, MCP render,
+  thumbnails) leaves it out, so the replay, the video and the replay's clock never see it (`ardoise-media` builds on `draw_items`;
+  `replay.ts` counts only text frames and equations); the projection window and the share draw text frames and equations only. `Note::has_content`,
+  the clocks (`ops::time_range`, `split_at_time`, `writing_origin`, `last_content_time`, `noteEnd`, `lastSampleTime`) and the split
+  panel's time range ignore it: a bookmark never makes a page non-empty, never lengthens a replay, never pushes a recording later.
+  The projection feed does not send the page again for a bookmark (`projectedObjects`).
+- **Layers do not hide it** (a choice the user may want otherwise). It has a `layer` like every object (the chosen layer when it
+  was put), which moves with a merge or a reorder, but hiding the layer hides neither the bookmark nor its listing: a table of
+  contents that loses entries when a layer is hidden would be wrong. So `drawItems`, `objectDrawingOrder`, `reachable` (lasso,
+  click, Ctrl + A's layer filter excepted), the crop and the split by zone treat a bookmark as visible and not tied to the chosen
+  layer. The text frames keep the rule of §2.
+- **The tool** (`Mode` `'bookmark'`, key B, « Signet » in the toolbar): a tap with the pen, the mouse or a finger puts a bookmark
+  (the tap is the middle of its height, at its left end) and opens `BookmarkField.svelte`, a one-line field just under it (above it
+  near the bottom), in the interface's font; what is typed changes the present doc without a step (`typeBookmark`), and the end of the
+  typing (Enter, Escape, the field left, another tool, undo) is **one undoable step** (`endBookmark`), or none when nothing changed;
+  an empty label removes the bookmark. A tap on an existing bookmark with the tool renames it, a double click with the selection tool
+  too. Moving, resizing, deleting, duplicating, copying (the clipboard carries the label and the place), pasting are the selection's.
+  Why a tool and not a command followed by a tap: it is the same gesture as the text tool's (the user already knows it), it works with
+  a pen or a finger with no mode to enter and leave, and the keyboard shortcut and the tool's help line say what to do. The keys typed
+  in the field never reach the editor's shortcuts; Escape follows `escape.ts` (`editingText` is true for a bookmark too).
+- **Listing and summary.** `Note::bookmarks()` (`BookmarkRef { id, label, x, y }`: reading order, every layer, blank labels left
+  out, the centre of the box rounded) goes into `NoteEntry` and `NoteSummary` as the typed text does (`note.json` only). The summary
+  of a binder, the search, the opening at a spot and the PDF outline are in `library-order.md` §3 and §6.
+- **"Back to the original"** (`original.rs`, `original.ts`): a bookmark is not ink. Adding, renaming or moving one is no change of
+  the ink (`same_ink`: no first version kept for it; a Xiaomi page update is not refused for it either, `pages.rs`), the first version
+  kept later holds none, and going back to it keeps the bookmarks the note has (on the last layer the original has).
+- **Not drawn by the assistant**: `get_note` lists the bookmarks (`bookmarks`, label and `at_mm`), `search_notes` finds them
+  (`matched_in: ["bookmarks"]`), `render_note` does not draw them, and every write tool keeps them (they are objects).
+
+Choices that could have gone another way: the bookmarks of a page whose layer is hidden still count (above); a bookmark's size does
+not follow the screen (a small label on a zoomed-out page is small); the summary does not reopen when one comes back from the note;
+the selection panel counts a selected bookmark in « textes, équations et signets » (one count for every page object); « Revenir à l'original » keeps
+the bookmarks although the page may then have another size (the bookmark can lie outside it: it can still be selected from the
+listing, not drawn).

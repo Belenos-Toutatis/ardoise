@@ -36,6 +36,11 @@
    * Equations (docs/design/equations.md) are drawn the same way, from the drawing they store. With the equation tool,
    * a tap asks for a new equation there or to rewrite the one under it (`onequation`), a double click on one with the
    * selection tool too; the editor's panel for it (`equationPanel`) is put next to `equationAnchor`.
+   * Bookmarks (SPEC §4.4 « Signets ») are drawn like frames, from the glyphs of `ink.text` (a flag, a chip and the label
+   * in Andika, `bookmarkLook`), in their layer's place but whatever that layer shows; they are the editor's only (the
+   * exports, the replay and the projection never see them). A tap with the bookmark tool asks for a new one there or to
+   * edit the one under it (`onbookmark`), a double click with the selection tool edits the one under it; the one being
+   * typed (`bookmarkEditing`) gets its field (`BookmarkField`).
    */
   import { untrack, type Snippet } from 'svelte';
   import { api } from '../../lib/api';
@@ -53,17 +58,23 @@
   } from '../../lib/editor/geometry';
   import { drawingOrder, hitStroke, onLayer, selectInLasso } from '../../lib/editor/hit';
   import {
+    bookmarkAt,
+    bookmarkLabelPath,
+    bookmarkLook,
     contentPoint,
     drawItems,
     equationAt,
     hitObject,
+    objectBounds,
     objectTransform,
     objectsInLasso,
     objectsOf,
     textAt,
     textStyle,
+    type BookmarkLook,
   } from '../../lib/editor/objects';
   import { offsetAt } from '../../lib/text';
+  import BookmarkField from './BookmarkField.svelte';
   import TextField from './TextField.svelte';
   import {
     PenPresence,
@@ -97,6 +108,7 @@
     backgroundWidth,
     fitView,
     fitWidthView,
+    MAX_SCALE,
     panBy,
     pageToScreen,
     screenToPage,
@@ -117,7 +129,16 @@
   import { nextStrokeBase, type StrokeClock } from '../../lib/editor/writing-clock';
   import { t } from '../../lib/i18n.svelte';
   import type { Ink, InkPoint } from '../../lib/ink';
-  import { cssColor, equationPathData, isEquationObject, isTextObject, type Stroke, type TextObject } from '../../lib/note';
+  import {
+    cssColor,
+    equationPathData,
+    isBookmarkObject,
+    isEquationObject,
+    isTextObject,
+    type BookmarkObject,
+    type Stroke,
+    type TextObject,
+  } from '../../lib/note';
   import type { InProgress } from '../../lib/projection-feed';
   import type { NarrationInfo } from '../../lib/video';
 
@@ -147,6 +168,11 @@
     onequation,
     equationAnchor = null,
     equationPanel,
+    bookmarkEditing = null,
+    onbookmark,
+    onbookmarkinput,
+    onbookmarkenter,
+    onbookmarkblur,
   }: {
     doc: Doc;
     tools: ToolSettings;
@@ -207,6 +233,16 @@
     equationAnchor?: Vec | null;
     /** The equation panel, given where to stand in the canvas area (pixels) and how wide. */
     equationPanel?: Snippet<[{ left: number; top: number; width: number }]>;
+    /** The bookmark being typed: its index in the note's objects, and a number that changes with each editing; null: none. */
+    bookmarkEditing?: { index: number; session: number } | null;
+    /** A tap with the bookmark tool (or a double click on a bookmark): a new bookmark at `at`, or the one at `index` to edit. */
+    onbookmark?: (request: { kind: 'new'; at: Vec } | { kind: 'edit'; index: number }) => void;
+    /** What the bookmark being typed says now. */
+    onbookmarkinput?: (label: string) => void;
+    /** Enter in the field of the bookmark being typed: the editing ends, the label kept. */
+    onbookmarkenter?: () => void;
+    /** The field of the bookmark being typed lost the focus. */
+    onbookmarkblur?: () => void;
   } = $props();
 
   /** Screen pixels per device unit at real size (96 dpi, 10 µm units). */
@@ -237,7 +273,7 @@
     | { kind: 'scale'; id: number; anchor: Vec; start: Vec }
     | { kind: 'crop'; id: number; start: Vec }
     /** The text tool: a press that is a tap when it ends where it began (screen pixels). */
-    | { kind: 'text'; id: number; start: Vec; screen: Vec };
+    | { kind: 'text'; id: number; start: Vec; screen: Vec; bookmark: boolean };
 
   let stage = $state<HTMLDivElement>();
   let svg = $state<SVGSVGElement>();
@@ -294,6 +330,17 @@
     return d;
   }
 
+  /** What a bookmark looks like (its box, flag and label's glyphs), cached per bookmark object. */
+  const bookmarkLooks = new WeakMap<BookmarkObject, { look: BookmarkLook; label: string }>();
+  function bookmarkDrawing(object: BookmarkObject): { look: BookmarkLook; label: string } {
+    let drawing = bookmarkLooks.get(object);
+    if (drawing === undefined) {
+      drawing = { look: bookmarkLook(object.label, ink.text), label: bookmarkLabelPath(object.label, ink.text) };
+      bookmarkLooks.set(object, drawing);
+    }
+    return drawing;
+  }
+
   type Item = {
     i: number;
     d: string;
@@ -306,6 +353,8 @@
     object?: { transform: string };
     /** A page object's kind (`text`, `equation`); absent for a stroke. */
     kind?: string;
+    /** A bookmark: what it looks like, and its text (`d` is the label's glyphs). */
+    bookmark?: { look: BookmarkLook; label: string };
   };
 
   const items = $derived.by(() => {
@@ -320,6 +369,21 @@
     for (const item of drawItems(note, drawingOrder(note))) {
       if (item.kind === 'object') {
         const object = objects[item.index];
+        if (object && isBookmarkObject(object)) {
+          const drawing = bookmarkDrawing(object);
+          out.push({
+            i: item.index,
+            d: drawing.label,
+            fill: '',
+            highlighter: false,
+            selected: selectedObjects.has(item.index),
+            faded: false,
+            side: !preview ? null : preview.movedObjects.has(item.index) ? 'moved' : 'kept',
+            object: { transform: objectTransform(object) },
+            bookmark: { look: drawing.look, label: object.label },
+          });
+          continue;
+        }
         if (!object || !(isTextObject(object) || isEquationObject(object))) continue;
         out.push({
           i: item.index,
@@ -362,6 +426,13 @@
     return object && isTextObject(object) ? object : null;
   });
 
+  /** The bookmark being typed, while one is. */
+  const editedBookmark = $derived.by(() => {
+    if (!bookmarkEditing) return null;
+    const object = objectsOf(shown.note)[bookmarkEditing.index];
+    return object && isBookmarkObject(object) ? object : null;
+  });
+
   /** The SVG transform of a drawn item: the drag's (a selection moved or resized), then the object's own. */
   function itemTransform(item: Item): string | undefined {
     const drag = item.selected && dragAffine ? svgMatrix(dragAffine) : '';
@@ -389,19 +460,32 @@
     onequation?.(hit !== null ? { kind: 'edit', index: hit, at: p } : { kind: 'new', at: p });
   }
 
-  /** A tap of the tool in use (the text or the equation tool). */
-  function toolTap(p: Vec) {
-    if (tools.mode === 'equation') equationTap(p);
+  /** A tap with the bookmark tool at `p`: editing the bookmark under it (whatever its layer), or a new one there. */
+  function bookmarkTap(p: Vec) {
+    const hit = bookmarkAt(doc.note, p, 6 / view.scale);
+    onbookmark?.(hit === null ? { kind: 'new', at: p } : { kind: 'edit', index: hit });
+  }
+
+  /** A tap of the tool the mode names: the bookmark tool's (`bookmark`, from the gesture's start), the equation tool's, else the text tool's. */
+  function pageTap(p: Vec, bookmark: boolean) {
+    if (bookmark) bookmarkTap(p);
+    else if (tools.mode === 'equation') equationTap(p);
     else textTap(p);
   }
 
-  /** The tools a finger's tap puts something down with. */
-  const tapsWith = (mode: string) => mode === 'text' || mode === 'equation';
-
-  /** A double click with the selection tool on a text frame or an equation of the chosen layer: editing it. */
+  /**
+   * A double click with the selection tool on a bookmark (any layer), or on an equation or a text frame of the chosen layer:
+   * editing it.
+   */
   function ondblclick(e: MouseEvent) {
     if (readonly || split || tools.mode !== 'select') return;
     const p = pagePoint(e);
+    const bookmark = onbookmark ? bookmarkAt(doc.note, p, 6 / view.scale) : null;
+    if (bookmark !== null) {
+      e.preventDefault();
+      onbookmark?.({ kind: 'edit', index: bookmark });
+      return;
+    }
     const equation = onequation ? equationAt(doc.note, p, 6 / view.scale, doc.activeLayer) : null;
     if (equation !== null) {
       e.preventDefault();
@@ -427,8 +511,8 @@
     return { left, top, width };
   });
 
-  /** A finger that navigates, put down with the text or equation tool: a tap if it is lifted soon, where it went down. */
-  let fingerTap: { id: number; start: Vec; screen: Vec; time: number } | null = null;
+  /** A finger that navigates, put down with the text, equation or bookmark tool: a tap if it is lifted soon, where it went down. */
+  let fingerTap: { id: number; start: Vec; screen: Vec; time: number; bookmark: boolean } | null = null;
 
   /** The straightened shapes of the setting's preview, as centre lines (a few strokes at most, not cached). */
   const previewLines = $derived(
@@ -474,6 +558,16 @@
   export function fitWidth() {
     measure();
     view = fitWidthView(doc.note.page, viewport);
+  }
+
+  /**
+   * Shows the point `p` of the page (a bookmark opened from the binder's summary): at the middle of the editor, at real
+   * size at least (the zoom stays when it is larger already).
+   */
+  export function centreOn(p: Vec) {
+    measure();
+    const scale = Math.min(MAX_SCALE, Math.max(view.scale, REAL_SIZE));
+    view = { scale, x: viewport.width / 2 - p.x * scale, y: viewport.height / 2 - p.y * scale };
   }
 
   export function zoomBy(factor: number) {
@@ -716,8 +810,12 @@
       if (!fingerDraws()) {
         e.preventDefault();
         capture(id);
-        // The text and equation tools: a finger's tap places a frame or an equation (or edits one), a drag moves the page.
-        fingerTap = tapsWith(tools.mode) && !readonly && !split ? { id, start: pagePoint(e), screen: local(e), time: e.timeStamp } : null;
+        // The text, equation and bookmark tools: a finger's tap places a frame, an equation or a bookmark (or edits the one
+        // there), a drag moves the page.
+        fingerTap =
+          (tools.mode === 'text' || tools.mode === 'equation' || tools.mode === 'bookmark') && !readonly && !split
+            ? { id, start: pagePoint(e), screen: local(e), time: e.timeStamp, bookmark: tools.mode === 'bookmark' }
+            : null;
         // A finger on the selection moves or resizes it instead of panning the page.
         const grab = e.button === 0 ? grabAt(e) : null;
         if (grab) {
@@ -816,7 +914,8 @@
         break;
       case 'text':
       case 'equation':
-        begin({ kind: 'text', id, start: p, screen: local(e) });
+      case 'bookmark':
+        begin({ kind: 'text', id, start: p, screen: local(e), bookmark: tools.mode === 'bookmark' });
         break;
       default:
         break;
@@ -919,7 +1018,7 @@
       if (tap && tap.id === pointerId(e)) {
         fingerTap = null;
         const at = local(e);
-        if (!cancelled && Math.hypot(at.x - tap.screen.x, at.y - tap.screen.y) < TAP_PX && e.timeStamp - tap.time < TAP_MS) toolTap(tap.start);
+        if (!cancelled && Math.hypot(at.x - tap.screen.x, at.y - tap.screen.y) < TAP_PX && e.timeStamp - tap.time < TAP_MS) pageTap(tap.start, tap.bookmark);
       }
     }
     finish(e, cancelled);
@@ -1026,7 +1125,7 @@
       }
       case 'text': {
         const at = local(e);
-        if (!cancelled && Math.hypot(at.x - d.screen.x, at.y - d.screen.y) < TAP_PX) toolTap(d.start);
+        if (!cancelled && Math.hypot(at.x - d.screen.x, at.y - d.screen.y) < TAP_PX) pageTap(d.start, d.bookmark);
         break;
       }
       case 'pan':
@@ -1069,7 +1168,27 @@
     {/if}
     <g class="ink">
       {#each items as item}
-        {#if item.object}
+        {#if item.bookmark}
+          <g
+            data-object={item.i}
+            data-bookmark={item.bookmark.label}
+            class="bookmark"
+            class:editing={bookmarkEditing?.index === item.i}
+            class:split-kept={item.side === 'kept'}
+            class:split-moved={item.side === 'moved'}
+            transform={itemTransform(item)}
+          >
+            <title>{item.bookmark.label}</title>
+            <rect class="bookmark-chip" x="0" y="0" width={item.bookmark.look.width} height={item.bookmark.look.height} rx="120" />
+            <path class="bookmark-flag" d={item.bookmark.look.flag} />
+            <path
+              class="bookmark-label"
+              d={item.d}
+              fill-rule="nonzero"
+              transform="translate({item.bookmark.look.textX} {item.bookmark.look.textY})"
+            />
+          </g>
+        {:else if item.object}
           <path
             d={item.d}
             fill={item.fill}
@@ -1172,6 +1291,19 @@
   {#if panelPlace && equationPanel}
     {@render equationPanel(panelPlace)}
   {/if}
+  {#if bookmarkEditing && editedBookmark}
+    {#key bookmarkEditing.session}
+      <BookmarkField
+        label={editedBookmark.label}
+        box={objectBounds(editedBookmark)}
+        {view}
+        {viewport}
+        oninput={(label) => onbookmarkinput?.(label)}
+        onenter={() => onbookmarkenter?.()}
+        onblur={() => onbookmarkblur?.()}
+      />
+    {/key}
+  {/if}
   <div class="zoom" role="group" aria-label={t('editor.zoom.label')}>
     <button class="button ghost" type="button" title={t('editor.zoom.out')} aria-label={t('editor.zoom.out')} onclick={() => zoomBy(1 / 1.25)}>−</button>
     <span class="zoom-level" aria-live="polite">{t('editor.zoom.level', { percent: zoomPercent })}</span>
@@ -1230,6 +1362,31 @@
 
   .mode-equation {
     cursor: cell;
+  }
+
+  .mode-bookmark {
+    cursor: cell;
+  }
+
+  /* A bookmark is on the page, which stays white whatever the theme: its colours are the page's. */
+  .bookmark-chip {
+    fill: #fff6dd;
+    stroke: #d9a526;
+    stroke-width: 1.2px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .bookmark-flag {
+    fill: #c2410c;
+  }
+
+  .bookmark-label {
+    fill: #3d2a00;
+  }
+
+  .bookmark.editing .bookmark-chip {
+    stroke: var(--accent);
+    stroke-width: 2px;
   }
 
   .mode-pan,

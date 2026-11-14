@@ -104,22 +104,27 @@ fn keep_first_version(file: &mut NoteFile, edited: &Note) -> Result<(), FormatEr
     if file.original.is_some() || file.original_note.is_some() || same_ink(&file.note, edited) {
         return Ok(());
     }
-    file.original_note = Some(to_bytes(&NoteFile::new(file.note.clone()))?);
+    // Bookmarks are marks on the page, not ink: the original does not hold them (and going back to it
+    // keeps the ones the note has now, `lib/editor/original.ts`).
+    let mut first = file.note.clone();
+    first.objects.retain(|object| !object.is_bookmark());
+    file.original_note = Some(to_bytes(&NoteFile::new(first))?);
     Ok(())
 }
 
-/// Whether `a` and `b` draw the same page: page size, layers, strokes and page objects. The
-/// objects are compared with their boxes as this version measures them, as the file stores them
-/// (the editor may send a box measured otherwise for a frame it did not change).
+/// Whether `a` and `b` draw the same page: page size, layers, strokes and page objects, bookmarks
+/// left out (adding, renaming or moving one is not a change of the ink). The objects are compared
+/// with their boxes as this version measures them, as the file stores them (the editor may send a
+/// box measured otherwise for a frame it did not change).
 fn same_ink(a: &Note, b: &Note) -> bool {
-    a.page == b.page
-        && a.layers == b.layers
-        && a.strokes == b.strokes
-        && a.objects.len() == b.objects.len()
-        && a.objects
+    let drawn = |note: &'_ Note| -> Vec<PageObject> {
+        note.objects
             .iter()
-            .zip(&b.objects)
-            .all(|(a, b)| measured(a) == measured(b))
+            .filter(|object| !object.is_bookmark())
+            .map(measured)
+            .collect()
+    };
+    a.page == b.page && a.layers == b.layers && a.strokes == b.strokes && drawn(a) == drawn(b)
 }
 
 /// `object` with its box as this version measures it (`PageObject::measure`).

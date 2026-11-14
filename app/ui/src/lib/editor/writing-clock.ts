@@ -24,11 +24,11 @@ export const WRITING_GAP_MS = 1000;
 /** Note time between the end of a note and a stroke drawn in the editor outside a recording, ms (the editor's rule). */
 export const STROKE_GAP_MS = 500;
 
-/** The time of the last sample of the note, or of its last page object (a text frame appears at its time), every layer counted; -1 without any. */
+/** The time of the last sample of the note, or of its last page object (a text frame appears at its time; a bookmark is not part of the writing), every layer counted; -1 without any. */
 export function lastSampleTime(note: Note): number {
   let last = -1;
   for (const stroke of note.strokes) for (const p of stroke.points) if (p.t > last) last = p.t;
-  for (const object of note.objects ?? []) if (object.t > last) last = object.t;
+  for (const object of note.objects ?? []) if (object.kind !== 'bookmark' && object.t > last) last = object.t;
   return last;
 }
 

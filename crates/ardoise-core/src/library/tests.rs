@@ -1400,6 +1400,49 @@ fn the_listing_gives_the_typed_text_of_a_note_without_opening_its_ink() {
 }
 
 #[test]
+fn the_listing_gives_the_bookmarks_of_a_note_in_reading_order_without_opening_its_ink() {
+    use crate::note::PageObject;
+
+    let (_dir, library) = new_library();
+    let mut marked = note_file("m", "Avec signets");
+    marked.note.objects = vec![
+        PageObject::bookmark("b", 0, 0, 4000.0, 5000.0, "Bilan"),
+        PageObject::bookmark("a", 0, 0, 500.0, 600.0, "  Introduction "),
+        PageObject::bookmark("blank", 0, 0, 0.0, 0.0, "  "),
+    ];
+    let marked = library.create(Path::new(""), &marked).unwrap();
+    library
+        .create(Path::new(""), &note_file("p", "Sans signet"))
+        .unwrap();
+
+    let mut cache = HeaderCache::default();
+    let listing = library.list_with(&mut cache);
+    let of = |id: &str| {
+        listing
+            .notes
+            .iter()
+            .find(|n| n.id == id)
+            .map(|n| n.bookmarks.clone())
+            .unwrap()
+    };
+    let found = of("m");
+    let labels: Vec<&str> = found.iter().map(|b| b.label.as_str()).collect();
+    assert_eq!(labels, ["Introduction", "Bilan"]);
+    assert_eq!(found[0].id, "a");
+    assert!(of("p").is_empty());
+
+    // A rename of a bookmark changes the stamp: the entry is read again.
+    let loaded = library.read(&marked.path).unwrap();
+    let mut file = loaded.file;
+    file.note.objects = vec![PageObject::bookmark("a", 0, 0, 500.0, 600.0, "Début")];
+    library.save(&marked.path, &file, &loaded.stamp).unwrap();
+    let listing = library.list_with(&mut cache);
+    let entry = listing.notes.iter().find(|n| n.id == "m").unwrap();
+    assert_eq!(entry.bookmarks.len(), 1);
+    assert_eq!(entry.bookmarks[0].label, "Début");
+}
+
+#[test]
 fn a_note_that_just_arrived_in_the_trash_is_kept_whatever_its_record_says() {
     let (_dir, library) = new_library();
     let saved = library

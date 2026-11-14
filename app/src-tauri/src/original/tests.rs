@@ -457,6 +457,45 @@ fn a_page_of_text_frames_only_has_something_to_go_back_to() {
     assert!(same_ink(&base, &base.clone()));
 }
 
+/// A bookmark is a mark on the page, not ink: adding, renaming or moving one is no change of the ink (no
+/// first version is kept for it), and the first version kept for a later change of the ink holds none.
+#[test]
+fn a_bookmark_is_not_part_of_the_ink_the_original_keeps() {
+    let mut file = NoteFile::new(sample_note("A"));
+    let mut marked = file.note.clone();
+    marked
+        .objects
+        .push(ardoise_core::note::PageObject::bookmark(
+            "m", 0, 0, 500.0, 600.0, "Début",
+        ));
+    assert!(same_ink(&file.note, &marked) && same_ink(&marked, &file.note));
+    keep_original(&mut file, &marked).unwrap();
+    assert!(file.original_note.is_none());
+
+    // The note on disk now has the bookmark; the ink changes: the first version is kept without it.
+    file.note = marked.clone();
+    let mut edited = marked.clone();
+    edited.strokes[0].points.pop();
+    keep_original(&mut file, &edited).unwrap();
+    let nested = read_from_bytes(file.original_note.as_ref().unwrap()).unwrap();
+    assert!(nested.note.objects.is_empty());
+    // The strokes as the format stores them (quantised): the same ink.
+    assert_eq!(nested.note.strokes.len(), marked.strokes.len());
+
+    // A page holding nothing but a bookmark is still an empty page: nothing to go back to.
+    let mut blank = NoteFile::new(crate::library::blank_note("Vide", "Calque 1", 1));
+    blank
+        .note
+        .objects
+        .push(ardoise_core::note::PageObject::bookmark(
+            "m", 0, 0, 500.0, 600.0, "Début",
+        ));
+    let mut drawn = blank.note.clone();
+    drawn.strokes = sample_note("B").strokes;
+    keep_original(&mut blank, &drawn).unwrap();
+    assert!(blank.original_note.is_none());
+}
+
 /// A tablet's page has no page object: going back to it takes away the frames typed since.
 #[test]
 fn a_tablet_note_goes_back_without_the_text_frames_added_to_it() {

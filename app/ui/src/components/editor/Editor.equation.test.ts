@@ -180,7 +180,7 @@ describe('the equation tool', () => {
     expect(v.panel()).toBeNull();
     expect(v.equations()).toHaveLength(1);
     expect(v.equations()[0].getAttribute('d')).toBe(preview);
-    expect(v.count()).toBe('Traits sélectionnés : 0 — textes et équations : 1');
+    expect(v.count()).toBe('Traits sélectionnés : 0 — textes, équations et signets : 1');
     const objects = await v.saved();
     const equation = objects.find((o) => o.kind === 'equation') as EquationObject;
     expect(equation.latex).toBe('\\ce{2H2 + O2 -> 2H2O}');

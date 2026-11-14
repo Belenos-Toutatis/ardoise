@@ -328,6 +328,18 @@ L'utilisateur a demandé ce qu'on pourrait ajouter à Ardoise, puis a tranché c
 - *« Effacer la page » pendant le direct sur une feuille reprise* : les textes restent (ils font partie de la feuille, comme son papier et son image).
 - *PDF* : le texte est dessiné en contours (identique partout) et doublé d'un texte invisible pour la recherche et le copier-coller ; les caractères hors de l'alphabet latin d'Europe de l'Ouest (grec, symboles) sont dessinés mais pas cherchables.
 
+**Points laissés au développeur pour le point 5 (signets et sommaire du classeur), à confirmer** (conception : `docs/design/page-objects.md` §7, `docs/design/library-order.md` §6) :
+
+- *Un outil, pas une commande* : « Signet » est un outil de la barre (touche `B`), comme « Texte » : on touche la page, on tape. Une commande « Ajouter un signet » qui demanderait ensuite un toucher aurait été le même geste en deux temps.
+- *Aucun calque ne masque un signet* : il est posé sur le calque choisi, mais masquer ce calque ne le cache pas, ne le rend pas insélectionnable et ne le retire pas du sommaire (un sommaire qui perd des entrées quand on masque un calque serait faux). Exemple : un signet « Corrigé » posé sur un calque « Corrigé » masqué pour les élèves reste dans le sommaire ; il n'est de toute façon jamais dans les exports.
+- *Taille* : le signet a la taille d'un petit texte (lettres de 5 mm) sur la page, pas celle de l'écran : sur une page très réduite il est petit, comme un texte. Il se redimensionne avec la sélection et tourne avec la page.
+- *Libellé* : une ligne, 60 caractères au plus (les retours à la ligne deviennent des espaces) ; un libellé vide supprime le signet. Exemple : « Théorème de Pythagore et sa réciproque » tient ; une phrase de deux lignes est coupée à 60 caractères.
+- *« Revenir à l'original »* garde les signets de la note (ce n'est pas du tracé), et poser un signet ne crée pas la « première version » ; la page revenue à l'original peut être plus petite : un signet hors de la page n'est plus dessiné mais reste dans le sommaire.
+- *Sommaire* : bouton « Sommaire » de la barre du haut quand un classeur est affiché, et entrée de son menu ; l'ordre est celui de l'export du classeur (ordre rangé, sinon la date la plus ancienne d'abord ; sous-classeurs après), quel que soit le tri affiché ; on ne revient pas au sommaire en quittant la note.
+- *PDF* : le signet d'un PDF mène à la page, un peu au-dessus de l'endroit du signet (5 mm) ; le PDF d'une seule note a ses signets pour plan, sans signet de note. L'export de plusieurs notes qui n'est pas un classeur (la sélection) n'a pas de plan, comme avant.
+- *Mise à jour d'une page de l'ardoise Xiaomi* : un signet posé sur une note de l'ardoise n'empêche plus sa mise à jour (la note reste « non retouchée » : le signet n'est pas du tracé) et est gardé.
+- *Panneau de sélection* : un signet sélectionné est compté dans « textes, équations et signets » (un seul compte pour tous les objets de la page, depuis l'arrivée des équations).
+
 **Points laissés au développeur pour le point 7 (outil Équation), à confirmer** (conception : `docs/design/equations.md`) :
 
 - *Échap abandonne l'équation en cours d'écriture* (la page ne change pas), alors qu'il termine la saisie d'un texte en le gardant : une équation n'est sur la page qu'une fois posée.

@@ -44,6 +44,7 @@ import { livePaperJourneys } from './journeys-m17-live.mjs';
 import { editorProjectionJourneys } from './journeys-m17-projection.mjs';
 import { writingSoundJourneys } from './journeys-m17-sound.mjs';
 import { blackboardJourneys } from './journeys-m18-blackboard.mjs';
+import { bookmarkJourneys } from './journeys-bookmarks.mjs';
 import { q20Journeys } from './journeys-q20-library.mjs';
 import { textJourneys } from './journeys-text.mjs';
 import { equationJourneys } from './journeys-equation.mjs';
@@ -52,7 +53,7 @@ import { mcpJourney } from './mcp.mjs';
 // Milestone M7 journeys live in files of their own. `ARDOISE_E2E_ONLY=text` runs only the journeys whose
 // name contains one of its `|`-separated parts (while working on them; `cargo xtask e2e` runs everything).
 const only = process.env.ARDOISE_E2E_ONLY?.split('|').filter(Boolean);
-const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys, ...resumeJourneys, ...touchUpJourneys, ...editorNavJourneys, ...closeKeyJourneys, ...revisionJourneys, ...editorLayersJourneys, ...liveComputerJourneys, ...exportLayersJourneys, ...straightenSettingJourneys, ...sidePanelEditorJourneys, ...sidePanelLiveJourneys, ...livePaperJourneys, ...editorProjectionJourneys, ...writingSoundJourneys, ...blackboardJourneys, ...q20Journeys, ...textJourneys, ...equationJourneys].filter(
+const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys, ...resumeJourneys, ...touchUpJourneys, ...editorNavJourneys, ...closeKeyJourneys, ...revisionJourneys, ...editorLayersJourneys, ...liveComputerJourneys, ...exportLayersJourneys, ...straightenSettingJourneys, ...sidePanelEditorJourneys, ...sidePanelLiveJourneys, ...livePaperJourneys, ...editorProjectionJourneys, ...writingSoundJourneys, ...blackboardJourneys, ...q20Journeys, ...textJourneys, ...bookmarkJourneys, ...equationJourneys].filter(
   (journey) => !only || only.some((part) => journey.name.includes(part)),
 );
 

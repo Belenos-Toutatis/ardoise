@@ -533,3 +533,58 @@ async fn rewriting_tools_keep_the_equations_as_they_are() {
         .await;
     assert_eq!(note_of(&session, CHIMIE).objects, source.objects);
 }
+
+/// Bookmarks (SPEC §4.4 « Signets »): `get_note` lists them (they are not "objects of a kind this version
+/// does not know"), `render_note` does not draw them, the search finds a note by their label, and the
+/// write tools keep them.
+#[tokio::test(flavor = "current_thread")]
+async fn the_assistant_reads_and_searches_bookmarks_and_keeps_them() {
+    let session = session().await;
+    let mut note = fiche();
+    note.objects.push(PageObject::bookmark(
+        "signet-b",
+        1,
+        0,
+        4_000.0,
+        9_000.0,
+        "Théorème de Pythagore",
+    ));
+    note.objects.push(PageObject::bookmark(
+        "signet-a", 0, 0, 500.0, 600.0, "Début",
+    ));
+    session
+        .harness
+        .library()
+        .create(Path::new("Physique"), &NoteFile::new(note))
+        .unwrap();
+
+    let result = session.ok("get_note", json!({ "note": FICHE })).await;
+    let marks = result["bookmarks"].as_array().unwrap();
+    assert_eq!(marks.len(), 2, "{result}");
+    // Reading order, every layer (the second bookmark is on the hidden layer).
+    assert_eq!(marks[0]["label"], "Début");
+    assert_eq!(marks[0]["id"], "signet-a");
+    assert_eq!(marks[1]["label"], "Théorème de Pythagore");
+    assert!(marks[0]["at_mm"]["x"].as_f64().unwrap() > 0.0);
+    // Not a kind this version does not know.
+    assert!(result.get("other_objects").is_none(), "{result}");
+
+    // The search finds a note by a bookmark's label, and says where.
+    let found = session
+        .ok("search_notes", json!({ "query": "pythagore" }))
+        .await;
+    assert_eq!(found["total"], 1, "{found}");
+    assert_eq!(found["notes"][0]["matched_in"], json!(["bookmarks"]));
+
+    // A write tool keeps them.
+    let before = note_of(&session, FICHE);
+    session
+        .ok(
+            "update_note",
+            json!({ "note": FICHE, "title": "Fiche renommée" }),
+        )
+        .await;
+    let after = note_of(&session, FICHE);
+    assert_eq!(after.bookmarks().len(), 2);
+    assert_eq!(ids(&after), ids(&before));
+}

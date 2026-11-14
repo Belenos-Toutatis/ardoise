@@ -7,10 +7,21 @@
  * version: an older reader ignores it): their placement, text, family, bold, size and colour; their id and layer do not
  * (a paste gives new ones). Equations travel the same way: their placement, LaTeX source, drawing and colour, the
  * drawing checked like a note's (`isEquationObject`) before anything is pasted.
+ * Bookmarks travel the same way (their label and place): a cut must not lose one.
  */
 import { equationBox, readEquationPath } from '../equation-path';
 import { TOOLS, type InkPoint } from '../ink';
-import { FONT_FAMILIES, isEquationObject, type EquationObject, type PageObject, type Stroke, type TextObject } from '../note';
+import {
+  FONT_FAMILIES,
+  isBookmarkObject,
+  isEquationObject,
+  type BookmarkObject,
+  type EquationObject,
+  type PageObject,
+  type Stroke,
+  type TextObject,
+} from '../note';
+import { cleanBookmarkLabel } from './objects';
 import { MAX_PAGE_SIDE } from './ops';
 
 /** The marker that makes a text ours. */
@@ -40,7 +51,8 @@ const MAX_OBJECT_SCALE = 1_000;
 
 type ClipboardText = Pick<TextObject, 'kind' | 't' | 'x' | 'y' | 'scale' | 'quarterTurns' | 'text' | 'font' | 'bold' | 'size' | 'color'>;
 type ClipboardEquation = Pick<EquationObject, 'kind' | 't' | 'x' | 'y' | 'scale' | 'quarterTurns' | 'latex' | 'path' | 'color'>;
-type ClipboardObject = ClipboardText | ClipboardEquation;
+type ClipboardBookmark = Pick<BookmarkObject, 'kind' | 't' | 'x' | 'y' | 'scale' | 'quarterTurns' | 'label'>;
+type ClipboardObject = ClipboardText | ClipboardEquation | ClipboardBookmark;
 
 interface ClipboardDocument {
   ardoise: typeof CLIPBOARD_MARKER;
@@ -54,7 +66,7 @@ export function encodeStrokes(strokes: readonly Stroke[]): string {
   return encodeClipboard(strokes, []);
 }
 
-/** The clipboard text for `strokes` and the text frames and equations among `objects` (other kinds stay behind). */
+/** The clipboard text for `strokes` and the text frames, equations and bookmarks among `objects` (other kinds stay behind). */
 export function encodeClipboard(strokes: readonly Stroke[], objects: readonly PageObject[]): string {
   const document: ClipboardDocument = {
     ardoise: CLIPBOARD_MARKER,
@@ -69,6 +81,9 @@ export function encodeClipboard(strokes: readonly Stroke[], objects: readonly Pa
     } else if (isEquationObject(o)) {
       const { kind, t, x, y, scale, quarterTurns, latex, path, color } = o;
       carried.push({ kind, t, x, y, scale, quarterTurns, latex, path, color });
+    } else if (isBookmarkObject(o)) {
+      const { kind, t, x, y, scale, quarterTurns, label } = o;
+      carried.push({ kind, t, x, y, scale, quarterTurns, label });
     }
   }
   if (carried.length > 0) document.objects = carried;
@@ -134,17 +149,31 @@ function equationObject(o: Record<string, unknown>): EquationObject | null {
 }
 
 /** A page object of the clipboard, or null when it is damaged or of a kind this version does not paste. */
-function clipboardObject(value: unknown): TextObject | EquationObject | null {
+function clipboardObject(value: unknown): TextObject | EquationObject | BookmarkObject | null {
   if (typeof value !== 'object' || value === null) return null;
   const o = value as Record<string, unknown>;
-  return o.kind === 'equation' ? equationObject(o) : textObject(o);
+  return o.kind === 'equation' ? equationObject(o) : o.kind === 'bookmark' ? bookmarkObject(o) : textObject(o);
+}
+
+/** A bookmark of the clipboard, or null when it is damaged (its box is measured again by the paste's note). */
+function bookmarkObject(value: unknown): BookmarkObject | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const o = value as Record<string, unknown>;
+  if (o.kind !== 'bookmark' || typeof o.label !== 'string' || o.label.length > MAX_TEXT_LENGTH) return null;
+  if (!within(o.x, MAX_PAGE_SIDE) || !within(o.y, MAX_PAGE_SIDE) || !within(o.scale, MAX_OBJECT_SCALE) || o.scale <= 0) return null;
+  const turns = o.quarterTurns ?? 0;
+  if (!finite(turns) || !Number.isInteger(turns) || turns < 0 || turns > 3) return null;
+  if (!finite(o.t) || !Number.isInteger(o.t) || o.t < 0 || o.t > MAX_T) return null;
+  const label = cleanBookmarkLabel(o.label);
+  if (label === '') return null;
+  return { kind: 'bookmark', id: '', layer: 0, t: o.t, x: o.x, y: o.y, scale: o.scale, quarterTurns: turns, width: 0, height: 0, label };
 }
 
 /**
- * The strokes, text frames and equations (on layer 0, to be placed by the paste) in a clipboard text, or null when the
+ * The strokes, text frames, equations and bookmarks (on layer 0, to be placed by the paste) in a clipboard text, or null when the
  * text is not ours, is damaged, or holds nothing: nothing foreign is ever pasted. The frames' boxes are 0 until measured.
  */
-export function decodeClipboard(text: string): { strokes: Stroke[]; objects: (TextObject | EquationObject)[] } | null {
+export function decodeClipboard(text: string): { strokes: Stroke[]; objects: (TextObject | EquationObject | BookmarkObject)[] } | null {
   if (text.length > MAX_TEXT || !text.trimStart().startsWith('{') || !text.includes(CLIPBOARD_MARKER)) return null;
   let parsed: unknown;
   try {
@@ -157,7 +186,7 @@ export function decodeClipboard(text: string): { strokes: Stroke[]; objects: (Te
   if (ardoise !== CLIPBOARD_MARKER || version !== CLIPBOARD_VERSION) return null;
   if (!Array.isArray(strokes) || strokes.length > MAX_STROKES) return null;
   if (objects !== undefined && (!Array.isArray(objects) || objects.length > MAX_OBJECTS)) return null;
-  const frames: (TextObject | EquationObject)[] = [];
+  const frames: (TextObject | EquationObject | BookmarkObject)[] = [];
   for (const raw of objects ?? []) {
     const frame = clipboardObject(raw);
     if (!frame) return null;

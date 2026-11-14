@@ -9,7 +9,9 @@
 //! ([`ObjectBody::Unknown`]), moved with the page like the others, and drawn nowhere.
 //!
 //! Kinds today: `text` ([`TextBody`], SPEC §4.4 « Texte tapé au clavier »), `equation`
-//! ([`EquationBody`], format 1.5, SPEC §4.4 « Équation », `docs/design/equations.md`).
+//! ([`EquationBody`], format 1.5, SPEC §4.4 « Équation », `docs/design/equations.md`) and
+//! `bookmark` ([`BookmarkBody`], SPEC §4.4 « Signets », format 1.6): a short label drawn in the
+//! editor only.
 
 use ardoise_ink::Rgba;
 use ardoise_text::{FontFamily, Layout, Path, TextStyle};
@@ -19,6 +21,9 @@ use serde_json::{Map, Value};
 
 /// The kind of a text frame (`"kind": "text"`).
 pub const TEXT_KIND: &str = "text";
+
+/// The kind of a bookmark (`"kind": "bookmark"`).
+pub const BOOKMARK_KIND: &str = "bookmark";
 
 /// Keys of the placement, common to every kind.
 const PLACEMENT_KEYS: [&str; 10] = [
@@ -36,6 +41,21 @@ const PLACEMENT_KEYS: [&str; 10] = [
 
 /// Keys of a text frame's body.
 const TEXT_KEYS: [&str; 5] = ["text", "font", "bold", "size", "color"];
+
+/// Keys of a bookmark's body.
+const BOOKMARK_KEYS: [&str; 1] = ["label"];
+
+/// How many characters a bookmark's label may have (the editor's field stops there; a longer label read
+/// from a file is kept and drawn whole).
+pub const MAX_BOOKMARK_LABEL: usize = 60;
+
+/// Size of the font of a bookmark's label (its em), device units: 5 mm. A bookmark keeps this size on the
+/// page, like a text frame: it is a small label in the margin.
+pub const BOOKMARK_FONT_SIZE: f32 = 500.0;
+/// Room around a bookmark's content, device units.
+pub const BOOKMARK_PAD: f32 = 150.0;
+/// Width of the flag at the left of the label, device units; the label starts after it and one `PAD`.
+pub const BOOKMARK_FLAG_WIDTH: f32 = 300.0;
 
 /// Sizes the text tool offers, in device units (the size of the font, its em): 4, 6 and 9 mm.
 pub const TEXT_SIZES: [f32; 3] = [400.0, 600.0, 900.0];
@@ -123,11 +143,58 @@ impl TextBody {
     }
 }
 
+/// A bookmark: a word or a short phrase, one line, at a spot of the page (SPEC §4.4 « Signets »).
+/// Drawn in the editor, with a flag, and nowhere else: not in the exports, nor the replay, nor the
+/// projection or the share. It makes the binder's summary and is found by the library's search.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BookmarkBody {
+    pub label: String,
+}
+
+impl BookmarkBody {
+    /// The label's text style: Andika, regular, [`BOOKMARK_FONT_SIZE`].
+    pub fn style() -> TextStyle {
+        TextStyle {
+            family: FontFamily::Andika,
+            bold: false,
+            size: BOOKMARK_FONT_SIZE,
+        }
+    }
+
+    /// The label's line, in its own units (the glyph path is this layout's).
+    pub fn layout(&self) -> Layout {
+        ardoise_text::layout(&self.label, Self::style())
+    }
+
+    /// The box of the bookmark's content (the flag, the label and room around them), device units.
+    pub fn content_box(&self) -> (f32, f32) {
+        let laid = self.layout();
+        (
+            BOOKMARK_PAD + BOOKMARK_FLAG_WIDTH + BOOKMARK_PAD + laid.width + BOOKMARK_PAD,
+            laid.height.max(laid.line_height) + 2.0 * BOOKMARK_PAD,
+        )
+    }
+}
+
+/// A label as a bookmark keeps it: one line (line breaks and tabs become spaces, runs of white space
+/// one space), no white space at either end, at most [`MAX_BOOKMARK_LABEL`] characters. Empty when
+/// there is nothing left: the bookmark is then removed.
+pub fn clean_bookmark_label(label: &str) -> String {
+    let one_line = label.split_whitespace().collect::<Vec<_>>().join(" ");
+    one_line
+        .chars()
+        .take(MAX_BOOKMARK_LABEL)
+        .collect::<String>()
+        .trim_end()
+        .to_owned()
+}
+
 /// What an object shows.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ObjectBody {
     Text(TextBody),
     Equation(EquationBody),
+    Bookmark(BookmarkBody),
     /// A kind this version does not know (or an object of a known kind it cannot read: a value it
     /// does not know, a wrong type): every key but the placement's, kept verbatim and written back.
     Unknown {
@@ -142,23 +209,26 @@ impl ObjectBody {
         match self {
             ObjectBody::Text(_) => TEXT_KIND,
             ObjectBody::Equation(_) => EQUATION_KIND,
+            ObjectBody::Bookmark(_) => BOOKMARK_KIND,
             ObjectBody::Unknown { kind, .. } => kind,
         }
     }
 
     /// What every output draws of the body, in the object's own units, and its colour: a text
-    /// frame's glyphs, an equation's drawing; `None` for a kind this version does not draw.
+    /// frame's glyphs, an equation's drawing; `None` for a kind no output draws (a bookmark: the
+    /// editor's only) or this version does not know.
     pub fn outline(&self) -> Option<(Path, Rgba)> {
         match self {
             ObjectBody::Text(body) => Some((ardoise_text::outline(&body.layout()), body.color)),
             ObjectBody::Equation(body) => Some((body.outline(), body.color)),
-            ObjectBody::Unknown { .. } => None,
+            ObjectBody::Bookmark(_) | ObjectBody::Unknown { .. } => None,
         }
     }
 
-    /// Whether every output draws the body (a kind this version knows and reads).
+    /// Whether every output draws the body: a text frame or an equation this version reads (never
+    /// a bookmark, which only the editor shows).
     pub fn is_drawn(&self) -> bool {
-        !matches!(self, ObjectBody::Unknown { .. })
+        matches!(self, ObjectBody::Text(_) | ObjectBody::Equation(_))
     }
 }
 
@@ -322,6 +392,35 @@ impl PageObject {
         object
     }
 
+    /// A bookmark with its top-left corner at `(x, y)`, its box measured. The label is kept as given:
+    /// callers clean it with [`clean_bookmark_label`].
+    pub fn bookmark(
+        id: impl Into<String>,
+        layer: u32,
+        t: u32,
+        x: f32,
+        y: f32,
+        label: impl Into<String>,
+    ) -> Self {
+        let mut object = PageObject {
+            id: id.into(),
+            layer,
+            t,
+            x,
+            y,
+            scale: 1.0,
+            quarter_turns: 0,
+            width: 0.0,
+            height: 0.0,
+            body: ObjectBody::Bookmark(BookmarkBody {
+                label: label.into(),
+            }),
+            extra: Map::new(),
+        };
+        object.measure();
+        object
+    }
+
     /// The text of a text frame.
     pub fn as_text(&self) -> Option<&TextBody> {
         match &self.body {
@@ -336,6 +435,20 @@ impl PageObject {
             ObjectBody::Equation(body) => Some(body),
             _ => None,
         }
+    }
+
+    /// The label of a bookmark.
+    pub fn as_bookmark(&self) -> Option<&BookmarkBody> {
+        match &self.body {
+            ObjectBody::Bookmark(body) => Some(body),
+            _ => None,
+        }
+    }
+
+    /// Whether the object is a bookmark: a kind only the editor shows, which the clocks of the replay
+    /// and of the writing do not count.
+    pub fn is_bookmark(&self) -> bool {
+        matches!(self.body, ObjectBody::Bookmark(_))
     }
 
     /// Sets `width` and `height` from the content, for the kinds this version can measure (the
@@ -354,6 +467,7 @@ impl PageObject {
                 self.width = right.max(0.0);
                 self.height = bottom.max(0.0);
             }
+            ObjectBody::Bookmark(body) => (self.width, self.height) = body.content_box(),
             ObjectBody::Unknown { .. } => {}
         }
     }
@@ -489,6 +603,9 @@ impl Serialize for PageObject {
                 map.insert("path".into(), Value::String(body.path.clone()));
                 map.insert("color".into(), color(body.color)?);
             }
+            ObjectBody::Bookmark(body) => {
+                map.insert("label".into(), Value::String(body.label.clone()));
+            }
             ObjectBody::Unknown { .. } => {}
         }
         map.serialize(serializer)
@@ -564,6 +681,16 @@ fn equation_body(map: &Map<String, Value>) -> Option<EquationBody> {
     body.is_readable().then_some(body)
 }
 
+/// A bookmark's body from its keys, or `None` when this version cannot read it.
+fn bookmark_body(map: &Map<String, Value>) -> Option<BookmarkBody> {
+    Some(BookmarkBody {
+        label: match map.get("label") {
+            None => String::new(),
+            Some(value) => value.as_str()?.to_owned(),
+        },
+    })
+}
+
 impl PageObject {
     /// Reads one object. An error means its placement cannot be read (the caller then keeps the
     /// whole list verbatim, see [`deserialize_objects`]); a body that cannot be read makes an
@@ -593,24 +720,30 @@ impl PageObject {
         let width = take_f32(&mut map, "width", 0.0)?.max(0.0);
         let height = take_f32(&mut map, "height", 0.0)?.max(0.0);
         let known = match kind.as_str() {
-            TEXT_KIND => text_body(&map).map(|body| (ObjectBody::Text(body), &TEXT_KEYS[..])),
-            EQUATION_KIND => {
-                equation_body(&map).map(|body| (ObjectBody::Equation(body), &EQUATION_KEYS[..]))
-            }
+            TEXT_KIND => text_body(&map).map(|body| {
+                for key in TEXT_KEYS {
+                    map.remove(key);
+                }
+                ObjectBody::Text(body)
+            }),
+            EQUATION_KIND => equation_body(&map).map(|body| {
+                for key in EQUATION_KEYS {
+                    map.remove(key);
+                }
+                ObjectBody::Equation(body)
+            }),
+            BOOKMARK_KIND => bookmark_body(&map).map(|body| {
+                for key in BOOKMARK_KEYS {
+                    map.remove(key);
+                }
+                ObjectBody::Bookmark(body)
+            }),
             _ => None,
         };
-        let body = match known {
-            Some((body, keys)) => {
-                for key in keys {
-                    map.remove(*key);
-                }
-                body
-            }
-            None => ObjectBody::Unknown {
-                kind,
-                fields: std::mem::take(&mut map),
-            },
-        };
+        let body = known.unwrap_or_else(|| ObjectBody::Unknown {
+            kind,
+            fields: std::mem::take(&mut map),
+        });
         Ok(PageObject {
             id,
             layer,
@@ -654,6 +787,7 @@ pub fn is_known_key(kind: &str, key: &str) -> bool {
     PLACEMENT_KEYS.contains(&key)
         || (kind == TEXT_KIND && TEXT_KEYS.contains(&key))
         || (kind == EQUATION_KIND && EQUATION_KEYS.contains(&key))
+        || (kind == BOOKMARK_KIND && BOOKMARK_KEYS.contains(&key))
 }
 
 #[cfg(test)]
@@ -893,6 +1027,81 @@ mod tests {
         assert!((object.x - 1000.0).abs() < 0.01 && (object.y - 500.0).abs() < 0.01);
         object.transform(&Affine::scaling(0.5, 0.0, 0.0, 10.0, 0.0));
         assert_eq!((object.x, object.y, object.scale), (510.0, 250.0, 0.5));
+    }
+
+    #[test]
+    fn a_bookmark_round_trips_with_its_unknown_keys_and_measures_its_box() {
+        let mut object = PageObject::bookmark("m", 1, 70, 300.0, 400.0, "Théorème de Thalès");
+        object
+            .extra
+            .insert("future".into(), json!({"color": "red"}));
+        let value = serde_json::to_value(&object).unwrap();
+        assert_eq!(value["kind"], "bookmark");
+        assert_eq!(value["label"], "Théorème de Thalès");
+        assert_eq!(value["future"], json!({"color": "red"}));
+        // The box is the flag, the label and room around them: the label's own width counts.
+        let wide = object.width;
+        let narrow = PageObject::bookmark("n", 0, 0, 0.0, 0.0, "Un").width;
+        assert!(wide > narrow && narrow > 2.0 * BOOKMARK_PAD + BOOKMARK_FLAG_WIDTH);
+        assert_eq!(
+            object.height,
+            1.25 * BOOKMARK_FONT_SIZE + 2.0 * BOOKMARK_PAD
+        );
+        let back: PageObject = serde_json::from_value(value).unwrap();
+        assert_eq!(back, object);
+        assert!(object.is_bookmark() && object.as_text().is_none());
+        assert_eq!(object.as_bookmark().unwrap().label, "Théorème de Thalès");
+    }
+
+    #[test]
+    fn a_bookmark_this_version_cannot_read_is_kept_as_it_is() {
+        // A label that is not a string (a later version's structured label): kept, not drawn, not lost.
+        let value = json!({"kind": "bookmark", "id": "m", "label": {"fr": "Début"}, "x": 5});
+        let object: PageObject = serde_json::from_value(value).unwrap();
+        assert!(object.as_bookmark().is_none() && !object.is_bookmark());
+        let back = serde_json::to_value(&object).unwrap();
+        assert_eq!(back["label"], json!({"fr": "Début"}));
+        assert_eq!(back["kind"], "bookmark");
+        // Without a label: an empty one (the editor removes it).
+        let bare: PageObject = serde_json::from_value(json!({"kind": "bookmark"})).unwrap();
+        assert_eq!(bare.as_bookmark().unwrap().label, "");
+    }
+
+    #[test]
+    fn a_label_is_kept_as_one_short_line() {
+        assert_eq!(
+            clean_bookmark_label(
+                "  Chap. 3 
+	 Les  forces "
+            ),
+            "Chap. 3 Les forces"
+        );
+        assert_eq!(
+            clean_bookmark_label(
+                " 
+ "
+            ),
+            ""
+        );
+        let long = "é".repeat(MAX_BOOKMARK_LABEL + 20);
+        assert_eq!(
+            clean_bookmark_label(&long).chars().count(),
+            MAX_BOOKMARK_LABEL
+        );
+        // Cut where a space would end the label: no trailing space.
+        let spaced = format!("{} suite", "a".repeat(MAX_BOOKMARK_LABEL - 1));
+        assert_eq!(
+            clean_bookmark_label(&spaced),
+            "a".repeat(MAX_BOOKMARK_LABEL - 1)
+        );
+    }
+
+    #[test]
+    fn a_bookmark_moves_with_the_page_like_any_object() {
+        let mut object = PageObject::bookmark("m", 0, 0, 1000.0, 500.0, "Début");
+        object.transform(&Affine::quarter_cw(2000.0));
+        assert_eq!(object.quarter_turns, 1);
+        assert_eq!([object.x, object.y], [1500.0, 1000.0]);
     }
 
     #[test]

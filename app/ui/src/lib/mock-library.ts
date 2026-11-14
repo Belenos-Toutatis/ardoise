@@ -3,7 +3,7 @@
  * binders, tags, favourites, trash, `tablet_info`…), over the demo library of `mock-data.ts`.
  */
 import type { FileStamp, LibraryListing, Note, NoteSummary, Stroke, TabletInfo, TagCount, TrashEntry } from './note';
-import { typedText } from './editor/objects';
+import { bookmarkRefs, typedText } from './editor/objects';
 import {
   UNHANDLED,
   fileName,
@@ -96,6 +96,7 @@ export function summary(path: string, stored: StoredNote): NoteSummary {
     tags: [...note.tags],
     favorite: note.favorite ?? false,
     typedText: typedText(note),
+    bookmarks: bookmarkRefs(note),
     stamp: stored.stamp,
     conflict: conflictOf(name),
   };

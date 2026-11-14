@@ -2,8 +2,8 @@
  * Page objects in the editor (format 1.4, `docs/design/page-objects.md`): their place on the page, and the pure
  * operations that move them with the page or the selection, the way `ops.ts` moves strokes. The placement is the same
  * for every kind (`PageObject` in `note.ts`), so these work on kinds this version does not know too; only text frames
- * (measured by `measureText`) and equations (measured when MathJax draws them, `lib/equation.ts`) are drawn and
- * selectable.
+ * (measured by `measureText`), equations (measured when MathJax draws them, `lib/equation.ts`) and bookmarks
+ * (`measureBookmark`) are drawn and selectable.
  *
  * The rules match Rust's (`ardoise_core::objects`, `ardoise_core::ops`): a lasso or a zone takes an object when the
  * centre of its box is inside; a crop drops a visible object whose box is wholly outside; objects are drawn with their
@@ -11,9 +11,12 @@
  */
 import { EQUATION_UNITS_PER_EM } from '../equation-path';
 import {
+  isBookmarkObject,
   isDrawnObject,
   isEquationObject,
   isTextObject,
+  type BookmarkObject,
+  type BookmarkRef,
   type EquationObject,
   type FontFamily,
   type Note,
@@ -130,7 +133,8 @@ export function drawItems(note: Pick<Note, 'layers' | 'strokes' | 'objects'>, st
   for (const i of strokeOrder) add(strokesBy, key(note.strokes[i]?.layer ?? -1), i);
   objects.forEach((o, i) => {
     const k = key(o.layer);
-    if (k === -1 || note.layers[k].visible) add(objectsBy, k, i);
+    // A bookmark is not hidden with its layer (SPEC §4.4 « Signets »).
+    if (k === -1 || note.layers[k].visible || isBookmarkObject(o)) add(objectsBy, k, i);
   });
   const items: DrawItem[] = [];
   const emit = (k: number) => {
@@ -172,10 +176,13 @@ export function measureText<T extends TextObject>(object: T, engine: TextEngine)
   return laid.width === object.width && laid.height === object.height ? object : { ...object, width: laid.width, height: laid.height };
 }
 
-/** The note with every text frame measured by `engine` (the same note when none changes: a note read by Rust is). */
+/**
+ * The note with every text frame and every bookmark measured by `engine` (the same note when none changes: a note read by
+ * Rust is).
+ */
 export function measureTexts(note: Note, engine: TextEngine): Note {
   const objects = objectsOf(note);
-  const measured = objects.map((o) => (isTextObject(o) ? measureText(o, engine) : o));
+  const measured = objects.map((o) => (isTextObject(o) ? measureText(o, engine) : isBookmarkObject(o) ? measureBookmark(o, engine) : o));
   return measured.some((o, i) => o !== objects[i]) ? withObjects(note, measured) : note;
 }
 
@@ -289,6 +296,98 @@ export function newTextObject(
   );
 }
 
+// --- Bookmarks (SPEC §4.4 « Signets », format 1.6) ----------------------------------------------
+
+/**
+ * The geometry of a bookmark's content, device units: the label in Andika at `fontSize`, a flag of `flagWidth` before it,
+ * `pad` all around (`BOOKMARK_*` in `ardoise-core`'s `objects.rs`: the same numbers, so that both measure the same box).
+ * `maxLabel`: how many characters a label may have.
+ */
+export const BOOKMARK = { fontSize: 500, pad: 150, flagWidth: 300, maxLabel: 60 } as const;
+
+const BOOKMARK_STYLE: TextStyle = { font: 'andika', bold: false, size: BOOKMARK.fontSize };
+
+/**
+ * A label as a bookmark keeps it (`clean_bookmark_label` in Rust): one line (runs of white space, line breaks included,
+ * become one space), no white space at either end, at most `BOOKMARK.maxLabel` characters. Empty: the bookmark goes.
+ */
+export function cleanBookmarkLabel(label: string): string {
+  const oneLine = label.split(/\s+/).filter(Boolean).join(' ');
+  return Array.from(oneLine).slice(0, BOOKMARK.maxLabel).join('').trimEnd();
+}
+
+/** What a bookmark looks like, in its own units: its box, the flag's path, and where the label's glyphs start. */
+export interface BookmarkLook {
+  width: number;
+  height: number;
+  /** SVG path data of the flag (a ribbon with a notch), to fill with the non-zero rule. */
+  flag: string;
+  /** Where the label's origin (its top-left corner) is. */
+  textX: number;
+  textY: number;
+}
+
+/** The look of a bookmark with this label, measured as `engine` lays the label out. */
+export function bookmarkLook(label: string, engine: TextEngine): BookmarkLook {
+  const laid = engine.layout(label, BOOKMARK_STYLE);
+  const { pad, flagWidth } = BOOKMARK;
+  const line = Math.max(laid.height, laid.lineHeight);
+  const left = pad;
+  const right = pad + flagWidth;
+  const top = pad;
+  const bottom = pad + line;
+  const notch = top + line * 0.72;
+  return {
+    width: pad + flagWidth + pad + laid.width + pad,
+    height: line + 2 * pad,
+    flag: `M${left} ${top}H${right}V${bottom}L${(left + right) / 2} ${notch}L${left} ${bottom}Z`,
+    textX: pad + flagWidth + pad,
+    textY: pad,
+  };
+}
+
+/** The glyphs of a bookmark's label, SVG path data in the label's own units (to place at `textX`, `textY`). */
+export function bookmarkLabelPath(label: string, engine: TextEngine): string {
+  return engine.path(label, BOOKMARK_STYLE);
+}
+
+/** The bookmark with its box measured as `engine` lays it out. */
+export function measureBookmark<T extends BookmarkObject>(object: T, engine: TextEngine): T {
+  const { width, height } = bookmarkLook(object.label, engine);
+  return width === object.width && height === object.height ? object : { ...object, width, height };
+}
+
+/** A new bookmark with its top-left corner at (`x`, `y`), its box measured. The label is cleaned. */
+export function newBookmarkObject(
+  engine: TextEngine,
+  fields: { id: string; layer: number; t: number; x: number; y: number; label: string },
+): BookmarkObject {
+  return measureBookmark(
+    { kind: 'bookmark', scale: 1, quarterTurns: 0, width: 0, height: 0, ...fields, label: cleanBookmarkLabel(fields.label) },
+    engine,
+  );
+}
+
+/**
+ * The bookmarks of the page that say something (a blank label is not listed), in reading order: top to bottom, then left to
+ * right, by the top-left corner of their box (`Note::bookmark_objects`); every layer.
+ */
+export function bookmarkObjects(note: Pick<Note, 'objects'>): BookmarkObject[] {
+  return objectsOf(note)
+    .filter((o): o is BookmarkObject => isBookmarkObject(o) && o.label.trim() !== '')
+    .map((o) => ({ o, box: objectBounds(o) }))
+    .sort((a, b) => a.box.y - b.box.y || a.box.x - b.box.x)
+    .map(({ o }) => o);
+}
+
+/** The bookmarks as the listing gives them (`Note::bookmarks`): label trimmed, the box's centre rounded. */
+export function bookmarkRefs(note: Pick<Note, 'objects'>): BookmarkRef[] {
+  return bookmarkObjects(note).map((o) => {
+    const centre = objectCentre(o);
+    return { id: o.id, label: o.label.trim(), x: Math.round(centre.x), y: Math.round(centre.y) };
+  });
+}
+
 /** A fresh id for an object (unique for all practical purposes; Rust repairs a clash when it reads). */
 export function newObjectId(): string {
   const random = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : null;
@@ -360,10 +459,14 @@ export function insertObjectCopies(
   return { note: withObjects(note, [...objectsOf(note), ...copies]), indices: copies.map((_, i) => start + i) };
 }
 
-/** Whether an object on `layer` can be touched: its layer shows, and it is `only` when given. */
-function reachable(note: Pick<Note, 'layers'>, layer: number, only?: number): boolean {
-  if (only !== undefined && layer !== only) return false;
-  const entry = note.layers[layer];
+/**
+ * Whether `object` can be touched: its layer shows, and it is `only` when given. A bookmark always can: it is not hidden
+ * with its layer, nor tied to the chosen one (SPEC §4.4 « Signets »).
+ */
+function reachable(note: Pick<Note, 'layers'>, object: PageObject, only?: number): boolean {
+  if (isBookmarkObject(object)) return true;
+  if (only !== undefined && object.layer !== only) return false;
+  const entry = note.layers[object.layer];
   return entry ? entry.visible : only === undefined;
 }
 
@@ -372,23 +475,23 @@ export function objectDrawingOrder(note: Pick<Note, 'layers' | 'objects'>, only?
   const objects = objectsOf(note);
   const order: number[] = [];
   note.layers.forEach((layer, l) => {
-    if (!layer.visible || (only !== undefined && l !== only)) return;
     objects.forEach((o, i) => {
-      if (o.layer === l) order.push(i);
+      if (o.layer !== l) return;
+      if (isBookmarkObject(o) || (layer.visible && (only === undefined || l === only))) order.push(i);
     });
   });
-  if (only === undefined) objects.forEach((o, i) => {
-    if (!note.layers[o.layer]) order.push(i);
+  objects.forEach((o, i) => {
+    if (!note.layers[o.layer] && (only === undefined || isBookmarkObject(o))) order.push(i);
   });
   return order;
 }
 
 /**
- * Whether the editor can select and change an object: a kind it draws (text frames, equations). An object of a kind this
- * version does not know is drawn nowhere, so it is not selectable either: it only moves with the page.
+ * Whether the editor can select and change an object: a kind it draws (text frames, equations, bookmarks). An object of a
+ * kind this version does not know is drawn nowhere, so it is not selectable either: it only moves with the page.
  */
 export function selectable(object: PageObject): boolean {
-  return isDrawnObject(object);
+  return isDrawnObject(object) || isBookmarkObject(object);
 }
 
 /** The objects a lasso `polygon` takes: selectable ones of visible layers (of `only` alone when given) whose centre is inside. */
@@ -396,7 +499,7 @@ export function objectsInLasso(note: Pick<Note, 'layers' | 'objects'>, polygon: 
   if (polygon.length < 3) return [];
   const picked: number[] = [];
   objectsOf(note).forEach((o, i) => {
-    if (selectable(o) && reachable(note, o.layer, only) && pointInPolygon(objectCentre(o), polygon)) picked.push(i);
+    if (selectable(o) && reachable(note, o, only) && pointInPolygon(objectCentre(o), polygon)) picked.push(i);
   });
   return picked;
 }
@@ -421,7 +524,7 @@ export function objectsBounds(note: Pick<Note, 'layers' | 'objects'>, indices: I
       if (o) bounds = union(bounds, objectBounds(o));
     }
   } else {
-    for (const o of objects) if (note.layers[o.layer]?.visible !== false) bounds = union(bounds, objectBounds(o));
+    for (const o of objects) if (note.layers[o.layer]?.visible !== false || isBookmarkObject(o)) bounds = union(bounds, objectBounds(o));
   }
   return bounds;
 }
@@ -471,6 +574,16 @@ export function remapObjectLayers(objects: readonly PageObject[], map: (layer: n
     const layer = map(o.layer);
     return layer === o.layer ? o : { ...o, layer };
   });
+}
+
+/** The topmost bookmark whose box, grown by `margin`, holds `p` (a tap with the bookmark tool; layers do not matter). */
+export function bookmarkAt(note: Pick<Note, 'layers' | 'objects'>, p: Vec, margin: number): number | null {
+  const order = objectDrawingOrder(note);
+  for (let k = order.length - 1; k >= 0; k--) {
+    const object = objectsOf(note)[order[k]];
+    if (isBookmarkObject(object) && containsPoint(inflate(objectBounds(object), margin), p)) return order[k];
+  }
+  return null;
 }
 
 /** Whether a point of the page lies within any object's box grown by `margin` (for a tap with the text tool). */

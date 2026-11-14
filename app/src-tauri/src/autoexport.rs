@@ -17,8 +17,8 @@ use ardoise_core::library::{Library, SavedNote};
 use ardoise_core::note::Note;
 use ardoise_core::settings::{AutoExport, AutoExportFormat};
 use ardoise_render::{
-    LayerMode, NoteView, PdfOptions, PdfPage, RenderError, RenderOptions, encode_png_at,
-    notes_to_pdf, render_note,
+    LayerMode, NoteView, PdfOptions, PdfPage, RenderError, RenderOptions, bookmark_outline,
+    encode_png_at, notes_to_pdf_with_outline, render_note,
 };
 
 /// Resolution of the automatic PNG exports: sharp on a phone, about 1 MB per page.
@@ -111,7 +111,9 @@ pub fn export_bytes<'a>(
                 background: true,
                 layers: LayerMode::Merged,
             };
-            let bytes = notes_to_pdf(&[note], &options)?;
+            // The note's bookmarks make the PDF's outline, as in the export of one note.
+            let outline = bookmark_outline(note.note, 0, 0);
+            let bytes = notes_to_pdf_with_outline(&[note], &options, &outline)?;
             Ok(Some(ExportedBytes { bytes, dpi: None }))
         }
         AutoExportFormat::Png => png_bytes(note).map(Some),

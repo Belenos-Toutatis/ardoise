@@ -90,7 +90,7 @@ export interface Note {
   favorite?: boolean;
   layers: Layer[];
   strokes: Stroke[];
-  /** What the page holds besides its strokes (format 1.4): text frames, equations (1.5). Absent means none. */
+  /** What the page holds besides its strokes (format 1.4): text frames, equations (1.5), bookmarks (1.6). Absent means none. */
   objects?: PageObject[];
   timing: 'recorded' | 'synthesized';
   origin: Origin;
@@ -225,6 +225,33 @@ export function isDrawnObject(object: PageObject): object is TextObject | Equati
   return isTextObject(object) || isEquationObject(object);
 }
 
+/**
+ * A bookmark (format 1.6, SPEC §4.4 « Signets »): a word or a short phrase at a spot of the page, one line, with a flag.
+ * Shown in the editor only (never in the exports, the replay, the projection or the share), listed in the binder's summary
+ * and found by the library's search. Its content (the flag and the label, in Andika) is laid out by `lib/editor/objects.ts`
+ * (`bookmarkBox`), the same way as Rust's `BookmarkBody::content_box`; the box is stored in `width` and `height`.
+ */
+export interface BookmarkObject extends PageObject {
+  kind: 'bookmark';
+  label: string;
+}
+
+/** A bookmark this version can read and show. */
+export function isBookmarkObject(object: PageObject): object is BookmarkObject {
+  return object.kind === 'bookmark' && typeof object.label === 'string';
+}
+
+/**
+ * A bookmark as the library's listing gives it (`BookmarkRef` in `ardoise-core`): its id, its label and the centre of its
+ * box on the page, device units.
+ */
+export interface BookmarkRef {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+}
+
 /** Modification time and size of a note file, as last seen; passed back when saving. */
 export interface FileStamp {
   modified: { secs_since_epoch: number; nanos_since_epoch: number };
@@ -248,6 +275,8 @@ export interface NoteSummary {
    * empty without any (formats 1.4, 1.5).
    */
   typedText?: string;
+  /** Its bookmarks, in reading order, every layer (format 1.6); absent or empty without any. */
+  bookmarks?: BookmarkRef[];
   stamp: FileStamp;
   /** Set when the file is a Nextcloud conflict copy of `originalName`. */
   conflict: { originalName: string } | null;

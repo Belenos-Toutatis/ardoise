@@ -30,8 +30,8 @@ use serde_json::json;
 use crate::error::{ToolError, ToolResult, content_result, json_result};
 use crate::host::Host;
 use crate::notes::{
-    NoteSummary, PageMm, RectMm, binder_text, equation_json, find_note, hex, iso, mm,
-    other_objects_json, parse_date, read_note, relative_path, text_frame_json, version_of,
+    NoteSummary, PageMm, RectMm, binder_text, bookmarks_json, equation_json, find_note, hex, iso,
+    mm, other_objects_json, parse_date, read_note, relative_path, text_frame_json, version_of,
 };
 use crate::server::ArdoiseServer;
 use crate::strokes::{DEFAULT_MAX_POINTS, MAX_POINTS, StrokeInfo, polylines};
@@ -247,7 +247,7 @@ impl ArdoiseServer {
         self.blocking(list_tags).await
     }
 
-    /// Search the notes like the app does: titles, tags, binders, the text typed in the page's text frames and the recognised handwriting, accents and case ignored (a match in typed text says `typed_text` in `matched_in`). Each result says where it matched and shows a snippet of the text. Notes whose handwriting has not been read yet are not searched by text; the result counts them (`get_note_text` reads one).
+    /// Search the notes like the app does: titles, tags, binders, the text typed in the page's text frames, the page's bookmarks (`bookmarks` in `matched_in`) and the recognised handwriting, accents and case ignored (a match in typed text says `typed_text` in `matched_in`). Each result says where it matched and shows a snippet of the text. Notes whose handwriting has not been read yet are not searched by text; the result counts them (`get_note_text` reads one).
     #[tool(
         name = "search_notes",
         annotations(
@@ -265,7 +265,7 @@ impl ArdoiseServer {
         self.blocking(move |host| search_notes(host, args)).await
     }
 
-    /// Read a note's data: metadata, `version` (changes whenever the note's file changes), page, layers, `revision` (only on a retouched copy: whose copy it is and its account of changes), paper and template (`background.ruling` gives the first rule's distance from the top and the distance between two rules, in mm, for the templates with horizontal rules to write on), background image, duration, the page's text frames (`text_frames`: text typed on the keyboard, exact, with `font`, `bold`, `size_mm`, `color` and `bounds_mm` on the page, in reading order), its equations (`equations`: the LaTeX source typed, exact, chemistry in `\ce{…}`, with `size_mm`, `color` and `bounds_mm`; `render_note` shows how they look; `other_objects` says when the page holds objects of a kind this version does not know, which `render_note` does not show) and, on request, its strokes (a summary of each, or simplified polylines in millimetres). Use `render_note` to see it and `get_note_text` to read its handwriting.
+    /// Read a note's data: metadata, `version` (changes whenever the note's file changes), page, layers, `revision` (only on a retouched copy: whose copy it is and its account of changes), paper and template (`background.ruling` gives the first rule's distance from the top and the distance between two rules, in mm, for the templates with horizontal rules to write on), background image, duration, the page's text frames (`text_frames`: text typed on the keyboard, exact, with `font`, `bold`, `size_mm`, `color` and `bounds_mm` on the page, in reading order), its equations (`equations`: the LaTeX source typed, exact, chemistry in `\ce{…}`, with `size_mm`, `color` and `bounds_mm`; `render_note` shows how they look), its bookmarks (`bookmarks`: words the user put at spots of the page, with `at_mm`, shown in the editor only and not by `render_note`; `other_objects` says when the page holds objects of a kind this version does not know, which `render_note` does not show) and, on request, its strokes (a summary of each, or simplified polylines in millimetres). Use `render_note` to see it and `get_note_text` to read its handwriting.
     #[tool(
         name = "get_note",
         annotations(
@@ -562,6 +562,17 @@ pub fn search_notes(host: &Host, args: SearchNotesArgs) -> ToolResult {
         let binder = fold(&binder_text(&note.binder));
         // The text frames the listing already holds (`note.json`): typed, so exact.
         let typed = fold(&note.typed_text);
+        let bookmarks = fold(
+            &note
+                .bookmarks
+                .iter()
+                .map(|b| b.label.as_str())
+                .collect::<Vec<_>>()
+                .join(
+                    "
+",
+                ),
+        );
         let hit = hits.get(&note.path);
         let mut places: Vec<&str> = Vec::new();
         let mut all = true;
@@ -572,6 +583,7 @@ pub fn search_notes(host: &Host, args: SearchNotesArgs) -> ToolResult {
                 ("tags", &tags),
                 ("binder", &binder),
                 ("typed_text", &typed),
+                ("bookmarks", &bookmarks),
             ] {
                 if haystack.contains(word.as_str()) {
                     seen = true;
@@ -711,6 +723,8 @@ pub fn get_note(host: &Host, args: GetNoteArgs) -> ToolResult {
             .into_iter()
             .map(|(object, body)| equation_json(note, object, body))
             .collect::<Vec<_>>(),
+        // The bookmarks the user put on the page (words at spots, shown in the editor only).
+        "bookmarks": bookmarks_json(note),
     });
     if let Some(others) = other_objects_json(note) {
         result["other_objects"] = others;

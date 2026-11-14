@@ -1114,7 +1114,67 @@ fn fixture_objects_1_5() -> NoteFile {
     NoteFile::new(note)
 }
 
-fn fixtures() -> [(&'static str, NoteFile, FormatVersion); 7] {
+/// Format 1.6: bookmarks. Two on the first layer (one with a key of a later version), one on a
+/// hidden layer, one whose label is not a string (a later version's), and an object of a kind this
+/// version does not know, between a text frame and the bookmarks; all kept.
+fn fixture_bookmarks_1_6() -> NoteFile {
+    let mut note = blank_note("00000000-0000-4000-8000-000000000007", "Signets");
+    note.layers.push(Layer {
+        name: "Calque 2".to_owned(),
+        visible: false,
+    });
+    let frame = PageObject::text(
+        "00000000-0000-4000-8000-0000000000b1",
+        0,
+        500,
+        1000.0,
+        2000.0,
+        TextBody {
+            text: "Chapitre 3".to_owned(),
+            font: FontFamily::Andika,
+            bold: false,
+            size: 600.0,
+            color: Rgba::BLACK,
+        },
+    );
+    let mut start = PageObject::bookmark(
+        "00000000-0000-4000-8000-0000000000b2",
+        0,
+        900,
+        8000.0,
+        3000.0,
+        "Définition de la vitesse",
+    );
+    start
+        .extra
+        .insert("later".to_owned(), json!({"colour": "green"}));
+    let mut hidden = PageObject::bookmark(
+        "00000000-0000-4000-8000-0000000000b3",
+        1,
+        1200,
+        2500.0,
+        15_000.0,
+        "Corrigé",
+    );
+    hidden.scale = 2.0;
+    hidden.quarter_turns = 3;
+    let sticker = PageObject::from_value(json!({
+        "kind": "sticker", "id": "00000000-0000-4000-8000-0000000000b4", "layer": 0,
+        "t": 1300, "x": 500.0, "y": 600.0, "scale": 1.0, "quarterTurns": 0,
+        "width": 800.0, "height": 800.0, "emoji": "star"
+    }))
+    .unwrap();
+    let structured = PageObject::from_value(json!({
+        "kind": "bookmark", "id": "00000000-0000-4000-8000-0000000000b5", "layer": 0,
+        "t": 1400, "x": 4000.0, "y": 600.0, "scale": 1.0, "quarterTurns": 0,
+        "width": 3000.0, "height": 925.0, "label": {"fr": "Plus tard"}
+    }))
+    .unwrap();
+    note.objects = vec![frame, sticker, start, hidden, structured];
+    NoteFile::new(note)
+}
+
+fn fixtures() -> [(&'static str, NoteFile, FormatVersion); 8] {
     [
         (
             "minimal.ardoise",
@@ -1150,6 +1210,11 @@ fn fixtures() -> [(&'static str, NoteFile, FormatVersion); 7] {
             "equations-1.5.ardoise",
             fixture_objects_1_5(),
             FormatVersion { major: 1, minor: 5 },
+        ),
+        (
+            "bookmarks-1.6.ardoise",
+            fixture_bookmarks_1_6(),
+            FormatVersion { major: 1, minor: 6 },
         ),
     ]
 }
@@ -1310,8 +1375,39 @@ fn v1_fixtures_are_read() {
     assert_eq!(rewritten, equations);
     // A reader of 1.4 sees the same objects: the kind it does not know is kept, not drawn.
     let json = note_json_value(&equations);
-    assert_eq!(json["format"]["minor"], 5);
+    assert_eq!(json["format"]["minor"], FormatVersion::CURRENT.minor);
     assert_eq!(json["objects"][3]["path"], "m0 0l500 0l0 400z");
+
+    let marked = read_note(&dir.join("bookmarks-1.6.ardoise")).unwrap();
+    let list = &marked.note.objects;
+    assert_eq!(list.len(), 5);
+    let start = list[2].as_bookmark().unwrap();
+    assert_eq!(start.label, "Définition de la vitesse");
+    assert_eq!((list[2].x, list[2].y, list[2].t), (8000.0, 3000.0, 900));
+    assert_eq!(list[2].extra["later"], json!({"colour": "green"}));
+    // A box measured as this version draws it: the flag, the label and room around them.
+    assert!(list[2].width > 3000.0 && list[2].height == 925.0);
+    assert_eq!(list[3].as_bookmark().unwrap().label, "Corrigé");
+    assert_eq!(
+        (list[3].layer, list[3].scale, list[3].quarter_turns),
+        (1, 2.0, 3)
+    );
+    assert_eq!(list[1].body.kind(), "sticker");
+    assert!(
+        list[4].as_bookmark().is_none(),
+        "a label this version cannot read"
+    );
+    assert_eq!(list[4].body.kind(), "bookmark");
+    // In reading order, whatever the layer shows (the second layer is hidden); the structured label and the sticker are not listed.
+    let labels: Vec<String> = marked
+        .note
+        .bookmarks()
+        .into_iter()
+        .map(|b| b.label)
+        .collect();
+    assert_eq!(labels, ["Définition de la vitesse", "Corrigé"]);
+    let rewritten = read_from_bytes(&to_bytes(&marked).unwrap()).unwrap();
+    assert_eq!(rewritten, marked);
 
     let future = read_note(&dir.join("future-minor.ardoise")).unwrap();
     assert_eq!(future.unknown_fields["stickers"][0]["kind"], "star");
@@ -1890,7 +1986,7 @@ fn an_equation_is_written_with_its_source_and_drawing_and_read_back() {
     note.objects.push(equation("e1", "M0 0L400.5 0L400.5 60Z"));
     let file = NoteFile::new(note);
     let value = note_json_value(&file);
-    assert_eq!(value["format"]["minor"], 5);
+    assert_eq!(value["format"]["minor"], FormatVersion::CURRENT.minor);
     let object = &value["objects"][0];
     assert_eq!(object["kind"], "equation");
     assert_eq!(object["latex"], r"\frac{1}{2}");

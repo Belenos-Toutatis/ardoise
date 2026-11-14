@@ -123,7 +123,7 @@ describe('the three tools', () => {
   it('are in the toolbar next to the pen, with a drawn icon and a name, in French and in English', async () => {
     const fr = await render();
     const labels = [...fr.target.querySelectorAll<HTMLButtonElement>('.toolbar [aria-label="Outil"] .tool')].map((b) => b.title);
-    expect(labels).toEqual(['Sélection', 'Stylo', 'Ligne', 'Rectangle', 'Ellipse', 'Texte', 'Équation', 'Gomme', 'Déplacer la page']);
+    expect(labels).toEqual(['Sélection', 'Stylo', 'Ligne', 'Rectangle', 'Ellipse', 'Texte', 'Équation', 'Signet', 'Gomme', 'Déplacer la page']);
     for (const name of ['Ligne', 'Rectangle', 'Ellipse']) {
       const button = fr.tool(name);
       expect(button.querySelector('svg')).not.toBeNull();
@@ -142,6 +142,7 @@ describe('the three tools', () => {
       'Ellipse',
       'Text',
       'Equation',
+      'Bookmark',
       'Eraser',
       'Move the page',
     ]);

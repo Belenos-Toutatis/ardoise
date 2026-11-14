@@ -173,7 +173,7 @@ describe('the text tool', () => {
     expect(await v.key('Escape', {}, v.field()!)).toBe(false);
     expect(v.field()).toBeNull();
     expect(v.frames()).toHaveLength(1);
-    expect(v.count()).toBe('Traits sélectionnés : 0 — textes et équations : 1');
+    expect(v.count()).toBe('Traits sélectionnés : 0 — textes, équations et signets : 1');
     // The next Escape deselects, as for strokes.
     await v.key('Escape');
     expect(v.count()).toBeNull();
@@ -317,7 +317,7 @@ describe('the text tool', () => {
     v.tool('Sélection').click();
     await tick();
     await v.key('a', { ctrlKey: true });
-    expect(v.count()).toBe('Traits sélectionnés : 1 — textes et équations : 1');
+    expect(v.count()).toBe('Traits sélectionnés : 1 — textes, équations et signets : 1');
     const before = (await v.saved())[0];
     // Move the selection by its frame.
     await v.drag(6100, 9000, 7100, 10_000);

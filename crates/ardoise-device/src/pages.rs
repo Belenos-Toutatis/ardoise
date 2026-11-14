@@ -708,7 +708,8 @@ fn unedited_since_import(file: &NoteFile, layer_name: &str) -> Result<BoardPosit
         || file.text.is_some()
         || file.revision.is_some()
         || file.original_note.is_some()
-        || !file.note.objects.is_empty()
+        // A bookmark is a mark on the page, not ink: the update keeps it where it is.
+        || file.note.objects.iter().any(|object| !object.is_bookmark())
         // Page objects this version cannot read, kept as they were written.
         || file.unknown_fields.contains_key(OBJECTS_FIELD)
     {
@@ -739,7 +740,6 @@ fn unedited_since_import(file: &NoteFile, layer_name: &str) -> Result<BoardPosit
         && note.background_image == again.background_image
         && note.layers == again.layers
         && note.strokes == again.strokes
-        && note.objects == again.objects
         && note.timing == again.timing
         && note.origin == again.origin;
     if same {
@@ -1971,6 +1971,36 @@ mod update_tests {
             }
         );
         assert_eq!(library.list().notes.len(), 1);
+    }
+
+    /// A bookmark is a mark on the page, not ink: a note that got one since its import is still updated
+    /// (the page grows), and keeps the bookmark.
+    #[test]
+    fn a_bookmark_does_not_stop_the_update_of_a_blackboard_note() {
+        let (_dir, library) = library();
+        let first = store(&library, page(FIRST, screen(5), None));
+        let loaded = library.read(&first.path).unwrap();
+        let mut file = loaded.file;
+        file.note
+            .objects
+            .push(ardoise_core::note::PageObject::bookmark(
+                "m", 0, 0, 500.0, 600.0, "Début",
+            ));
+        library.save(&first.path, &file, &loaded.stamp).unwrap();
+        let mut whole = screen(5);
+        whole.extend(screen(8));
+        let second = store(&library, page(SECOND, whole, Some(FIRST as u32)));
+        assert_eq!(
+            second.how,
+            Stored::Updated {
+                replaced: FIRST as u32
+            }
+        );
+        assert_eq!(library.list().notes.len(), 1);
+        let after = library.read(&first.path).unwrap().file;
+        assert_eq!(after.note.bookmarks().len(), 1);
+        assert_eq!(after.note.bookmarks()[0].label, "Début");
+        assert!(after.note.strokes.len() > 1);
     }
 
     /// The guards: an edited note, a note in the trash or none, a page that does not hold the

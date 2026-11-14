@@ -56,7 +56,7 @@
     "tabletNone": "Aucune tablette enregistrée",
     "tabletState": "Ouvrir ou fermer le panneau de la tablette",
     "search": "Rechercher une note",
-    "searchPlaceholder": "Rechercher (titre, étiquette, écriture)…",
+    "searchPlaceholder": "Rechercher (titre, étiquette, signet, écriture)…",
     "sort": "Trier les notes",
     "sortOptions": {
       "date-desc": "Date : la plus récente d'abord",
@@ -114,6 +114,22 @@
       "assemble": "Assembler…",
       "duplicate": "Dupliquer",
       "assembleNeeds": "Sélectionnez au moins deux notes pour les assembler."
+    },
+    "summary": {
+      "button": "Sommaire",
+      "hint": "Sommaire du classeur : ses signets, note par note, dans l'ordre du classeur",
+      "title": "Sommaire du classeur « {name} »",
+      "intro": {
+        "one": "1 signet dans ce classeur. Choisissez-le pour ouvrir la note à cet endroit.",
+        "other": "{count} signets dans ce classeur, dans l'ordre du classeur. Choisissez-en un pour ouvrir la note à cet endroit."
+      },
+      "empty": "Ce classeur n'a aucun signet. Dans l'éditeur, l'outil Signet pose un mot ou une courte phrase à un endroit de la page.",
+      "filter": "Filtrer les signets",
+      "filterPlaceholder": "Filtrer les signets…",
+      "list": "Signets du classeur",
+      "noMatch": "Aucun signet ne correspond à « {query} ».",
+      "open": "Ouvrir la note « {note} » au signet « {label} »",
+      "close": "Fermer"
     },
     "empty": {
       "favorites": "Aucun favori pour l'instant. Cliquez sur l'étoile d'une note pour la retrouver ici.",
@@ -281,6 +297,7 @@
     "binder": {
       "menu": "Actions sur le classeur « {name} »",
       "rename": "Renommer…",
+      "summary": "Sommaire du classeur…",
       "exportPdf": "Exporter le classeur en PDF…",
       "print": "Imprimer le classeur…",
       "emptyHint": "Ce classeur ne contient aucune note.",
@@ -969,6 +986,7 @@
       "ellipse": "Ellipse",
       "text": "Texte",
       "equation": "Équation",
+      "bookmark": "Signet",
       "eraser": "Gomme",
       "pan": "Déplacer la page"
     },
@@ -1031,6 +1049,12 @@
         "unavailable": "L'outil Équation n'a pas pu se charger : {message}"
       }
     },
+    "bookmark": {
+      "help": "Touchez la page pour poser un signet, ou un signet pour le renommer · Entrée : valider · Échap : terminer",
+      "field": "Texte du signet",
+      "placeholder": "Mot ou courte phrase",
+      "gone": "Ce signet n'existe plus dans la note."
+    },
     "eraser": {
       "label": "Mode de la gomme",
       "whole": "Traits entiers",
@@ -1081,7 +1105,7 @@
     "selection": {
       "label": "Sélection",
       "count": "Traits sélectionnés : {count}",
-      "countMixed": "Traits sélectionnés : {strokes} — textes et équations : {texts}",
+      "countMixed": "Traits sélectionnés : {strokes} — textes, équations et signets : {texts}",
       "duplicate": "Dupliquer",
       "delete": "Supprimer",
       "clear": "Désélectionner",
@@ -1313,6 +1337,7 @@
         "eraser": "Outil Gomme",
         "text": "Outil Texte",
         "equation": "Outil Équation",
+        "bookmark": "Outil Signet",
         "pan": "Outil Déplacer la page",
         "panHold": "Déplacer la page tant que la touche est enfoncée (sauf si un bouton a le focus)",
         "straighten": "Redresser les formes de la sélection",
@@ -1322,7 +1347,7 @@
         "selectAll": "Tout sélectionner (les traits, les textes et les équations du calque choisi)",
         "clipboard": "Copier, couper, coller des traits, des textes et des équations",
         "delete": "Supprimer la sélection",
-        "escape": "Échap, par étapes : annule le geste en cours, termine la saisie d’un texte (le texte reste) ou abandonne l’équation en cours d’écriture ; sinon ferme la découpe, la relecture, le recadrage ou le réglage de « Redresser les formes » ouverts ; sinon désélectionne ; sinon enregistre la note et revient à la bibliothèque (pas pendant un enregistrement sonore)",
+        "escape": "Échap, par étapes : annule le geste en cours, termine la saisie d’un texte ou d’un signet (le texte reste) ou abandonne l’équation en cours d’écriture ; sinon ferme la découpe, la relecture, le recadrage ou le réglage de « Redresser les formes » ouverts ; sinon désélectionne ; sinon enregistre la note et revient à la bibliothèque (pas pendant un enregistrement sonore)",
         "fit": "Ajuster : la page entière",
         "fitWidth": "Largeur : la page sur toute la largeur",
         "pages": "Page précédente, page suivante (la note d'avant, celle d'après)",

@@ -17,7 +17,7 @@ use ardoise_core::library::{
     FileStamp, HeaderCache, Library, LibraryError, NoteEntry, TagCount, TrashItem,
     parse_conflict_name,
 };
-use ardoise_core::note::{A4_LANDSCAPE, Background, Layer, Note, Origin, Timing};
+use ardoise_core::note::{A4_LANDSCAPE, Background, BookmarkRef, Layer, Note, Origin, Timing};
 use serde::Serialize;
 use tauri::State;
 
@@ -97,6 +97,9 @@ pub struct NoteSummary {
     /// search; empty without any (`Note::typed_text`). `note.json` holds it: listing reads nothing
     /// more.
     pub typed_text: String,
+    /// The note's bookmarks, in reading order, for the binder's summary and the search
+    /// (`Note::bookmarks`; read from `note.json` with the rest of the listing). Empty without any.
+    pub bookmarks: Vec<BookmarkRef>,
     pub stamp: FileStamp,
     pub conflict: Option<ConflictInfo>,
 }
@@ -114,6 +117,7 @@ impl From<NoteEntry> for NoteSummary {
             tags: entry.tags,
             favorite: entry.favorite,
             typed_text: entry.typed_text,
+            bookmarks: entry.bookmarks,
             stamp: entry.stamp,
             conflict: entry.conflict.map(|c| ConflictInfo {
                 original_name: c.original_name,
@@ -152,6 +156,7 @@ pub(crate) fn summary_of(
         tags: note.tags.clone(),
         favorite: note.favorite,
         typed_text: note.typed_text(),
+        bookmarks: note.bookmarks(),
         stamp,
     }
 }
@@ -714,6 +719,48 @@ pub(crate) mod tests {
         // The summary of a note just written says the same.
         let summary = summary_of(&library, &saved.path, &note, saved.stamp);
         assert_eq!(summary.typed_text, "Première\nDeuxième\nligne");
+    }
+
+    #[test]
+    fn a_listed_note_gives_its_bookmarks_in_reading_order() {
+        use ardoise_core::note::PageObject;
+
+        let (_dir, library) = library();
+        let mut note = sample_note("Avec signets");
+        note.layers.push(ardoise_core::note::Layer {
+            name: "Cachée".into(),
+            visible: false,
+        });
+        note.objects = vec![
+            PageObject::bookmark("b", 0, 0, 4_000.0, 5_000.0, "Bilan"),
+            PageObject::bookmark("h", 1, 0, 100.0, 9_000.0, "Sur un calque caché"),
+            PageObject::bookmark("a", 0, 0, 500.0, 600.0, "Introduction"),
+        ];
+        let saved = library
+            .create(&binder_path(""), &NoteFile::new(note.clone()))
+            .unwrap();
+        write_sample(&library, "", "Sans signet");
+
+        let json = serde_json::to_value(list(&library)).unwrap();
+        let notes = json["notes"].as_array().unwrap();
+        let of = |title: &str| {
+            let note = notes.iter().find(|n| n["title"] == title).unwrap();
+            note["bookmarks"].clone()
+        };
+        let labels: Vec<String> = of("Avec signets")
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|b| b["label"].as_str().unwrap().to_owned())
+            .collect();
+        // Reading order, every layer: a bookmark is not hidden with its layer.
+        assert_eq!(labels, ["Introduction", "Bilan", "Sur un calque caché"]);
+        assert_eq!(of("Avec signets")[0]["id"], "a");
+        assert!(of("Avec signets")[0]["x"].is_i64() && of("Avec signets")[0]["y"].is_i64());
+        assert_eq!(of("Sans signet"), serde_json::json!([]));
+        // The summary of a note just written says the same.
+        let summary = summary_of(&library, &saved.path, &note, saved.stamp);
+        assert_eq!(summary.bookmarks.len(), 3);
     }
 
     #[test]

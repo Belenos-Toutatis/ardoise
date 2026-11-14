@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::format::{self, FormatError, NoteFile};
 use crate::fsutil::{CheckedWriteError, rename_no_replace, write_atomic_checked, write_atomic_new};
+use crate::note::BookmarkRef;
 
 pub use binders::BinderTrashed;
 pub use conflicts::{ConflictKind, ConflictName, parse_conflict_name};
@@ -329,6 +330,9 @@ pub struct NoteEntry {
     /// The text of the page's text frames on visible layers ([`Note::typed_text`]), for the
     /// search: `note.json` holds the frames, so listing reads nothing more. Empty without any.
     pub typed_text: String,
+    /// The page's bookmarks ([`Note::bookmarks`]), in reading order, for the binder's summary and
+    /// the search: `note.json` holds them, so listing reads nothing more. Empty without any.
+    pub bookmarks: Vec<BookmarkRef>,
     /// To pass back to [`Library::save`].
     pub stamp: FileStamp,
     /// Set when the file is a sync client's conflict copy.
@@ -906,6 +910,7 @@ fn read_entry(path: &Path, binder: PathBuf) -> Result<NoteEntry, LibraryError> {
         .to_owned();
     let note = header.note;
     let typed_text = note.typed_text();
+    let bookmarks = note.bookmarks();
     Ok(NoteEntry {
         path: path.to_path_buf(),
         binder,
@@ -918,6 +923,7 @@ fn read_entry(path: &Path, binder: PathBuf) -> Result<NoteEntry, LibraryError> {
         tags: note.tags,
         favorite: note.favorite,
         typed_text,
+        bookmarks,
         stamp,
     })
 }

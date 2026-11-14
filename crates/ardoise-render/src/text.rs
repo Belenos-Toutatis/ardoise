@@ -9,7 +9,7 @@
 //! writers ([`TextFill`]).
 //!
 //! Only kinds this version knows are drawn: an [`ObjectBody::Unknown`] (a newer kind, or an
-//! object this version cannot read) draws nothing.
+//! object this version cannot read) draws nothing, and a bookmark (the editor's only) neither.
 
 use ardoise_core::note::{ObjectBody, PageObject};
 use ardoise_ink::Rgba;
@@ -57,7 +57,8 @@ impl TextFill {
                 (body.text.clone(), Some(layout), path, body.color)
             }
             ObjectBody::Equation(body) => (body.latex.clone(), None, body.outline(), body.color),
-            ObjectBody::Unknown { .. } => return None,
+            // A bookmark is the editor's only: no output draws it.
+            ObjectBody::Bookmark(_) | ObjectBody::Unknown { .. } => return None,
         };
         let path = outline.map(|p| object.page_point(p));
         if path.is_empty() {

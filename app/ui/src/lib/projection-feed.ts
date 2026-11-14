@@ -99,7 +99,15 @@ function sameValue(a: unknown, b: unknown): boolean {
   return ka.every((k) => sameValue((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
 }
 
-/** The page as Rust shows it is still `note`'s: same note, size, paper, image, layers, pixels and page objects. */
+/** The page objects the projection can show: bookmarks are the editor's only (SPEC §4.4 « Signets »). */
+function projectedObjects(objects: Note['objects']): Note['objects'] {
+  return objects?.filter((o) => o.kind !== 'bookmark');
+}
+
+/**
+ * The page as Rust shows it is still `note`'s: same note, size, paper, image, layers, pixels and page objects (a
+ * bookmark added, renamed or moved is no change of what the projection shows).
+ */
 function sameLayout(sent: SentPage, note: Note, imageKey: string | null): boolean {
   return (
     sent.id === note.id &&
@@ -109,7 +117,7 @@ function sameLayout(sent: SentPage, note: Note, imageKey: string | null): boolea
     sameValue(sent.background, note.background) &&
     sameValue(sent.backgroundImage ?? null, note.backgroundImage ?? null) &&
     sameValue(sent.layers, note.layers) &&
-    (sent.objects === note.objects || sameValue(sent.objects ?? [], note.objects ?? []))
+    (sent.objects === note.objects || sameValue(projectedObjects(sent.objects) ?? [], projectedObjects(note.objects) ?? []))
   );
 }
 

@@ -7,7 +7,8 @@
 
 Four things, all on the library screen: duplicating a note and changing its date (§1), the free order of a binder (§2),
 exporting a binder as one PDF (§3), and printing 1, 2 or 4 notes per sheet (§4). §5 says what each of them does to the
-recognition of the tablet's pages, which is what could have gone wrong.
+recognition of the tablet's pages, which is what could have gone wrong. §6 is the summary of a binder, fed by the bookmarks of
+the pages (`page-objects.md` §7).
 
 ## 1. Duplicating a note, changing its date
 
@@ -131,9 +132,12 @@ screen**.
 level, page }`, all open, `PageMode UseOutlines`): a bookmark per note (its title, or its date when untitled), and with the
 sub-binders a bookmark per sub-binder (to its first note) that holds its notes and its own sub-binders. The interface sends it
 beside the sources (`outline` of `export_notes`: for each source the binders it is in below the exported one, and the title
-shown). The later feature of bookmarks in notes (SPEC §4.4) would add its entries to the same list. An export without the
-outline, or with one that is not one entry per note, is the PDF of before, byte for byte. A single-note PDF (the editor's
-export) is unchanged.
+shown). **The bookmarks of the notes** (SPEC §4.4 « Signets », `docs/design/page-objects.md` §7) add their entries to the same
+list, one level below their note's, in reading order (`export::outline_with_bookmarks`, `ardoise_render::bookmark_outline`): each
+goes to its page at its spot (a `/XYZ` destination a little above the bookmark, mapped through the page's placement, A4 fitting
+included). An export without the outline, or with one that is not one entry per note, is the PDF of before, byte for byte, unless
+it is one note's: **a PDF of one note** (the editor's export, the automatic export, the assistant's) takes that note's bookmarks as
+its outline, and has none (the PDF of before) when the note has no bookmark.
 
 ## 4. Printing, pages per sheet
 
@@ -170,7 +174,27 @@ Pages are recognised by `ardoise-device/src/pages.rs` (`page_note_id`, `Imported
   the update of its screen (`earlier_note` wants a note created no later than the earlier page): a new note is added, the dated one
   untouched.
 
-## 6. Journeys, and what a real drag can be driven with
+## 6. The summary of a binder (SPEC §4.3), and bookmarks in the library
+
+Where: « Sommaire du classeur… » in a binder's menu (sidebar), and a « Sommaire » button of the top bar while a binder is shown. It
+opens `SummaryDialog.svelte`, a modal: for each note of the binder **that has bookmarks**, its title (and, for a note of a
+sub-binder, where it is below the binder), then its bookmarks as buttons, in the note's reading order (top to bottom, then left to
+right). The notes are `LibraryState.binderNotes(binder, true)`: the binder's free order (or, without one, by date, oldest first, the
+rule of `inBinderOrder`) then each sub-binder's own, **whatever sort is on screen**, exactly what the PDF of the binder takes. The
+field narrows the list (every word of the query in a bookmark's label, or in the note's title: accents and case ignored,
+`filterSummary`). Tab, the arrow keys and Enter drive it; Escape closes it (the modal's own).
+
+Data: `NoteEntry.bookmarks` / `NoteSummary.bookmarks` (`BookmarkRef { id, label, x, y }`, the centre of the box in device units,
+rounded), read from `note.json` with the rest of the listing (no extra read; the header cache keeps them). Every layer, a blank
+label left out. A click calls `Home.openAtBookmark`: the summary closes, the editor opens the note with `focus = { id }`, selects
+the bookmark and shows it at the middle of the editor, at real size at least (`Canvas.centreOn`); a bookmark deleted since the
+listing was read gives a notice and the note just opens. Going back from the editor goes to the library (the summary is not
+reopened).
+
+**Search**: the library's search (`matchesSearch`) reads the labels like the typed text, the assistant's `search_notes` too
+(`matched_in: ["bookmarks"]`); `get_note` lists the bookmarks (`bookmarks`, with `at_mm`).
+
+## 7. Journeys, and what a real drag can be driven with
 
 `app/e2e/journeys-q20-library.mjs` (run by `run.mjs`) covers, on the production executable in both languages: duplicating (right click,
 selection bar, undo), changing a date, the free order by keyboard (kept after a reload, followed by the editor's page buttons), exporting a

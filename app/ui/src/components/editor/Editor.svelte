@@ -66,6 +66,12 @@
    * family, the size and bold are the tool's (`tools.text`) and those of the frame typed in or of the selected frames;
    * the colour is the tool's colour.
    *
+   * The bookmark tool (SPEC §4.4 « Signets », docs/design/page-objects.md §7) works the same way: a tap asks for a
+   * bookmark there, or for the one under it to be renamed (`startBookmark`); the label typed in its field changes the
+   * present doc without a step (`typeBookmark`), and the end of the typing (Enter, Escape, the field left, another tool)
+   * makes one undoable step, or none; an empty label removes the bookmark (`endBookmark`). `focus` opens the note at one
+   * of its bookmarks (the binder's summary): selected, and shown at the middle of the page.
+   *
    * The equation tool (SPEC §4.4 « Équation », docs/design/equations.md): a tap opens its panel (`EquationPanel`, put
    * by the canvas next to the tap, `equationEdit`) for a new equation there, or for the equation under it (a double
    * click with the selection tool too); the panel converts the LaTeX with MathJax (loaded the first time) into our own
@@ -82,13 +88,18 @@
   import { withSourceIn } from '../../lib/editor/revision';
   import { decodeClipboard, encodeClipboard } from '../../lib/editor/clipboard';
   import {
+    bookmarkLook,
     changeTexts,
+    cleanBookmarkLabel,
+    measureBookmark,
     measureText,
     measureTexts,
+    newBookmarkObject,
     newEquationObject,
     newObjectId,
     newTextObject,
     objectBounds,
+    objectCentre,
     objectsOf,
     redrawnEquation,
   } from '../../lib/editor/objects';
@@ -176,6 +187,7 @@
   import { tablet } from '../../lib/tablet-state.svelte';
   import { loadInk, type Ink, type Tool } from '../../lib/ink';
   import {
+    isBookmarkObject,
     isEquationObject,
     isTextObject,
     type EquationObject,
@@ -227,6 +239,7 @@
     onchange,
     pages,
     onpage,
+    focus = null,
     windowClose = defaultWindowClose(),
   }: {
     path: string;
@@ -253,6 +266,12 @@
      * the editor's again.
      */
     onpage?: (path: string) => void;
+    /**
+     * Open the note at one of its bookmarks (the binder's summary): the bookmark `id`, found by its id in the note as it is
+     * now (a bookmark deleted since the listing: the note just opens, with a notice). Used for the note `path` it came with,
+     * at its first opening.
+     */
+    focus?: { id: string } | null;
     /** How a window close is held back while there are unsaved changes (tests replace it). */
     windowClose?: WindowClose;
   } = $props();
@@ -409,6 +428,14 @@
   /** The text frame being typed: its index, the doc before the typing began, where the caret starts, and its number. */
   let textEdit = $state.raw<{ index: number; base: Doc; caret: number | null; session: number } | null>(null);
   let textSessions = 0;
+  /**
+   * The bookmark being typed: its index, the doc before the typing began, and its number. Its keys are the field's (the
+   * shortcuts ignore them).
+   */
+  let bookmarkEdit = $state.raw<{ index: number; base: Doc; session: number } | null>(null);
+  let bookmarkSessions = 0;
+  /** The bookmark to show when the note named opens (`focus`): once. */
+  let pendingFocus: { path: string; id: string } | null = untrack(() => (focus ? { path, id: focus.id } : null));
   /** The text frames the tool's family, size and bold apply to: the one typed in, else the selected ones. */
   const textTargets = $derived.by((): number[] => {
     if (!doc) return [];
@@ -802,10 +829,16 @@
       // A frame being typed, an equation being written, belong to the doc that goes.
       textEdit = null;
       equationEdit = null;
+      bookmarkEdit = null;
       history = createHistory(start);
       savedNote = start.note;
       stamp = opened.stamp;
       revision = opened.revision ?? null;
+      if (pendingFocus?.path === target) {
+        const wanted = pendingFocus.id;
+        pendingFocus = null;
+        void showBookmark(wanted);
+      }
       // M17: the note says its narration when it opens (Rust before M17 did not: it is read then).
       if (opened.narration !== undefined) narration = opened.narration;
       else void loadNarration();
@@ -1414,6 +1447,7 @@
   function setMode(mode: Mode) {
     if (mode !== 'text') endText();
     if (mode !== 'equation') cancelEquation();
+    if (mode !== 'bookmark') endBookmark();
     tools = { ...tools, mode };
   }
 
@@ -1427,6 +1461,7 @@
   function startEquation(request: { kind: 'new'; at: Vec } | { kind: 'edit'; index: number; at: Vec }) {
     if (!doc || !history || replaying || split) return;
     endText();
+    endBookmark();
     if (tools.mode !== 'equation') tools = { ...tools, mode: 'equation' };
     if (equationEdit && equationEdit.id === null) {
       equationEdit = { ...equationEdit, at: request.at };
@@ -1595,6 +1630,90 @@
     }
   }
 
+  // --- Bookmarks (the bookmark tool) ---------------------------------------------------------
+
+  /** A tap of the bookmark tool: typing in the label of the bookmark under it, or in a new one put there. */
+  function startBookmark(request: { kind: 'new'; at: { x: number; y: number } } | { kind: 'edit'; index: number }) {
+    if (!doc || !history || !ink || replaying || split) return;
+    // The bookmark asked for, by its id: ending the typing of another one may remove that one (left empty) and move indices.
+    const wanted = request.kind === 'edit' ? objectsOf(history.present.note)[request.index]?.id : undefined;
+    endText();
+    endBookmark();
+    cancelEquation();
+    const current = history.present;
+    bookmarkSessions += 1;
+    if (request.kind === 'edit') {
+      const index = objectsOf(current.note).findIndex((o) => o.id === wanted);
+      if (index < 0 || !isBookmarkObject(objectsOf(current.note)[index])) return;
+      history = replacePresent(history, selectItems(current, [], [index]));
+      bookmarkEdit = { index, base: current, session: bookmarkSessions };
+      return;
+    }
+    // The tap is the middle of the bookmark's height, at its left end. A bookmark is put on the chosen layer, whatever it
+    // shows (a bookmark is not hidden with its layer).
+    const height = bookmarkLook('', ink.text).height;
+    const object = newBookmarkObject(ink.text, {
+      id: newObjectId(),
+      layer: current.activeLayer,
+      t: textTime(current.note),
+      x: request.at.x,
+      y: request.at.y - height / 2,
+      label: '',
+    });
+    const next = addObjectToDoc(current, object);
+    history = replacePresent(history, next);
+    bookmarkEdit = { index: objectsOf(next.note).length - 1, base: current, session: bookmarkSessions };
+  }
+
+  /** What the bookmark being typed says now: the present doc changes, without a step. */
+  function typeBookmark(label: string) {
+    if (!bookmarkEdit || !history || !ink) return;
+    const object = objectsOf(history.present.note)[bookmarkEdit.index];
+    if (!object || !isBookmarkObject(object) || object.label === label) return;
+    history = replacePresent(history, replaceObjectAt(history.present, bookmarkEdit.index, measureBookmark({ ...object, label }, ink.text)));
+  }
+
+  /**
+   * The end of the typing: one undoable step from the doc before it (none when nothing changed), the bookmark selected
+   * afterwards; a bookmark left without a label goes. The label is kept as `cleanBookmarkLabel` makes it.
+   */
+  function endBookmark() {
+    const edit = bookmarkEdit;
+    if (!edit || !history || !ink) return;
+    bookmarkEdit = null;
+    let present = history.present;
+    const object = objectsOf(present.note)[edit.index];
+    let kept = false;
+    if (object && isBookmarkObject(object)) {
+      const label = cleanBookmarkLabel(object.label);
+      if (label === '') present = removeObjectAt(present, edit.index);
+      else {
+        kept = true;
+        if (label !== object.label) present = replaceObjectAt(present, edit.index, measureBookmark({ ...object, label }, ink.text));
+      }
+    }
+    const before = JSON.stringify(objectsOf(edit.base.note));
+    const after = JSON.stringify(objectsOf(present.note));
+    if (before === after) {
+      history = replacePresent(history, kept ? selectItems(edit.base, [], [edit.index]) : edit.base);
+      return;
+    }
+    const selected = kept ? selectItems(present, [], [edit.index]) : present;
+    history = commit(replacePresent(history, edit.base), selected);
+  }
+
+  /** The note opens at the bookmark `id` (the binder's summary): it is selected and shown at the middle of the editor. */
+  async function showBookmark(id: string) {
+    // The note, then the canvas that shows it, are in place after two ticks.
+    await tick();
+    await tick();
+    if (!doc || !history) return;
+    const index = objectsOf(doc.note).findIndex((o) => o.id === id && isBookmarkObject(o));
+    if (index < 0) return showNotice(t('editor.bookmark.gone'));
+    history = replacePresent(history, selectItems(doc, [], [index]));
+    canvas?.centreOn(objectCentre(objectsOf(doc.note)[index]));
+  }
+
   function setTool(tool: Tool) {
     widths[tools.tool] = tools.width;
     tools = { ...tools, tool, width: widths[tool] };
@@ -1645,12 +1764,14 @@
 
   function doUndo() {
     endText();
+    endBookmark();
     cancelEquation();
     if (history && !split?.busy) history = undo(history);
   }
 
   function doRedo() {
     endText();
+    endBookmark();
     cancelEquation();
     if (history && !split?.busy) history = redo(history);
   }
@@ -1673,7 +1794,7 @@
     if (!doc) return;
     if (!canDraw(doc)) return hiddenLayerNotice();
     const engine = ink?.text;
-    const measured = engine ? objects.map((o) => (isTextObject(o) ? measureText(o, engine) : o)) : objects;
+    const measured = engine ? objects.map((o) => (isTextObject(o) ? measureText(o, engine) : isBookmarkObject(o) ? measureBookmark(o, engine) : o)) : objects;
     change(pasteStrokes(doc, strokes, pasteTime(doc.note), measured));
   }
 
@@ -1937,8 +2058,9 @@
         // The kept part has the same background image, with the same pixels.
         const pixels = result.note.backgroundImage ? present.backgroundPixels : undefined;
         const start = pixels ? { ...fresh, backgroundPixels: pixels } : fresh;
-        // A frame being typed, an equation being written, belong to the doc that goes.
+        // A frame or a bookmark being typed, an equation being written, belong to the doc that goes.
         textEdit = null;
+        bookmarkEdit = null;
         equationEdit = null;
         history = createHistory(start);
         savedNote = start.note;
@@ -2308,6 +2430,7 @@
       case 'eraser':
       case 'text':
       case 'equation':
+      case 'bookmark':
       case 'pan':
         setMode(action.kind);
         break;
@@ -2337,7 +2460,7 @@
       leaving,
       owned: modalOpen() || !!exporting || !!printing || !!video || share.panelOpen || !!revisionDialog || !!offer,
       dragging: canvas?.dragging() ?? false,
-      editingText: textEdit !== null,
+      editingText: textEdit !== null || bookmarkEdit !== null,
       editingEquation: equationEdit !== null,
       split: split !== null,
       settings: shapesPanel,
@@ -2355,7 +2478,8 @@
       case 'cancelDrag':
         return canvas?.cancelGesture();
       case 'endText':
-        return endText();
+        endText();
+        return endBookmark();
       case 'cancelEquation':
         return cancelEquation();
       case 'closeSplit':
@@ -2656,6 +2780,11 @@
         onequation={startEquation}
         equationAnchor={equationEdit && !replaying ? equationEdit.at : null}
         {equationPanel}
+        bookmarkEditing={bookmarkEdit ? { index: bookmarkEdit.index, session: bookmarkEdit.session } : null}
+        onbookmark={startBookmark}
+        onbookmarkinput={typeBookmark}
+        onbookmarkenter={endBookmark}
+        onbookmarkblur={endBookmark}
         oninprogress={(event) => {
           if (pageProjection.presentation) pageProjection.stroke(event);
         }}
