@@ -5,6 +5,7 @@ import { api } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
 import { LibraryState } from '../../lib/library-state.svelte';
 import { mockLibrary, resetMockLibrary } from '../../lib/mock-data';
+import { openPdfPreviews } from '../../lib/mock-background';
 import type { NoteSummary } from '../../lib/note';
 import AssembleDialog from './AssembleDialog.svelte';
 import NewFromFileDialog from './NewFromFileDialog.svelte';
@@ -71,6 +72,87 @@ describe('new notes from a PDF or an image', () => {
     expect(made.map((n) => n.title)).toEqual(['fiche - page 2', 'fiche - page 3']);
     const pages = made.map((n) => mockLibrary().notes.get(n.path)?.note.backgroundImage?.pdfPage);
     expect(pages).toEqual([2, 3]);
+  });
+
+  it('chooses the pages on thumbnails, in step with the field of page numbers', async () => {
+    (window as E2eWindow).__ardoiseE2eOpenPath = 'C:\Documents\fiche.pdf';
+    const oncreated = vi.fn();
+    const create = vi.spyOn(api, 'createNotesFromFile');
+    const { button } = place(NewFromFileDialog, { binder: 'Classe', onclose: vi.fn(), oncreated });
+    await vi.waitFor(() => expect(button('Créer les 3 notes').disabled).toBe(false));
+    const boxes = () => [...document.querySelectorAll<HTMLButtonElement>('.pdf-strip [role="checkbox"]')];
+    // A miniature of each page, all chosen at first (with « all pages »), drawn as they come into view.
+    expect(boxes().map((b) => b.getAttribute('aria-checked'))).toEqual(['true', 'true', 'true']);
+    await vi.waitFor(() => expect(document.querySelectorAll('.pdf-strip img').length).toBe(3));
+    expect(document.querySelector<HTMLInputElement>('input[value="all"]')!.checked).toBe(true);
+
+    // A click on a thumbnail makes it « some pages »: page 2 is out, the field says 1, 3.
+    boxes()[1].click();
+    await tick();
+    expect(document.querySelector<HTMLInputElement>('input[value="some"]')!.checked).toBe(true);
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="Pages à importer"]')!.value).toBe('1, 3');
+    expect(boxes().map((b) => b.getAttribute('aria-checked'))).toEqual(['true', 'false', 'true']);
+    expect(document.body.textContent).toContain('Notes à créer : 2');
+
+    // Typing in the field shows on the thumbnails; an invalid list leaves them as they were.
+    const list = document.querySelector<HTMLInputElement>('input[aria-label="Pages à importer"]')!;
+    list.value = '2-3';
+    list.dispatchEvent(new Event('input', { bubbles: true }));
+    await tick();
+    expect(boxes().map((b) => b.getAttribute('aria-checked'))).toEqual(['false', 'true', 'true']);
+    list.value = '9';
+    list.dispatchEvent(new Event('input', { bubbles: true }));
+    await tick();
+    expect(boxes().map((b) => b.getAttribute('aria-checked'))).toEqual(['false', 'true', 'true']);
+    expect(button('Créer la note').disabled).toBe(true);
+
+    // « None » and « All ».
+    button('Aucune').click();
+    await tick();
+    expect(boxes().map((b) => b.getAttribute('aria-checked'))).toEqual(['false', 'false', 'false']);
+    expect(document.body.textContent).toContain('Aucune page choisie');
+    expect(button('Créer la note').disabled).toBe(true);
+    // Shift + click chooses a run.
+    boxes()[0].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    boxes()[2].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true }));
+    await tick();
+    expect(list.value).toBe('1-3');
+    button('Aucune').click();
+    await tick();
+    boxes()[2].click();
+    await tick();
+    button('Créer la note').click();
+    await vi.waitFor(() => expect(oncreated).toHaveBeenCalledTimes(1));
+    expect(create).toHaveBeenCalledWith('Classe', 'C:\Documents\fiche.pdf', [3], expect.any(Function));
+  });
+
+  it('« all pages » picks every thumbnail again, and the preview is freed with the dialog and with the file', async () => {
+    (window as E2eWindow).__ardoiseE2eOpenPath = 'C:\Documents\fiche.pdf';
+    const before = openPdfPreviews();
+    const { button } = place(NewFromFileDialog, { binder: '', onclose: vi.fn(), oncreated: vi.fn() });
+    await vi.waitFor(() => expect(button('Créer les 3 notes').disabled).toBe(false));
+    await vi.waitFor(() => expect(openPdfPreviews()).toBe(before + 1));
+    const boxes = () => [...document.querySelectorAll<HTMLButtonElement>('.pdf-strip [role="checkbox"]')];
+    button('Aucune').click();
+    await tick();
+    button('Toutes').click();
+    await tick();
+    expect(boxes().map((b) => b.getAttribute('aria-checked'))).toEqual(['true', 'true', 'true']);
+    expect(document.querySelector<HTMLInputElement>('input[value="all"]')!.checked).toBe(true);
+    expect(button('Créer les 3 notes').disabled).toBe(false);
+    // Another file: the first PDF is freed and the thumbnails are those of the new one (an image has none).
+    (window as E2eWindow).__ardoiseE2eOpenPath = 'C:\Photos\tableau.jpg';
+    button('Autre fichier…').click();
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Une note sera créée avec cette image en fond.'));
+    await vi.waitFor(() => expect(openPdfPreviews()).toBe(before));
+    expect(document.querySelector('.pdf-strip')).toBeNull();
+    // The dialog going away frees what was open.
+    (window as E2eWindow).__ardoiseE2eOpenPath = 'C:\Documents\fiche.pdf';
+    button('Autre fichier…').click();
+    await vi.waitFor(() => expect(openPdfPreviews()).toBe(before + 1));
+    cleanup?.();
+    cleanup = null;
+    await vi.waitFor(() => expect(openPdfPreviews()).toBe(before));
   });
 
   it('says how many notes are made while a PDF of many pages is imported', async () => {

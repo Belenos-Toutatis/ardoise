@@ -18,6 +18,7 @@ import type {
   SplitResult,
   SplitSpec,
   Stroke,
+  SummaryPage,
 } from './note';
 import { dpiFits, isRaster } from './export-options';
 import { UNHANDLED, fileName, freshStamp, mockLibrary, normalizeTags, notifyLibraryChanged, sameStamp } from './mock-data';
@@ -79,6 +80,7 @@ export const mockExportRequest = {
     options: ExportOptions;
     destination: string;
     outline: { path: string[]; title: string }[] | undefined;
+    summary: SummaryPage | undefined;
   } | null,
 };
 
@@ -220,7 +222,7 @@ export function mockExportInvoke(command: string, args: Record<string, unknown>)
     case 'export_notes': {
       const sources = args.sources as ExportSource[];
       const format = args.format as ExportFormat;
-      if (sources.length === 0) failure('exportFailed', 'no note');
+      if (sources.length === 0) failure('nothingToExport', 'no note to export');
       const notes = sources.map(sourceNote);
       const options = args.options as ExportOptions;
       checkOptions(options, format);
@@ -230,6 +232,7 @@ export function mockExportInvoke(command: string, args: Record<string, unknown>)
         options,
         destination: args.destination as string,
         outline: args.outline as { path: string[]; title: string }[] | undefined,
+        summary: args.summary as SummaryPage | undefined,
       };
       if (isRaster(format)) {
         checkImageSize(

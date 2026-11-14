@@ -66,7 +66,7 @@ describe('mock export', () => {
 
   it('refuses options and sources the desktop app would refuse', async () => {
     const source = [{ path: pathOf('Liste de courses') }];
-    expect(await code(api.exportNotes([], 'png', OPTIONS, 'C:\\x'))).toBe('exportFailed');
+    expect(await code(api.exportNotes([], 'png', OPTIONS, 'C:\\x'))).toBe('nothingToExport');
     expect(await code(api.exportNotes(source, 'png', { ...OPTIONS, dpi: 10 }, 'C:\\x'))).toBe('exportFailed');
     expect(await code(api.exportNotes(source, 'jpg', { ...OPTIONS, quality: 0 }, 'C:\\x'))).toBe('exportFailed');
   });

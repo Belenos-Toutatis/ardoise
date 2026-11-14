@@ -71,7 +71,7 @@
     return {
       name: binder.split('/').pop() || binder,
       hasSub: lib.hasSubBinders(binder),
-      sourcesFor: (includeSub: boolean) => lib.binderSources(binder, includeSub),
+      sourcesFor: (includeSub: boolean, withDates: boolean) => lib.binderSources(binder, includeSub, withDates),
     };
   }
   /** The notes as the library shows them now (binder, tag, search, sort): the editor's page buttons walk through them. */

@@ -18,6 +18,7 @@ import {
   buildBinderTree,
   displayTitle,
   isInBinder,
+  listedTitles,
   mergeTags,
   moveByStep,
   moveToSpot,
@@ -292,13 +293,22 @@ export class LibraryState {
     return binderChain(this.tree, binder).length > 1;
   }
 
-  /** What exporting or printing `binder` takes: its notes (`binderNotes`) as sources, each with the bookmark it gets in a PDF. */
-  binderSources(binder: string, includeSub: boolean): ExportSource[] {
-    const locale = currentLocale();
-    return this.binderNotes(binder, includeSub).map((note) => ({
+  /**
+   * What exporting or printing `binder` takes: its notes (`binderNotes`) as sources, each with the bookmark it gets in a
+   * PDF. `withDates` names an untitled note by its date, else « Note sans titre » (`listedTitles`).
+   */
+  binderSources(binder: string, includeSub: boolean, withDates: boolean): ExportSource[] {
+    const notes = this.binderNotes(binder, includeSub);
+    const titles = listedTitles(notes, currentLocale(), withDates, t('editor.untitled'));
+    return notes.map((note) => ({
       path: note.path,
-      outline: { path: binderPathBelow(binder, note.binder), title: displayTitle(note, locale) },
+      outline: { path: binderPathBelow(binder, note.binder), title: titles.get(note.path) ?? '' },
     }));
+  }
+
+  /** The names the notes of the summary of `binder` go by, by path (`listedTitles` over every note of the binder and below). */
+  binderTitles(binder: string, withDates: boolean): Map<string, string> {
+    return listedTitles(this.binderNotes(binder, true), currentLocale(), withDates, t('editor.untitled'));
   }
 
   /**

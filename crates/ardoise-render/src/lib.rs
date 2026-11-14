@@ -31,6 +31,7 @@ pub mod look;
 mod noise;
 mod pdf;
 pub mod picture;
+mod summary;
 mod svg;
 mod text;
 mod vector;
@@ -46,8 +47,10 @@ pub use labels::{LABEL_HEIGHT_PX, LabelSpot, draw_labels};
 pub use look::{Blend, Fill, Grain, Look};
 pub use pdf::{
     OutlineEntry, PdfOptions, PdfPage, bookmark_outline, notes_to_pdf, notes_to_pdf_with_outline,
+    notes_to_pdf_with_summary,
 };
 pub use picture::{NoteView, Picture, PictureError, PictureFormat, StoredImage};
+pub use summary::{Summary, SummaryEntry, SummaryKind};
 pub use svg::{SvgOptions, note_to_svg};
 
 /// What the vector formats do with the layers of a note (SPEC §4.6, "Calques à l'export").

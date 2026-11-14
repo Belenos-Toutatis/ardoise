@@ -147,6 +147,29 @@ describe('the summary of a binder', () => {
     expect(view.q('[data-dialog="binder-summary"]')).toBeNull();
   });
 
+  it('names an untitled note « Note sans titre » (numbered when several), or by its date when asked, and remembers the choice', async () => {
+    addNote('Classe', '', T0, [mark('u-1', 'Un', 100, 100)]);
+    addNote('Classe', '', T0 + DAY, [mark('u-2', 'Deux', 100, 100)]);
+    addNote('Classe', 'Titrée', T0 + 2 * DAY, [mark('u-3', 'Trois', 100, 100)]);
+    const view = await render('fr', 6);
+    const dialog = await openSummary(view);
+    const box = dialog.querySelector<HTMLInputElement>('input[data-option="show-dates"]')!;
+    // Off at first: no date in the summary.
+    expect(box.checked).toBe(false);
+    expect(lines(dialog)).toEqual(['Note sans titre', '- Un', 'Note sans titre (2)', '- Deux', 'Titrée', '- Trois']);
+    expect(dialog.querySelector('.summary-item')!.getAttribute('aria-label')).toBe('Ouvrir la note « Note sans titre » au signet « Un »');
+    // With the dates: the notes are named by theirs.
+    await view.click(box);
+    const named = lines(dialog);
+    expect(named[0]).toMatch(/2026/);
+    expect(named[0]).not.toContain('Note sans titre');
+    expect(named[4]).toBe('Titrée');
+    // Remembered for the next time (and by the PDF of the binder).
+    await view.click(view.button('Fermer'));
+    const again = await openSummary(view);
+    expect(again.querySelector<HTMLInputElement>('input[data-option="show-dates"]')!.checked).toBe(true);
+  });
+
   it('has no button outside a binder', async () => {
     seedClasse();
     const view = await render();

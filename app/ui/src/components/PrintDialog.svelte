@@ -5,7 +5,9 @@
    * own, in its orientation. Here the user only chooses whether the paper is printed and how
    * the note sits on the sheet.
    */
+  import { untrack } from 'svelte';
   import { api, errorMessage } from '../lib/api';
+  import { binderContent } from '../lib/binder-options';
   import { t, tn } from '../lib/i18n.svelte';
   import type { ExportSource, PrintOptions } from '../lib/note';
   import { PRINT_PER_SHEET, loadPrintChoice, savePrintChoice } from '../lib/print-options';
@@ -20,15 +22,23 @@
   }: {
     sources: ExportSource[];
     /** « Imprimer le classeur »: the notes are a binder's, in its order; `sourcesFor` gives them with or without its sub-binders. */
-    binder?: { name: string; hasSub: boolean; sourcesFor: (includeSub: boolean) => ExportSource[] };
+    binder?: {
+      name: string;
+      hasSub: boolean;
+      sourcesFor: (includeSub: boolean, withDates: boolean) => ExportSource[];
+    };
     /** What is printed, as a sentence part: the note's title, or "3 notes". */
     subject: string;
     onclose: () => void;
   } = $props();
 
-  /** The sub-binders are printed too: off at first (SPEC: an option). */
-  let includeSub = $state(false);
-  const sources = $derived(binder ? binder.sourcesFor(includeSub) : given);
+  /** The sub-binders are printed too only when the user asks (SPEC: an option), but a binder with no note of its own starts with them. */
+  const content = untrack(() => (binder ? binderContent(binder) : null));
+  let includeSub = $state(content?.includeSubAtStart ?? false);
+  /** The page prints no date or bookmark: whether the dates name the notes does not matter here. */
+  const sources = $derived(binder ? binder.sourcesFor(includeSub, false) : given);
+  /** A binder's dialog with no note to print: the button waits, and a sentence says why. */
+  const noNote = $derived(sources.length === 0);
 
   let options = $state<PrintOptions>({ ...loadPrintChoice() });
   let phase = $state<'idle' | 'running' | 'done' | 'cancelled'>('idle');
@@ -76,7 +86,16 @@
       <p class="muted small">{t('export.includeSubBindersHint')}</p>
     {/if}
     {#if binder}
-      <p class="muted small" data-slot="binder-print-hint">{t('print.binderHint', { count: sources.length })}</p>
+      {#if content && content.total === 0}
+        <p class="muted" role="status" data-slot="binder-empty">{t('export.binderEmpty')}</p>
+      {:else if content && content.own === 0}
+        <p class="muted small" role="status" data-slot="binder-only-sub">
+          {includeSub ? t('print.binderOnlySubIncluded') : t('print.binderOnlySub')}
+        </p>
+      {/if}
+      {#if !noNote}
+        <p class="muted small" data-slot="binder-print-hint">{t('print.binderHint', { count: sources.length })}</p>
+      {/if}
     {/if}
 
     <fieldset class="export-fieldset" disabled={running}>
@@ -123,7 +142,7 @@
     {/if}
 
     <div class="actions">
-      <button type="button" class="button primary" data-autofocus data-action="print-run" disabled={running} onclick={run}>
+      <button type="button" class="button primary" data-autofocus data-action="print-run" disabled={running || noNote} onclick={run}>
         {phase === 'done' ? t('print.again') : running ? t('print.running') : t('print.run')}
       </button>
       <button type="button" class="button" disabled={running} onclick={onclose}>

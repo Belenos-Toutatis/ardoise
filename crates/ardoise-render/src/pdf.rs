@@ -17,6 +17,11 @@
 //! when there is one), all entries open. The bookmarks of a note (SPEC §4.4 « Signets ») are entries
 //! with a spot: [`bookmark_outline`].
 //!
+//! Summary: [`notes_to_pdf_with_summary`] puts the pages of a [`Summary`] (the binder's name, then each note and
+//! bookmark with its page number, [`crate::summary`]) before the notes: the pages are written like the notes'
+//! own, with a link over each row to the page (or the spot of the page) it names, and the outline starts
+//! with an entry for the summary.
+//!
 //! Text frames: each layer's frames are painted over its strokes as filled paths, the glyph
 //! outlines with their curves (quadratic curves written as the cubic curves they are), so the
 //! page stays vector and looks the same in every viewer, with no font to embed. So that the
@@ -32,12 +37,13 @@ use std::collections::HashMap;
 
 use ardoise_core::note::Note;
 use ardoise_text::{FontFamily, TextStyle, layout};
-use pdf_writer::types::{BlendMode, PageMode, TextRenderingMode};
+use pdf_writer::types::{ActionType, AnnotationType, BlendMode, PageMode, TextRenderingMode};
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str, TextStr};
 
 use crate::background::{Shape, VectorBackground};
 use crate::look::{Blend, UNITS_PER_INCH};
 use crate::picture::{DctColor, NoteView, PlacedPicture};
+use crate::summary::{self, Summary};
 use crate::svg::TEXTURE_QUALITY;
 use crate::text::TextFill;
 use crate::vector::{LayerFills, Scene};
@@ -137,26 +143,107 @@ pub fn notes_to_pdf_with_outline<'a, V>(
 where
     V: Into<NoteView<'a>> + Copy,
 {
+    notes_to_pdf_with_summary(notes, options, outline, None)
+}
+
+/// A link of a page, in the page's user space: the box, the page it goes to and the spot of it.
+struct Link {
+    rect: Rect,
+    target: usize,
+    spot: Option<[f32; 2]>,
+}
+
+/// [`notes_to_pdf_with_outline`] with the pages of a summary first, when `summary` is given with the title of
+/// its outline entry. `outline` stays the one of the notes (its pages count from the first note): the pages of
+/// the summary are put in front of it, and the entry of the summary before its entries. The summary's pages are
+/// A4 portrait with [`PdfPage::A4`], else the size of the first note.
+pub fn notes_to_pdf_with_summary<'a, V>(
+    notes: &[V],
+    options: &PdfOptions,
+    outline: &[OutlineEntry],
+    summary: Option<(&Summary, &str)>,
+) -> Result<Vec<u8>, RenderError>
+where
+    V: Into<NoteView<'a>> + Copy,
+{
     if notes.is_empty() {
         return Err(RenderError::Encode("no note to put in the PDF".into()));
     }
-    let count = i32::try_from(notes.len())
+    let views: Vec<NoteView<'a>> = notes.iter().map(|&view| view.into()).collect();
+    let front = summary.map(|(summary, _)| {
+        let size = summary::page_size(options.page == PdfPage::A4, views[0].note.page);
+        summary::lay_out(summary, size)
+    });
+    let front_count = front.as_ref().map_or(0, |front| front.notes.len());
+    let all: Vec<NoteView<'_>> = front
+        .iter()
+        .flat_map(|front| front.notes.iter())
+        .map(|note| NoteView::new(note, None))
+        .chain(views.iter().copied())
+        .collect();
+    let count = i32::try_from(all.len())
         .map_err(|_| RenderError::Encode("too many notes for one PDF".into()))?;
+    // The outline of the whole document: the summary's entry, then the notes' pushed back by its pages.
+    let mut shifted: Vec<OutlineEntry> = Vec::new();
+    if let (Some((_, title)), true) = (summary, front_count > 0) {
+        shifted.push(OutlineEntry {
+            title: title.to_owned(),
+            level: 0,
+            page: 0,
+            at: None,
+        });
+    }
+    shifted.extend(outline.iter().map(|entry| OutlineEntry {
+        page: entry.page + front_count,
+        ..entry.clone()
+    }));
+    let outline = &shifted[..];
+
     let mut pdf = Pdf::new();
     let mut next = Ref::new(1);
     let catalog = next.bump();
     let tree = next.bump();
     let info = next.bump();
-    let pages: Vec<Ref> = notes.iter().map(|_| next.bump()).collect();
-    let bookmarks = Bookmarks::of(outline, notes.len(), &mut next);
-    let places: Vec<Placement> = notes
+    let pages: Vec<Ref> = all.iter().map(|_| next.bump()).collect();
+    let bookmarks = Bookmarks::of(outline, all.len(), &mut next);
+    let places: Vec<Placement> = all
         .iter()
-        .map(|&view| {
-            let view: NoteView<'_> = view.into();
+        .map(|view| {
             let page = view.note.page;
             Placement::of(page.width as f32, page.height as f32, options.page)
         })
         .collect();
+    // The links of each summary page, in the page's user space.
+    let links: Vec<Vec<Link>> = front.as_ref().map_or_else(Vec::new, |front| {
+        front
+            .links
+            .iter()
+            .enumerate()
+            .map(|(index, page_links)| {
+                let place = places[index];
+                page_links
+                    .iter()
+                    .map(|link| {
+                        let [left, top, right, bottom] = link.rect;
+                        let x = |v: f32| round(place.left + v * place.scale);
+                        let y = |v: f32| round(place.height - (place.top + v * place.scale));
+                        let target = link.page + front_count;
+                        let spot = link.at.zip(places.get(target)).map(|([x, y], target)| {
+                            [
+                                round(target.left + x * target.scale),
+                                round(target.height - (target.top + y * target.scale)),
+                            ]
+                        });
+                        Link {
+                            rect: Rect::new(x(left), y(bottom), x(right), y(top)),
+                            target,
+                            spot,
+                        }
+                    })
+                    .collect()
+            })
+            .collect()
+    });
     let separate = options.layers == LayerMode::Separate;
     if !separate {
         let mut root = pdf.catalog(catalog);
@@ -173,14 +260,17 @@ where
     pdf.pages(tree).kids(pages.iter().copied()).count(count);
     let mut groups = Groups::default();
     let mut fonts = TextFonts::default();
-    for (&view, &page) in notes.iter().zip(&pages) {
+    for (index, (&view, &page)) in all.iter().zip(&pages).enumerate() {
         let groups = separate.then_some(&mut groups);
         let ids = Ids {
             tree,
             page,
             next: &mut next,
         };
-        write_page(&mut pdf, ids, view.into(), options, groups, &mut fonts)?;
+        let page_links = links.get(index).map_or(&[][..], Vec::as_slice);
+        write_page(
+            &mut pdf, ids, view, options, groups, &mut fonts, page_links, &pages,
+        )?;
     }
     write_fonts(&mut pdf, &fonts);
     if separate {
@@ -211,8 +301,9 @@ where
     }
     let mut document = pdf.document_info(info);
     document.producer(TextStr("Ardoise"));
-    if let [view] = notes {
-        let view: NoteView<'_> = (*view).into();
+    if let (Some((summary, _)), true) = (summary, front_count > 0) {
+        document.title(TextStr(summary.title.trim()));
+    } else if let [view] = &views[..] {
         let title = view.note.title.trim();
         if !title.is_empty() {
             document.title(TextStr(title));
@@ -796,6 +887,8 @@ fn write_page(
     options: &PdfOptions,
     mut groups: Option<&mut Groups>,
     fonts: &mut TextFonts,
+    links: &[Link],
+    pages: &[Ref],
 ) -> Result<(), RenderError> {
     let Ids {
         tree,
@@ -930,12 +1023,42 @@ fn write_page(
         None => None,
     };
 
+    // The links of a summary page: a GoTo to the page of a note, at its spot when it has one.
+    let mut annotations = Vec::with_capacity(links.len());
+    for link in links {
+        let id = next.bump();
+        let mut annotation = pdf.annotation(id);
+        annotation
+            .subtype(AnnotationType::Link)
+            .rect(link.rect)
+            .border(0.0, 0.0, 0.0, None);
+        let mut action = annotation.action();
+        action.action_type(ActionType::GoTo);
+        match link.spot {
+            Some([x, y]) => {
+                action
+                    .destination()
+                    .page(pages[link.target])
+                    .xyz(x, y, None);
+            }
+            None => {
+                action.destination().page(pages[link.target]).fit();
+            }
+        }
+        action.finish();
+        annotation.finish();
+        annotations.push(id);
+    }
+
     let mut page = pdf.page(page_id);
     page.parent(tree)
         .media_box(Rect::new(0.0, 0.0, place.width, place.height))
         .contents(content_id);
     if place.user_unit > 1.0 {
         page.user_unit(place.user_unit);
+    }
+    if !annotations.is_empty() {
+        page.annotations(annotations.iter().copied());
     }
     page.group().transparency().color_space().device_rgb();
     let mut resources = page.resources();

@@ -410,6 +410,30 @@ export function displayTitle(note: { title: string; created: number }, locale: s
   return note.title.trim() || formatDate(note.created, locale);
 }
 
+/**
+ * The names `notes` go by in a binder's summary or in the bookmarks of its PDF, by path. With `withDates` an untitled
+ * note is named by its date (`displayTitle`). Without, it is `untitled`, then `untitled (2)`, `untitled (3)`… when
+ * several of `notes` have no title (the numbers follow the order given), so that two bookmarks never read alike.
+ */
+export function listedTitles(
+  notes: readonly { path: string; title: string; created: number }[],
+  locale: string,
+  withDates: boolean,
+  untitled: string,
+): Map<string, string> {
+  const names = new Map<string, string>();
+  let blanks = 0;
+  for (const note of notes) {
+    if (note.title.trim() || withDates) {
+      names.set(note.path, displayTitle(note, locale));
+    } else {
+      blanks += 1;
+      names.set(note.path, blanks === 1 ? untitled : `${untitled} (${blanks})`);
+    }
+  }
+  return names;
+}
+
 /** The notes oldest first (by creation date, then by path), as an assembly puts them. */
 export function oldestFirst(notes: NoteSummary[]): NoteSummary[] {
   return [...notes].sort((a, b) => a.created - b.created || a.path.localeCompare(b.path));

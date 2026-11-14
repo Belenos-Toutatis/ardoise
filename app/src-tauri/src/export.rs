@@ -6,8 +6,8 @@
 //!   named like the note file, ` (2)` added rather than overwriting anything.
 //!
 //! Every file is written atomically (`ardoise_core::fsutil`). Rendering, encoding and writing
-//! failures are `exportFailed` (`imageTooLarge` when the image would exceed the size limit);
-//! reading a note of the library fails with the library's codes. The export can be cancelled
+//! failures are `exportFailed` (`imageTooLarge` when the image would exceed the size limit); no note
+//! at all to export is `nothingToExport`; reading a note of the library fails with the library's codes. The export can be cancelled
 //! (`cancel_export`): it then stops between two notes and before any write, keeping the files
 //! already written in a folder, and fails with `cancelled`.
 
@@ -21,9 +21,9 @@ use ardoise_core::library::{Library, LibraryError, note_file_stem};
 use ardoise_core::note::Note;
 use ardoise_render::{
     LayerMode, MAX_DPI, MIN_DPI, NoteView, OutlineEntry, PdfOptions, PdfPage, Picture, RenderError,
-    RenderOptions, SvgOptions, bookmark_outline, encode_jpeg_at, encode_png_at, encode_webp,
-    note_to_svg, notes_to_pdf, notes_to_pdf_with_outline, render_note, render_note_transparent,
-    scale_for_dpi,
+    RenderOptions, Summary, SummaryEntry, SummaryKind, SvgOptions, bookmark_outline,
+    encode_jpeg_at, encode_png_at, encode_webp, note_to_svg, notes_to_pdf,
+    notes_to_pdf_with_summary, render_note, render_note_transparent, scale_for_dpi,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -39,6 +39,8 @@ pub const EXPORT_FAILED: &str = "exportFailed";
 pub const IMAGE_TOO_LARGE: &str = "imageTooLarge";
 /// Error code of an export stopped by the user.
 pub const CANCELLED: &str = "cancelled";
+/// Error code of an export or a print job without any note (a binder with no note, say).
+pub const NOTHING_TO_EXPORT: &str = "nothingToExport";
 /// Highest ` (n)` tried for a free file name in a folder.
 const MAX_SUFFIX: u32 = 999;
 
@@ -144,6 +146,16 @@ pub struct OutlineSpec {
     pub title: String,
 }
 
+/// The summary page(s) put before the notes of a binder's PDF (`summary` of `export_notes`, SPEC §4.6): the text
+/// the interface gives, which the rows do not hold: the page's title (the binder's name) and the name of its
+/// entry in the PDF's outline.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SummaryRequest {
+    pub title: String,
+    pub outline_title: String,
+}
+
 /// The outline of a PDF whose pages are the notes `specs` describe, in order: a bookmark per note,
 /// and, for a note below the exported binder, bookmarks for each binder it is in (a binder's
 /// bookmark goes to its first note, and holds those of the notes and sub-binders it contains).
@@ -159,6 +171,15 @@ pub fn outline_entries(specs: &[OutlineSpec]) -> Vec<OutlineEntry> {
 /// one level deeper than the note, in reading order, each going to its spot on the page
 /// (SPEC §4.6 « Exporter un classeur en PDF »).
 pub fn outline_with_bookmarks(specs: &[OutlineSpec], notes: &[&Note]) -> Vec<OutlineEntry> {
+    outline_with_kinds(specs, notes)
+        .into_iter()
+        .map(|(entry, _)| entry)
+        .collect()
+}
+
+/// [`outline_with_bookmarks`], each entry with what it is (a sub-binder, a note, a bookmark): the rows of the
+/// summary page are these entries.
+fn outline_with_kinds(specs: &[OutlineSpec], notes: &[&Note]) -> Vec<(OutlineEntry, SummaryKind)> {
     let mut entries = Vec::new();
     let mut open: Vec<&str> = Vec::new();
     for (page, spec) in specs.iter().enumerate() {
@@ -169,25 +190,52 @@ pub fn outline_with_bookmarks(specs: &[OutlineSpec], notes: &[&Note]) -> Vec<Out
             .count();
         open.truncate(common);
         for (level, name) in spec.path.iter().enumerate().skip(common) {
-            entries.push(OutlineEntry {
-                title: name.clone(),
-                level,
-                page,
-                at: None,
-            });
+            entries.push((
+                OutlineEntry {
+                    title: name.clone(),
+                    level,
+                    page,
+                    at: None,
+                },
+                SummaryKind::Binder,
+            ));
             open.push(name);
         }
-        entries.push(OutlineEntry {
-            title: spec.title.clone(),
-            level: spec.path.len(),
-            page,
-            at: None,
-        });
+        entries.push((
+            OutlineEntry {
+                title: spec.title.clone(),
+                level: spec.path.len(),
+                page,
+                at: None,
+            },
+            SummaryKind::Note,
+        ));
         if let Some(note) = notes.get(page) {
-            entries.extend(bookmark_outline(note, page, spec.path.len() + 1));
+            entries.extend(
+                bookmark_outline(note, page, spec.path.len() + 1)
+                    .into_iter()
+                    .map(|entry| (entry, SummaryKind::Bookmark)),
+            );
         }
     }
     entries
+}
+
+/// The summary a binder's PDF starts with: the rows are the outline's entries (`outline_with_kinds`).
+fn summary_of(request: &SummaryRequest, entries: &[(OutlineEntry, SummaryKind)]) -> Summary {
+    Summary {
+        title: request.title.clone(),
+        entries: entries
+            .iter()
+            .map(|(entry, kind)| SummaryEntry {
+                title: entry.title.clone(),
+                level: entry.level,
+                page: entry.page,
+                at: entry.at,
+                kind: *kind,
+            })
+            .collect(),
+    }
 }
 
 /// A note ready to export, with the file name (without extension) its export takes and the
@@ -208,6 +256,11 @@ impl LoadedSource {
 
 pub(crate) fn export_error(message: impl ToString) -> CommandError {
     CommandError::new(EXPORT_FAILED, message)
+}
+
+/// No note to export or to print.
+pub(crate) fn nothing_to_export() -> CommandError {
+    CommandError::new(NOTHING_TO_EXPORT, "no note to export")
 }
 
 /// A rendering or encoding failure: `imageTooLarge` when the image side would exceed the limit,
@@ -421,11 +474,12 @@ pub fn export(
     destination: &Path,
     cancel: &AtomicBool,
 ) -> CommandResult<Vec<PathBuf>> {
-    export_with_outline(sources, format, options, destination, cancel, &[])
+    export_with_outline(sources, format, options, destination, cancel, &[], None)
 }
 
 /// [`export`], a PDF carrying the outline `outline` describes (one spec per source; none, or a
-/// number that is not the sources', gives a PDF without outline). Images ignore it.
+/// number that is not the sources', gives a PDF without outline), and, with `summary`, the summary page(s) of a
+/// binder's PDF in front of the notes (only when the outline is the sources'). Images ignore both.
 pub fn export_with_outline(
     sources: &[LoadedSource],
     format: ExportFormat,
@@ -433,25 +487,39 @@ pub fn export_with_outline(
     destination: &Path,
     cancel: &AtomicBool,
     outline: &[OutlineSpec],
+    summary: Option<&SummaryRequest>,
 ) -> CommandResult<Vec<PathBuf>> {
     check_options(format, options)?;
     check_cancelled(cancel)?;
     match sources {
-        [] => Err(export_error("nothing to export")),
+        [] => Err(nothing_to_export()),
         _ if format == ExportFormat::Pdf => {
             let notes: Vec<NoteView<'_>> = sources.iter().map(LoadedSource::view).collect();
             // A binder's PDF: a bookmark per note with its own bookmarks under it. A PDF of one note
             // gets that note's bookmarks as its outline.
-            let entries = if outline.len() == sources.len() {
+            let kinds = if outline.len() == sources.len() {
                 let notes: Vec<&Note> = sources.iter().map(|source| &source.note).collect();
-                outline_with_bookmarks(outline, &notes)
+                outline_with_kinds(outline, &notes)
             } else if let [single] = sources {
                 bookmark_outline(&single.note, 0, 0)
+                    .into_iter()
+                    .map(|entry| (entry, SummaryKind::Bookmark))
+                    .collect()
             } else {
                 Vec::new()
             };
-            let pdf = notes_to_pdf_with_outline(&notes, &pdf_options(options), &entries)
-                .map_err(render_error)?;
+            // The summary page(s) go with a binder's PDF only: its rows are the outline's entries.
+            let front = summary
+                .filter(|_| outline.len() == sources.len())
+                .map(|request| (summary_of(request, &kinds), request.outline_title.as_str()));
+            let entries: Vec<OutlineEntry> = kinds.into_iter().map(|(entry, _)| entry).collect();
+            let pdf = notes_to_pdf_with_summary(
+                &notes,
+                &pdf_options(options),
+                &entries,
+                front.as_ref().map(|(summary, title)| (summary, *title)),
+            )
+            .map_err(render_error)?;
             check_cancelled(cancel)?;
             fsutil::write_atomic(destination, &pdf).map_err(write_error(destination))?;
             Ok(vec![destination.to_path_buf()])
@@ -489,7 +557,16 @@ pub fn export_sources(
     destination: &Path,
     cancel: &AtomicBool,
 ) -> CommandResult<Vec<PathBuf>> {
-    export_sources_with_outline(library, sources, format, options, destination, cancel, &[])
+    export_sources_with_outline(
+        library,
+        sources,
+        format,
+        options,
+        destination,
+        cancel,
+        &[],
+        None,
+    )
 }
 
 /// [`export_sources`] with the outline of a PDF ([`export_with_outline`]).
@@ -501,12 +578,21 @@ pub fn export_sources_with_outline(
     destination: &Path,
     cancel: &AtomicBool,
     outline: &[OutlineSpec],
+    summary: Option<&SummaryRequest>,
 ) -> CommandResult<Vec<PathBuf>> {
     // Refuse bad options before reading any note.
     check_options(format, options)?;
     check_cancelled(cancel)?;
     let loaded = load_sources(library, sources)?;
-    export_with_outline(&loaded, format, options, destination, cancel, outline)
+    export_with_outline(
+        &loaded,
+        format,
+        options,
+        destination,
+        cancel,
+        outline,
+        summary,
+    )
 }
 
 /// The library, if one of `sources` must be read from it (a note not given, or the pixels of a
@@ -544,6 +630,7 @@ pub async fn export_notes(
     options: ExportOptions,
     destination: String,
     outline: Option<Vec<OutlineSpec>>,
+    summary: Option<SummaryRequest>,
 ) -> CommandResult<Vec<String>> {
     let library = library_for(&context, &sources)?;
     let flag = Arc::clone(&cancel.0);
@@ -558,6 +645,7 @@ pub async fn export_notes(
             Path::new(&destination),
             &flag,
             &outline.unwrap_or_default(),
+            summary.as_ref(),
         )
     })
     .await
@@ -915,6 +1003,7 @@ mod tests {
                 &destination,
                 &NOT_CANCELLED,
                 outline,
+                None,
             )
             .unwrap();
             let bytes = fs::read(&destination).unwrap();
@@ -955,6 +1044,7 @@ mod tests {
             &folder,
             &NOT_CANCELLED,
             &[spec(&[], "Cours"), spec(&["3e B"], "TP")],
+            None,
         )
         .unwrap();
         assert_eq!(written.len(), 2);
@@ -1083,6 +1173,7 @@ mod tests {
                 &destination,
                 &NOT_CANCELLED,
                 outline,
+                None,
             )
             .unwrap();
             fs::read(&destination).unwrap()
@@ -1117,6 +1208,64 @@ mod tests {
         // A note without a bookmark: the PDF of before, with no outline.
         let plain = export(vec![in_memory(sample_note("Rien"))], &[]);
         assert!(pdf_outline(&plain).is_empty());
+    }
+
+    /// « Ajouter une page de sommaire au début »: the summary pages are in front of a binder's PDF, their rows are the
+    /// outline's entries (sub-binder, note, bookmark) with the page numbers counted after them, the names are the
+    /// ones given (with or without the dates, which the interface decides), and a single note or images get none.
+    #[test]
+    fn a_binders_pdf_can_start_with_a_summary_page() {
+        let specs = [spec(&[], "Cours"), spec(&["3e B"], "Note sans titre")];
+        let request = SummaryRequest {
+            title: "Classe".into(),
+            outline_title: "Sommaire".into(),
+        };
+        let out = tempfile::tempdir().unwrap();
+        let export = |summary: Option<&SummaryRequest>, specs: &[OutlineSpec]| {
+            let destination = out.path().join("sortie.pdf");
+            let sources = vec![
+                in_memory(marked("Cours", &[("Introduction", 1500.0)])),
+                in_memory(marked("TP", &[("Bilan", 800.0)])),
+            ];
+            export_sources_with_outline(
+                None,
+                sources,
+                ExportFormat::Pdf,
+                &options(150, true),
+                &destination,
+                &NOT_CANCELLED,
+                specs,
+                summary,
+            )
+            .unwrap();
+            fs::read(&destination).unwrap()
+        };
+        let with = export(Some(&request), &specs);
+        let document = lopdf::Document::load_mem(&with).unwrap();
+        // One summary page (the first note's own size, the page choice being « actual ») then the two notes.
+        assert_eq!(document.get_pages().len(), 3);
+        assert_eq!(
+            pdf_outline(&with),
+            [
+                (0, "Sommaire".to_owned(), 0, false),
+                (0, "Cours".to_owned(), 1, false),
+                (1, "Introduction".to_owned(), 1, true),
+                (0, "3e B".to_owned(), 2, false),
+                (1, "Note sans titre".to_owned(), 2, false),
+                (2, "Bilan".to_owned(), 2, true),
+            ]
+        );
+        // The rows: the binder, the notes, their bookmarks, as the outline has them; the page numbers count the
+        // summary page, so the first note is on page 2.
+        let text = document.extract_text(&[1]).unwrap();
+        for word in ["Classe", "Cours", "Introduction", "3e B", "Note sans titre", "Bilan"] {
+            assert!(text.contains(word), "{word} in {text:?}");
+        }
+        // No summary asked, or no binder's outline: the PDF of before.
+        let without = export(None, &specs);
+        assert_eq!(lopdf::Document::load_mem(&without).unwrap().get_pages().len(), 2);
+        let no_outline = export(Some(&request), &[]);
+        assert_eq!(lopdf::Document::load_mem(&no_outline).unwrap().get_pages().len(), 2);
     }
 
     /// The sample note with a second layer holding a stroke of its own, and a hidden one.
@@ -1353,7 +1502,7 @@ mod tests {
         );
         assert_eq!(
             run(ExportFormat::Pdf, &options(150, true), vec![]),
-            EXPORT_FAILED
+            NOTHING_TO_EXPORT
         );
 
         // Library errors keep their codes.
@@ -1457,6 +1606,86 @@ mod tests {
         )
         .unwrap();
         assert_eq!(written.len(), 2);
+    }
+
+    /// Exporting no note at all is its own error (`nothingToExport`, a sentence of its own in the interface), never
+    /// the « could not be written, check the space » of `exportFailed`: the report that started this was a binder
+    /// whose notes are all in a sub-binder, so that the dialog had nothing to export.
+    #[test]
+    fn an_export_of_no_note_is_nothing_to_export_not_a_write_failure() {
+        let (_dir, library) = library();
+        let out = tempfile::tempdir().unwrap();
+        for format in [ExportFormat::Pdf, ExportFormat::Png] {
+            let destination = out.path().join("nothing");
+            let error = export_sources(
+                Some(&library),
+                Vec::new(),
+                format,
+                &options(72, true),
+                &destination,
+                &NOT_CANCELLED,
+            )
+            .unwrap_err();
+            assert_eq!(error.code(), "nothingToExport", "{format:?}");
+            assert!(!destination.exists());
+        }
+    }
+
+    /// A binder with a space in its name and notes only in its sub-binder, on a real library: the listing gives those
+    /// notes the sub-binder's path (`/`-separated, as the sidebar's tree names it), the binder has none of its own,
+    /// and the PDF of the notes it does list is written.
+    #[test]
+    fn a_binder_of_sub_binder_notes_only_lists_none_of_its_own() {
+        let (_dir, library) = library();
+        write_sample(&library, "oral du dnb/2026", "Candidat 1");
+        write_sample(&library, "oral du dnb/2026", "Candidat 2");
+        write_sample(&library, "Autre", "Hors classeur");
+        let listing = crate::library::list(&library);
+        assert_eq!(listing.binders, ["Autre", "oral du dnb", "oral du dnb/2026"]);
+        let of = |binder: &str| -> Vec<&str> {
+            listing
+                .notes
+                .iter()
+                .filter(|note| note.binder == binder)
+                .map(|note| note.path.as_str())
+                .collect()
+        };
+        assert!(of("oral du dnb").is_empty(), "no note of its own");
+        let below = of("oral du dnb/2026");
+        assert_eq!(below.len(), 2);
+
+        let out = tempfile::tempdir().unwrap();
+        let destination = out.path().join("oral du dnb.pdf");
+        let sources = below
+            .iter()
+            .map(|path| ExportSource {
+                path: (*path).to_owned(),
+                note: None,
+                image_key: None,
+            })
+            .collect();
+        let outline = [
+            OutlineSpec {
+                path: vec!["2026".to_owned()],
+                title: "Candidat 1".to_owned(),
+            },
+            OutlineSpec {
+                path: vec!["2026".to_owned()],
+                title: "Candidat 2".to_owned(),
+            },
+        ];
+        export_sources_with_outline(
+            Some(&library),
+            sources,
+            ExportFormat::Pdf,
+            &options(72, true),
+            &destination,
+            &NOT_CANCELLED,
+            &outline,
+            None,
+        )
+        .unwrap();
+        assert_eq!(pdf_pages(&fs::read(&destination).unwrap()).len(), 2);
     }
 
     #[test]

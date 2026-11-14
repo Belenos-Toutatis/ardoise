@@ -8,11 +8,18 @@
    */
   import { onMount } from 'svelte';
   import { api, errorMessage } from '../../lib/api';
-  import { pageMillimetres, parsePageList, type BackgroundSource, type NotesProgress } from '../../lib/background';
+  import {
+    formatPageList,
+    pageMillimetres,
+    parsePageList,
+    type BackgroundSource,
+    type NotesProgress,
+  } from '../../lib/background';
   import { pickBackgroundFile } from '../../lib/dialogs';
   import { t, tn } from '../../lib/i18n.svelte';
   import type { NoteSummary } from '../../lib/note';
   import { beginWork } from '../../lib/work';
+  import PdfPagePicker from '../editor/PdfPagePicker.svelte';
   import Modal from '../Modal.svelte';
 
   let {
@@ -31,6 +38,8 @@
   let source = $state.raw<BackgroundSource | null>(null);
   let which = $state<'all' | 'some'>('all');
   let pageList = $state('');
+  /** The pages chosen on the thumbnails, kept in step with `pageList` (the field is the other way to choose). */
+  let pagesPicked = $state<number[]>([]);
   let running = $state(false);
   $effect(() => {
     if (running) return beginWork();
@@ -48,6 +57,8 @@
   const count = $derived(source?.pages.length ?? 0);
   const chosen = $derived(which === 'all' || !source ? null : parsePageList(pageList, count));
   const firstPage = $derived(source?.pages[0] ? pageMillimetres(source.pages[0]) : null);
+  /** The pages of the PDF, from 1: what « Toutes » picks. */
+  const everyPage = $derived(Array.from({ length: count }, (_, i) => i + 1));
   const ready = $derived(!!source && !running && (which === 'all' || source.kind === 'image' || chosen !== null));
 
   async function choose() {
@@ -65,11 +76,31 @@
       source = inspected;
       which = 'all';
       pageList = inspected.kind === 'pdf' && inspected.pages.length > 0 ? `1-${inspected.pages.length}` : '';
+      pagesPicked = Array.from({ length: inspected.kind === 'pdf' ? inspected.pages.length : 0 }, (_, i) => i + 1);
     } catch (e) {
       error = errorMessage(e);
     } finally {
       running = false;
     }
+  }
+
+  /** « Toutes » and the first choice: every page, in the field and on the thumbnails. */
+  function pickEvery() {
+    which = 'all';
+    pagesPicked = everyPage;
+    pageList = count > 0 ? `1-${count}` : '';
+  }
+
+  /** A click on the thumbnails: those pages (never « all » any more), written in the field. */
+  function pickedOnThumbnails(pages: number[]) {
+    which = 'some';
+    pageList = formatPageList(pages);
+  }
+
+  /** Typing in the field: a valid list is shown on the thumbnails (an invalid one leaves them as they were). */
+  function typedList() {
+    const pages = parsePageList(pageList, count);
+    if (pages) pagesPicked = [...pages].sort((a, b) => a - b);
   }
 
   async function create() {
@@ -127,7 +158,7 @@
           <fieldset class="export-fieldset" disabled={running}>
             <legend>{t('background.library.pages')}</legend>
             <label class="choice">
-              <input type="radio" name="new-from-file-pages" value="all" bind:group={which} />
+              <input type="radio" name="new-from-file-pages" value="all" bind:group={which} onchange={pickEvery} />
               {t('background.library.allPages', { count })}
             </label>
             <label class="choice">
@@ -141,12 +172,46 @@
                 aria-label={t('background.library.pageList')}
                 placeholder="1-3, 5"
                 bind:value={pageList}
+                oninput={typedList}
               />
               <p class="muted small export-hint" class:error={chosen === null}>
                 {chosen === null
-                  ? t('background.library.pageListInvalid', { count })
+                  ? pageList.trim() === ''
+                    ? t('background.library.noPageChosen')
+                    : t('background.library.pageListInvalid', { count })
                   : t('background.library.pageListCount', { count: chosen.length })}
               </p>
+            {/if}
+            <!-- The thumbnails of the pages: click to choose (Maj + clic for a run), as many as the PDF has, drawn as they
+                 come into view. They are shown with « all » too: a click on one makes it « some pages ». -->
+            {#if path}
+              <p class="muted small" id="new-from-file-thumbs-hint">{t('background.library.thumbnailsHint')}</p>
+              <PdfPagePicker
+                {path}
+                name={source.name}
+                pages={source.pages}
+                multiple
+                bind:picked={pagesPicked}
+                onpick={pickedOnThumbnails}
+                disabled={running}
+              />
+              <div class="actions thumbs-actions">
+                <button type="button" class="button small-button" data-action="pages-all" disabled={running} onclick={pickEvery}>
+                  {t('background.library.pagesAll')}
+                </button>
+                <button
+                  type="button"
+                  class="button small-button"
+                  data-action="pages-none"
+                  disabled={running}
+                  onclick={() => {
+                    pagesPicked = [];
+                    pickedOnThumbnails([]);
+                  }}
+                >
+                  {t('background.library.pagesNone')}
+                </button>
+              </div>
             {/if}
           </fieldset>
         {/if}

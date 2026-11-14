@@ -3,6 +3,7 @@ import {
   currentFit,
   displayedSize,
   fitRect,
+  formatPageList,
   opacityOf,
   pageMillimetres,
   parsePageList,
@@ -99,6 +100,15 @@ describe('page lists of the import', () => {
     for (const bad of ['', ' , ', '0', '9', '3-1', 'a', '1-', '1.5', '2-9']) {
       expect(parsePageList(bad, 8), bad).toBeNull();
     }
+  });
+
+  it('writes pages as a list the field reads back: sorted runs, no repeat', () => {
+    expect(formatPageList([])).toBe('');
+    expect(formatPageList([5, 1, 2, 3])).toBe('1-3, 5');
+    expect(formatPageList([2, 2, 4])).toBe('2, 4');
+    expect(formatPageList([7])).toBe('7');
+    const pages = [1, 2, 3, 6, 8, 9, 10, 40];
+    expect(parsePageList(formatPageList(pages), 50)).toEqual(pages);
   });
 
   it('shows a page size in millimetres', () => {

@@ -80,6 +80,7 @@ import type {
   ShapeSettings,
   SplitResult,
   SplitSpec,
+  SummaryPage,
   TabletInfo,
   Template,
   TrashEntry,
@@ -305,9 +306,16 @@ export const api = {
   /**
    * Exports notes. PDF: `destination` is one file holding every note, one page each. PNG, JPG,
    * SVG: a file for one note, a folder for several (one file per note, never overwriting).
-   * Returns the paths written. When every source has an `outline`, a PDF gets bookmarks (a binder's PDF).
+   * Returns the paths written. When every source has an `outline`, a PDF gets bookmarks (a binder's PDF), and with
+   * `summary` summary pages in front of the notes (their rows are those bookmarks).
    */
-  exportNotes: (sources: ExportSource[], format: ExportFormat, options: ExportOptions, destination: string) => {
+  exportNotes: (
+    sources: ExportSource[],
+    format: ExportFormat,
+    options: ExportOptions,
+    destination: string,
+    summary?: SummaryPage,
+  ) => {
     // The outline travels beside the sources, one per source (Rust: `export_notes`, `outline`).
     const outline = sources.length > 0 && sources.every((source) => source.outline) ? sources.map((source) => source.outline) : undefined;
     return call<string[]>('export_notes', {
@@ -316,6 +324,7 @@ export const api = {
       options,
       destination,
       outline,
+      summary,
     });
   },
   /**

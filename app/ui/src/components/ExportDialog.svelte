@@ -6,6 +6,7 @@
    */
   import { untrack } from 'svelte';
   import { api, errorMessage } from '../lib/api';
+  import { binderContent, loadShowDates, loadSummaryPage, saveShowDates, saveSummaryPage } from '../lib/binder-options';
   import { pickExportFile, pickExportFolder } from '../lib/dialogs';
   import {
     DPI_CHOICES,
@@ -35,15 +36,29 @@
      * « Exporter le classeur en PDF »: the notes are a binder's, in its order, and only the PDF is offered. `sourcesFor`
      * gives them again with or without the sub-binders (the checkbox, shown when `hasSub`).
      */
-    binder?: { name: string; hasSub: boolean; sourcesFor: (includeSub: boolean) => ExportSource[] };
+    binder?: {
+      name: string;
+      hasSub: boolean;
+      sourcesFor: (includeSub: boolean, withDates: boolean) => ExportSource[];
+    };
     /** What is exported, as a sentence part: the note's title, or "3 notes". */
     subject: string;
     onclose: () => void;
   } = $props();
 
-  /** The sub-binders go in the PDF of a binder: off at first (SPEC: an option). */
-  let includeSub = $state(false);
-  const sources = $derived(binder ? binder.sourcesFor(includeSub) : given);
+  /**
+   * Where the notes of the binder are: the sub-binders go in its PDF only when the user asks (SPEC: an option), except
+   * for a binder with no note of its own, whose notes are all below it: they are included from the start.
+   */
+  const content = untrack(() => (binder ? binderContent(binder) : null));
+  let includeSub = $state(content?.includeSubAtStart ?? false);
+  /** The dates name the untitled notes in the bookmarks of the PDF (else « Note sans titre »): remembered. */
+  let showDates = $state(loadShowDates());
+  /** The PDF of the binder starts with a summary page (the notes and their bookmarks, with their page numbers): remembered. */
+  let summaryPage = $state(loadSummaryPage());
+  const sources = $derived(binder ? binder.sourcesFor(includeSub, showDates) : given);
+  /** A binder's dialog with no note to export: the button waits, and a sentence says why. */
+  const noNote = $derived(sources.length === 0);
 
   /** Prefix of the element ids that tie each format to its description. */
   const uid = $props.id();
@@ -150,6 +165,7 @@
         format,
         request,
         chosen,
+        binder && summaryPage ? { title: binder.name, outlineTitle: t('export.summaryOutline') } : undefined,
       );
       // A binder's PDF keeps what the dialog remembers of the formats (it is not a choice of format).
       if (!binder) saveChoice({ format, options: { ...options }, layers: { ...layers } });
@@ -194,7 +210,38 @@
       <p class="muted small">{t('export.includeSubBindersHint')}</p>
     {/if}
     {#if binder}
-      <p class="muted small" data-slot="binder-pdf-hint">{t('export.binderPdfHint', { count: sources.length })}</p>
+      {#if content && content.total === 0}
+        <p class="muted" role="status" data-slot="binder-empty">{t('export.binderEmpty')}</p>
+      {:else if content && content.own === 0}
+        <p class="muted small" role="status" data-slot="binder-only-sub">
+          {includeSub ? t('export.binderOnlySubIncluded') : t('export.binderOnlySub')}
+        </p>
+      {/if}
+      {#if !noNote}
+        <p class="muted small" data-slot="binder-pdf-hint">{t('export.binderPdfHint', { count: sources.length })}</p>
+      {/if}
+      <label class="check" data-slot="show-dates">
+        <input
+          type="checkbox"
+          data-option="show-dates"
+          bind:checked={showDates}
+          onchange={() => saveShowDates(showDates)}
+          disabled={running}
+        />
+        {t('export.showDates')}
+      </label>
+      <p class="muted small">{t('export.showDatesHint')}</p>
+      <label class="check" data-slot="summary-page">
+        <input
+          type="checkbox"
+          data-option="summary-page"
+          bind:checked={summaryPage}
+          onchange={() => saveSummaryPage(summaryPage)}
+          disabled={running}
+        />
+        {t('export.summaryPage')}
+      </label>
+      <p class="muted small">{t('export.summaryPageHint')}</p>
     {/if}
 
     {#if !binder}
@@ -358,7 +405,7 @@
     {/if}
 
     <div class="actions">
-      <button type="button" class="button primary" data-autofocus disabled={running || (raster && nothingFits)} onclick={run}>
+      <button type="button" class="button primary" data-autofocus disabled={running || noNote || (raster && nothingFits)} onclick={run}>
         {phase === 'done' ? t('export.again') : running ? t('export.running') : t('export.run')}
       </button>
       {#if running}

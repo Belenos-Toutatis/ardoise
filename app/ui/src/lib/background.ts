@@ -171,6 +171,19 @@ export function parsePageList(text: string, count: number): number[] | null {
   return pages;
 }
 
+/** `pages` (from 1) as a page list the field takes back (`parsePageList`): runs as `1-3`, then `5`; sorted, no repeat. */
+export function formatPageList(pages: readonly number[]): string {
+  const sorted = [...new Set(pages)].sort((a, b) => a - b);
+  const parts: string[] = [];
+  for (let i = 0; i < sorted.length; ) {
+    let end = i;
+    while (end + 1 < sorted.length && sorted[end + 1] === sorted[end] + 1) end += 1;
+    parts.push(end > i ? `${sorted[i]}-${sorted[end]}` : String(sorted[i]));
+    i = end + 1;
+  }
+  return parts.join(', ');
+}
+
 /** A page's size in points as millimetres, rounded (`210 × 297`). */
 export function pageMillimetres(page: { width: number; height: number }): { width: number; height: number } {
   const mm = (pt: number) => Math.round((pt * 25.4) / 72);

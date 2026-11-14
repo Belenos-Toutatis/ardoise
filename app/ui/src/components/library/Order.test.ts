@@ -600,6 +600,52 @@ describe('exporting and printing a binder', () => {
     ]);
   });
 
+  it('starts with the sub-binders included for a binder whose notes are all in its sub-binders, and exports them', async () => {
+    // `Classe` of the demo library holds no note of its own, only « Cours de physique » in `Classe/3e B`.
+    const view = await render('fr', 3);
+    await chooseInBinderMenu(view, 'Classe', 'Exporter le classeur en PDF…');
+    const dialog = view.q('[role="dialog"]')!;
+    const include = dialog.querySelector<HTMLInputElement>('input[data-option="include-sub-binders"]')!;
+    expect(include.checked).toBe(true);
+    expect(dialog.textContent).toContain('1 au total');
+    expect(dialog.textContent).toContain("n'a pas de note à lui");
+    await view.click(view.button('Exporter…', dialog as HTMLElement));
+    await vi.waitFor(() => expect(mockExportRequest.last).not.toBeNull());
+    expect(mockExportRequest.last!.outline).toEqual([{ path: ['3e B'], title: 'Cours de physique' }]);
+    // Unchecked: nothing to export, said plainly, and the button waits.
+    await view.click(include);
+    expect(dialog.textContent).toContain('cochez « Inclure les sous-classeurs »');
+    expect(view.button('Exporter de nouveau…', dialog as HTMLElement).disabled).toBe(true);
+  });
+
+  it('prints the notes of the sub-binders from the start for such a binder', async () => {
+    const view = await render('fr', 3);
+    await chooseInBinderMenu(view, 'Classe', 'Imprimer le classeur…');
+    const dialog = view.q<HTMLElement>('[data-dialog="print"]')!;
+    expect(dialog.querySelector<HTMLInputElement>('input[data-option="include-sub-binders"]')!.checked).toBe(true);
+    expect(dialog.textContent).toContain('Notes à imprimer : 1');
+    await view.click(view.button('Imprimer…', dialog));
+    await vi.waitFor(() => expect(mockPrint.last).not.toBeNull());
+    expect(mockPrint.last!.sources).toHaveLength(1);
+  });
+
+  it('names an untitled note in the bookmarks by « Note sans titre » unless the dates are asked for', async () => {
+    addNote('Classe', '', T0);
+    addNote('Classe', '', T0 + DAY);
+    const view = await render('fr', 5);
+    await chooseInBinderMenu(view, 'Classe', 'Exporter le classeur en PDF…');
+    const dialog = view.q('[role="dialog"]')!;
+    await view.click(view.button('Exporter…', dialog as HTMLElement));
+    await vi.waitFor(() => expect(mockExportRequest.last).not.toBeNull());
+    expect(mockExportRequest.last!.outline!.map((o) => o.title)).toEqual(['Note sans titre', 'Note sans titre (2)']);
+    await view.click(dialog.querySelector('input[data-option="show-dates"]'));
+    mockExportRequest.last = null;
+    await view.click(view.button('Exporter de nouveau…', dialog as HTMLElement));
+    await vi.waitFor(() => expect(mockExportRequest.last).not.toBeNull());
+    const titles = mockExportRequest.last!.outline!.map((o) => o.title);
+    expect(titles.every((title) => /2026/.test(title))).toBe(true);
+  });
+
   it('offers no sub-binders for a binder without any, and the entries are off for an empty binder', async () => {
     const view = await render('fr', 3);
     await chooseInBinderMenu(view, 'Perso', 'Exporter le classeur en PDF…');

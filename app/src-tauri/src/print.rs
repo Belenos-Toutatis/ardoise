@@ -274,7 +274,7 @@ pub(crate) fn print_error(message: impl ToString) -> CommandError {
 }
 
 /// Opens the Windows print dialog for `sources` and prints each note on its own page.
-/// `printUnavailable` outside Windows.
+/// `nothingToExport` without any source; `printUnavailable` outside Windows.
 #[tauri::command]
 pub async fn print_notes(
     window: tauri::WebviewWindow,
@@ -282,6 +282,10 @@ pub async fn print_notes(
     sources: Vec<crate::export::ExportSource>,
     options: PrintOptions,
 ) -> CommandResult<PrintResult> {
+    // No Windows dialog for an empty job (a binder with no note): the interface says so in its own words.
+    if sources.is_empty() {
+        return Err(crate::export::nothing_to_export());
+    }
     #[cfg(windows)]
     {
         let library = crate::export::library_for(&context, &sources)?;

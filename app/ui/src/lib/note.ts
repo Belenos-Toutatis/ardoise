@@ -410,6 +410,15 @@ export interface ExportSource {
   outline?: { path: string[]; title: string };
 }
 
+/**
+ * The summary pages in front of a binder's PDF (« Ajouter une page de sommaire au début »): the title of the first
+ * (the binder's name) and the name of its entry in the PDF's outline. The rows are the notes' bookmarks (`outline`).
+ */
+export interface SummaryPage {
+  title: string;
+  outlineTitle: string;
+}
+
 /** How a printed note sits on the sheet: its real size (reduced if too large), or as large as fits. */
 export type PrintFit = 'actual' | 'fit';
 

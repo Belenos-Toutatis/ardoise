@@ -6,8 +6,9 @@
    * bookmarks that have the words typed (or to the notes whose title has them); the arrow keys walk through the bookmarks
    * as well as Tab does.
    */
-  import { currentLocale, t, tn } from '../../lib/i18n.svelte';
-  import { displayTitle, filterSummary } from '../../lib/library-logic';
+  import { loadShowDates, saveShowDates } from '../../lib/binder-options';
+  import { t, tn } from '../../lib/i18n.svelte';
+  import { filterSummary } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
   import type { BookmarkRef, NoteSummary } from '../../lib/note';
   import Modal from '../Modal.svelte';
@@ -26,11 +27,16 @@
   } = $props();
 
   let query = $state('');
+  /** The dates name the untitled notes (else « Note sans titre »): the choice of the binder's PDF too, remembered. */
+  let showDates = $state(loadShowDates());
   let list = $state<HTMLElement>();
 
   const name = $derived(binder.split('/').pop() || binder);
   const summary = $derived(lib.binderSummary(binder));
   const shown = $derived(filterSummary(summary, query));
+  const titles = $derived(lib.binderTitles(binder, showDates));
+  /** A note's name in the list: its title, or its date or « Note sans titre » (`showDates`). */
+  const titleOf = (note: NoteSummary) => titles.get(note.path) ?? note.title;
   const total = $derived(summary.reduce((sum, entry) => sum + entry.bookmarks.length, 0));
 
   /** Up and Down move from one bookmark to the next (Tab does too). */
@@ -55,6 +61,16 @@
       </div>
     {:else}
       <p class="muted small">{tn('library.summary.intro', total)}</p>
+      <label class="check" data-slot="summary-dates">
+        <input
+          type="checkbox"
+          data-option="show-dates"
+          bind:checked={showDates}
+          onchange={() => saveShowDates(showDates)}
+        />
+        {t('export.showDates')}
+      </label>
+      <p class="muted small">{t('export.showDatesHint')}</p>
       <input
         class="text-input"
         type="search"
@@ -68,7 +84,7 @@
         {#each shown as entry (entry.note.path)}
           <section class="summary-note" data-note={entry.note.path}>
             <h3 class="summary-note-title">
-              {displayTitle(entry.note, currentLocale())}
+              {titleOf(entry.note)}
               {#if entry.below.length > 0}
                 <span class="muted small summary-binder">{entry.below.join(' / ')}</span>
               {/if}
@@ -80,7 +96,7 @@
                     type="button"
                     class="summary-item"
                     data-bookmark-id={bookmark.id}
-                    aria-label={t('library.summary.open', { label: bookmark.label, note: displayTitle(entry.note, currentLocale()) })}
+                    aria-label={t('library.summary.open', { label: bookmark.label, note: titleOf(entry.note) })}
                     onclick={() => onopen(entry.note, bookmark)}
                   >
                     <span class="summary-flag" aria-hidden="true">⚑</span>

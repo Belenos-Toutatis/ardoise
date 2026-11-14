@@ -1,7 +1,7 @@
 // The summary of a binder and the search of bookmarks: what the pure functions of `library-logic.ts` decide
 // (SPEC §4.3 « Sommaire du classeur »). The dialog and the screens are in `components/library/Summary.test.ts`.
 import { describe, expect, it } from 'vitest';
-import { arrangeByBinderOrder, binderSummary, buildBinderTree, filterSummary, matchesSearch } from './library-logic';
+import { arrangeByBinderOrder, binderSummary, buildBinderTree, displayTitle, filterSummary, listedTitles, matchesSearch } from './library-logic';
 import type { BookmarkRef, NoteSummary } from './note';
 
 const STAMP = { modified: { secs_since_epoch: 1, nanos_since_epoch: 0 }, len: 1 };
@@ -30,6 +30,23 @@ const notes = [
   note('c', 'Classe', 3, ['Corrigé']),
   note('d', 'Classe/3e B', 4, ['Loi d\'Ohm'], 'Cours'),
 ];
+
+describe('the names of the notes of a summary or of a PDF outline', () => {
+  const named = (title: string, created: number, path = title) => ({ path, title, created });
+  const list = [named('Cours', 1), named('', Date.UTC(2026, 9, 1), 'u1'), named('  ', Date.UTC(2026, 9, 2), 'u2'), named('', Date.UTC(2026, 9, 3), 'u3')];
+
+  it('puts « Note sans titre » for an untitled note without the dates, numbered from the second', () => {
+    const names = listedTitles(list, 'fr', false, 'Note sans titre');
+    expect([...names.values()]).toEqual(['Cours', 'Note sans titre', 'Note sans titre (2)', 'Note sans titre (3)']);
+  });
+
+  it('puts the date of an untitled note with the dates (the title of a titled note never changes)', () => {
+    const names = listedTitles(list, 'fr', true, 'Note sans titre');
+    expect(names.get('Cours')).toBe('Cours');
+    expect(names.get('u1')).toBe(displayTitle(list[1], 'fr'));
+    expect(names.get('u1')).toMatch(/2026/);
+  });
+});
 
 describe('the summary of a binder', () => {
   it('keeps the notes that have bookmarks, in the order given, and says where each is below the binder', () => {

@@ -9,6 +9,13 @@
    * page, up and down by a row), Home and End go to the first and the last page, Enter and Space choose the page that
    * has the focus. Each page says « Page 3 » to a screen reader; the picture is decoration. A long PDF also gets a
    * number field beside the grid to go straight to a page, kept in step with it.
+   *
+   * With `multiple` (« Nouvelle note depuis un PDF »: each chosen page becomes a note) it is a group of checkboxes
+   * instead, `picked` holding the chosen pages in order: a click toggles a page, Shift + click (or Shift + Space) sets
+   * every page from the last one clicked to this one to the state of the last one clicked, Ctrl + A picks them all.
+   * The arrows only move the focus (a single tab stop, as for the radios), Space and Enter toggle the page that has it,
+   * and Shift + an arrow moves and extends the range. `onpick` hears of every change the user makes (not of those the
+   * parent makes through `picked`), with the new list.
    */
   import { tick } from 'svelte';
   import { t } from '../../lib/i18n.svelte';
@@ -19,6 +26,9 @@
     name,
     pages,
     selected = $bindable(1),
+    multiple = false,
+    picked = $bindable([]),
+    onpick,
     disabled = false,
   }: {
     /** The PDF's file. */
@@ -29,6 +39,12 @@
     pages: { width: number; height: number }[];
     /** The chosen page, from 1. */
     selected?: number;
+    /** Several pages can be chosen (`picked`) instead of one (`selected`). */
+    multiple?: boolean;
+    /** The chosen pages, from 1, in order, with `multiple`. */
+    picked?: number[];
+    /** The user changed the choice (`multiple`): the pages now chosen. */
+    onpick?: (pages: number[]) => void;
     disabled?: boolean;
   } = $props();
 
@@ -41,6 +57,10 @@
   const RATIO_MAX = 2.5;
 
   const count = $derived(pages.length);
+  const pickedSet = $derived(new Set(picked));
+  /** The page that has the tab stop and the focus with `multiple`, and the one a range starts from. */
+  let active = $state(1);
+  let anchor = $state<number | null>(null);
 
   let strip = $state<HTMLElement | null>(null);
   let thumbs = $state.raw<PdfThumbnails | null>(null);
@@ -94,14 +114,81 @@
   /** Chooses `page`, and brings it into view (and gives it the focus when `focus`). */
   function choose(page: number, focus = false) {
     selected = Math.min(Math.max(page, 1), count);
+    reveal(selected, focus);
+  }
+
+  function reveal(page: number, focus: boolean) {
     void tick().then(() => {
-      const target = cell(selected);
+      const target = cell(page);
       target?.scrollIntoView?.({ block: 'nearest' });
       if (focus) target?.focus();
     });
   }
 
+  /** `pages` chosen (any order, repeats allowed), told to the parent. */
+  function pick(pages: Iterable<number>) {
+    picked = [...new Set(pages)].sort((a, b) => a - b);
+    onpick?.(picked);
+  }
+
+  /** Every page from `from` to `to` set to `on`. */
+  function setRange(from: number, to: number, on: boolean) {
+    const next = new Set(picked);
+    for (let page = Math.min(from, to); page <= Math.max(from, to); page++) {
+      if (on) next.add(page);
+      else next.delete(page);
+    }
+    pick(next);
+  }
+
+  /** A click on `page` with `multiple`: toggles it, or with Shift sets the range from the last one clicked. */
+  function toggle(page: number, shift: boolean) {
+    active = page;
+    if (shift && anchor !== null) {
+      setRange(anchor, page, pickedSet.has(anchor));
+      return;
+    }
+    anchor = page;
+    const next = new Set(picked);
+    if (!next.delete(page)) next.add(page);
+    pick(next);
+  }
+
+  /** The grid's columns as laid out now (the arrows up and down move by a row). */
+  function columns(): number {
+    const tracks = strip ? getComputedStyle(strip).gridTemplateColumns : '';
+    const found = tracks.split(' ').filter((track) => /\d/.test(track)).length;
+    return found > 0 ? found : COLUMNS;
+  }
+
+  function keydownMany(event: KeyboardEvent) {
+    if (disabled || event.altKey || event.metaKey) return;
+    if ((event.ctrlKey && event.key.toLowerCase() === 'a')) {
+      event.preventDefault();
+      pick(Array.from({ length: count }, (_, i) => i + 1));
+      return;
+    }
+    if (event.ctrlKey) return;
+    const here = Number((document.activeElement as HTMLElement | null)?.dataset.page ?? active);
+    const moves: Record<string, number> = {
+      ArrowLeft: here - 1,
+      ArrowUp: here - columns(),
+      ArrowRight: here + 1,
+      ArrowDown: here + columns(),
+      Home: 1,
+      End: count,
+    };
+    const target = moves[event.key];
+    if (target === undefined) return;
+    event.preventDefault();
+    const next = Math.min(Math.max(target, 1), count);
+    if (event.shiftKey && anchor !== null) setRange(anchor, next, pickedSet.has(anchor));
+    active = next;
+    reveal(next, true);
+  }
+
   function keydown(event: KeyboardEvent) {
+    if (multiple) return keydownMany(event);
     if (disabled || event.altKey || event.ctrlKey || event.metaKey) return;
     const moves: Record<string, number> = {
       ArrowLeft: selected - 1,
@@ -125,7 +212,7 @@
 </script>
 
 <div class="pdf-picker" data-slot="pdf-page-picker">
-  {#if count >= JUMP_FROM}
+  {#if count >= JUMP_FROM && !multiple}
     <label class="pane-row pdf-jump">
       <span>{t('background.editor.page')}</span>
       <span class="pdf-jump-field">
@@ -148,7 +235,8 @@
   <!-- svelte-ignore a11y_interactive_supports_focus -->
   <div
     class="pdf-strip"
-    role="radiogroup"
+    class:pdf-many={multiple}
+    role={multiple ? 'group' : 'radiogroup'}
     aria-label={t('background.editor.pagesGroup', { name })}
     bind:this={strip}
     onkeydown={keydown}
@@ -157,17 +245,18 @@
       {@const page = i + 1}
       {@const url = thumbs?.urls.get(page)}
       {@const failed = thumbs?.failed.has(page) ?? false}
+      {@const on = multiple ? pickedSet.has(page) : page === selected}
       <button
         type="button"
-        role="radio"
+        role={multiple ? 'checkbox' : 'radio'}
         class="pdf-thumb"
-        class:pdf-picked={page === selected}
-        aria-checked={page === selected}
+        class:pdf-picked={on}
+        aria-checked={on}
         aria-label={t('background.editor.pageN', { page })}
-        tabindex={page === selected ? 0 : -1}
+        tabindex={(multiple ? page === active : page === selected) ? 0 : -1}
         data-page={page}
         {disabled}
-        onclick={() => choose(page)}
+        onclick={(event) => (multiple ? toggle(page, event.shiftKey) : choose(page))}
       >
         <span class="pdf-frame" class:pdf-failed={failed} style:aspect-ratio={ratioOf(size)} aria-hidden="true">
           {#if url}
@@ -176,7 +265,7 @@
             <span class="pdf-missing">{t('background.editor.noPreview')}</span>
           {/if}
         </span>
-        <span class="pdf-number" aria-hidden="true">{page}</span>
+        <span class="pdf-number" aria-hidden="true">{multiple && on ? `✓ ${page}` : page}</span>
       </button>
     {/each}
   </div>
@@ -216,6 +305,12 @@
     padding: 3px;
     overflow-y: auto;
     overscroll-behavior: contain;
+  }
+
+  /* Several pages: more columns, as many as the dialog's width holds. */
+  .pdf-strip.pdf-many {
+    grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+    max-height: min(22rem, 45vh);
   }
 
   .pdf-thumb {
