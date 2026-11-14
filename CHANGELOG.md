@@ -2,6 +2,11 @@
 
 ## Non publié
 
+### Ajouté (demande de l'utilisateur du 2026-11-14 : ouvrir le guide depuis Ardoise)
+
+- **Un bouton « Guide »** dans la barre du haut de la bibliothèque, une entrée **« Ouvrir le guide d'utilisation »** en tête de l'onglet **Aide** de l'éditeur et du mode direct, un bouton **« Ouvrir le guide « Assistant » »** dans Réglages > Assistant (il remplace la phrase qui donnait seulement le nom du fichier) et la touche **F1** (partout, y compris dans un champ de texte) ouvrent le guide dans le navigateur par défaut, dans la langue de l'interface, **hors connexion** : la page `guide.fr.html` ou `guide.en.html` (`assistant.*.html` pour le guide « Assistant ») du dossier `guide` placé à côté d'`ardoise.exe` dans l'archive.
+- **Si ce dossier ou cette page manque** (quelqu'un n'a gardé que `ardoise.exe`), le même guide s'ouvre sur GitHub, et Ardoise le dit : « Guide ouvert sur GitHub (connexion à Internet) : le dossier « guide » est absent à côté d'Ardoise. » C'est la seule fois où Ardoise va sur Internet, à la demande de l'utilisateur ; l'infobulle du bouton l'annonce. L'interface ne choisit que la page et la langue : le chemin est cherché depuis le dossier de l'exécutable (un fichier qui est en réalité ailleurs, ou un dossier, n'est pas une page) et l'adresse web est construite dans Rust. `F1` est ajoutée à l'aide des raccourcis (FR et EN). Parcours de bout en bout `guide`, qui n'ouvre aucun navigateur (`ARDOISE_OPEN_LOG`).
+
 ### Ajouté (le README et les guides illustrés)
 
 - **`README.md` mis à jour** : ce que fait Ardoise aujourd'hui (deux tablettes, mode direct et projection, bibliothèque, éditeur, relecture et vidéo, exports et impression), l'état des essais sur le matériel réel, les crédits (MathJax, Latin Modern, Andika) et la limite de l'exécutable à 40 Mo.

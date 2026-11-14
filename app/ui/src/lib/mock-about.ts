@@ -3,6 +3,7 @@
  * components and excerpts of the two texts, enough to see the screen in a plain browser.
  */
 import type { AboutComponent, AboutInfo } from './about';
+import type { GuideOpened } from './guide';
 import { UNHANDLED } from './mock-data';
 
 export const MOCK_COMPONENTS: AboutComponent[] = [
@@ -18,6 +19,13 @@ export const MOCK_COMPONENTS: AboutComponent[] = [
 const MOCK_LICENSE = 'GNU GENERAL PUBLIC LICENSE\nVersion 3, 29 June 2007\n\n(browser stand-in: the real text is the LICENSE file)';
 const MOCK_NOTICES = 'THIRD-PARTY NOTICES\n\n(browser stand-in: the real text is the THIRD-PARTY-NOTICES file)';
 
+/** The browser stand-in of `open_guide`: opens nothing; tests read what was asked and choose the answer. */
+export const mockGuide: { asked: { page: string; language: string }[]; source: GuideOpened; fail: boolean } = {
+  asked: [],
+  source: 'local',
+  fail: false,
+};
+
 export function mockAboutInvoke(command: string, args: Record<string, unknown>): unknown {
   switch (command) {
     case 'about_info':
@@ -26,6 +34,10 @@ export function mockAboutInvoke(command: string, args: Record<string, unknown>):
       if (args.which === 'license') return MOCK_LICENSE;
       if (args.which === 'notices') return MOCK_NOTICES;
       throw { code: 'unexpected', message: `no such text: ${String(args.which)}` };
+    case 'open_guide':
+      if (mockGuide.fail) throw { code: 'guideUnavailable', message: 'no handler' };
+      mockGuide.asked.push({ page: args.page as string, language: args.language as string });
+      return mockGuide.source;
     default:
       return UNHANDLED;
   }

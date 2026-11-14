@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { closeKey } from './close-keys';
+import { isGuideKey } from './guide';
 import { liveEditKeyAction, liveKeyAction, type KeyInput } from './live-keys';
 import { LIVE_KEY_CONTEXTS, LIVE_SHORTCUTS } from './live-shortcuts';
 import type { LiveKeyContext } from './shortcuts';
@@ -7,7 +8,7 @@ import { sweepShortcuts } from './shortcuts-sweep';
 
 /**
  * What the control window does with a key, in the words of the table: the touch-up keys first, as `LiveView.onkeydown`
- * does while a session runs, then Ctrl + Q (which `App.svelte` answers), then `liveKeyAction`.
+ * does while a session runs, then Ctrl + Q and F1 (which `App.svelte` answers), then `liveKeyAction`.
  */
 function liveDoes(e: KeyInput, context: LiveKeyContext): string | null {
   if (context.running) {
@@ -15,6 +16,7 @@ function liveDoes(e: KeyInput, context: LiveKeyContext): string | null {
     if (edit) return edit.kind;
   }
   if (closeKey(e) === 'quit') return 'quit';
+  if (isGuideKey(e)) return 'guide';
   const action = liveKeyAction(e);
   if (!action) return null;
   if (action.kind === 'command') return action.command;
@@ -65,6 +67,13 @@ describe('the live shortcut table, entry by entry', () => {
     ]);
     expect(liveDoes({ key: 'Escape' }, { running: true, selection: true })).toBe('deselect');
     expect(liveDoes({ key: 'Escape' }, { running: true, selection: false })).toBe('leave');
+  });
+
+  it('has F1 open the guide in every context, and Ctrl + F1 do nothing', () => {
+    for (const context of LIVE_KEY_CONTEXTS) {
+      expect(liveDoes({ key: 'F1' }, context)).toBe('guide');
+      expect(liveDoes({ key: 'F1', ctrlKey: true }, context)).toBeNull();
+    }
   });
 
   it('has Space turn the page and nothing else, selected or not', () => {

@@ -1,13 +1,13 @@
 /**
  * The editor's keyboard shortcuts as data (milestone M16; docs/design/side-panel.md, §6, "The tables"): what the help
  * tab shows, and what `sweepShortcuts` confronts with `editorKeyAction` (`lib/editor/keys.ts`) in both directions.
- * `does` is the kind of action the mapping gives (`EditorKeyKind`), or `quit` for Ctrl + Q, which `App.svelte`
- * answers. Entries in the order of the help; a key with `shown: false` is a variant the mapping takes too (Shift +
+ * `does` is the kind of action the mapping gives (`EditorKeyKind`), or `quit` for Ctrl + Q and `guide` for F1,
+ * which `App.svelte` answers. Entries in the order of the help; a key with `shown: false` is a variant the mapping takes too (Shift +
  * a letter, a layout's own key for 0 and 2…) and stays out of the help.
  *
  * The sweep that checks the table against the mapping is `shortcuts.test.ts`; the probes that check each shown
  * shortcut acts in the mounted editor are `Editor.shortcuts.test.ts`. The editor's `does` for the sweep:
- * `closeKey(e) === 'quit' ? 'quit' : editorKeyAction(e, context)?.kind ?? null`.
+ * `closeKey(e) === 'quit' ? 'quit' : isGuideKey(e) ? 'guide' : editorKeyAction(e, context)?.kind ?? null`.
  */
 import type { Chord, EditorKeyContext, Shortcut, ShortcutKey } from '../shortcuts';
 
@@ -124,6 +124,7 @@ export const EDITOR_SHORTCUTS: readonly Shortcut<EditorKeyContext>[] = [
     keys: [key({ key: 'p', ctrl: true }, 'print'), variant({ key: 'p', ctrl: true, shift: true }, 'print')],
   },
   { id: 'close', label: label('close'), keys: [key({ key: 'w', ctrl: true }, 'close'), key({ key: 'F4', ctrl: true }, 'close')] },
+  { id: 'guide', label: label('guide'), keys: [key({ key: 'F1' }, 'guide')] },
   { id: 'quit', label: label('quit'), keys: [key({ key: 'q', ctrl: true }, 'quit')] },
   {
     id: 'leaveReplay',

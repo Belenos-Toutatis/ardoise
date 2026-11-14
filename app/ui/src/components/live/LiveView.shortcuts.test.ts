@@ -266,6 +266,28 @@ const PROBES: Record<string, () => Promise<void>> = {
     send('close');
     await vi.waitFor(() => expect(dialog()).not.toBeNull());
   },
+  async guide() {
+    // F1 is the application's too (`App.svelte`, whatever is on display): it opens the user guide, here in the language of
+    // the window, the notice of a web fallback staying out of live mode's way.
+    const opened = vi.spyOn(api, 'openGuide').mockResolvedValue('local');
+    vi.spyOn(api, 'appState').mockResolvedValue(app);
+    const target = document.createElement('div');
+    document.body.append(target);
+    const component = mount(App, { target });
+    cleanup = () => {
+      unmount(component);
+      target.remove();
+    };
+    await vi.waitFor(() => expect(target.querySelector('.tablet-status')).not.toBeNull());
+    target.querySelector<HTMLElement>('.tablet-status')!.click();
+    await vi.waitFor(() => expect(target.querySelector('.tablet-panel button[data-action="live"]')).not.toBeNull());
+    target.querySelector<HTMLButtonElement>('.tablet-panel button[data-action="live"]')!.click();
+    await vi.waitFor(() => expect(target.querySelector('section.live-view[data-state="live"]')).not.toBeNull());
+    const event = send('guide');
+    expect(event.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(opened).toHaveBeenCalledWith('guide', 'fr'));
+    expect(dialog()).toBeNull();
+  },
   async quit() {
     // Ctrl + Q is the application's (`App.svelte`, whatever is on display); live mode answers with its question.
     vi.spyOn(api, 'appState').mockResolvedValue(app);

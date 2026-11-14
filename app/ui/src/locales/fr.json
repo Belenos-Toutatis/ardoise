@@ -453,7 +453,18 @@
     "copied": "Copié",
     "copyFailed": "Impossible de copier : sélectionnez le texte et copiez-le avec Ctrl+C.",
     "privacy": "Vie privée : ce que l'assistant lit (le texte et l'image de vos notes, parfois des noms d'élèves) part chez son fournisseur, selon les réglages de votre compte. En général, l'assistant demande votre accord avant de modifier quoi que ce soit, mais cela dépend de ses réglages d'autorisation ; Ardoise lui signale les outils qui modifient ou retirent des notes. Rien n'est jamais supprimé définitivement, et l'assistant n'écrit jamais l'encre de l'originale : il retouche une copie (ce qu'on lui demande d'y faire n'est pas vérifié : regardez la copie). Pour qu'il ne puisse que lire, déclarez-le avec « Lecture seule » cochée.",
-    "guide": "Pas à pas : le guide « Assistant », fichier guide\\assistant.fr.html dans le dossier d'Ardoise."
+    "guide": "Pas à pas : le guide « Assistant »."
+  },
+  "guide": {
+    "button": "Guide",
+    "label": "Guide d'utilisation",
+    "tooltip": "Ouvrir le guide d'utilisation (F1) dans votre navigateur, hors connexion. S'il manque à côté d'Ardoise (dossier « guide »), c'est le guide sur GitHub qui s'ouvre.",
+    "open": "Ouvrir le guide d'utilisation",
+    "openHint": "Dans votre navigateur, hors connexion (raccourci : F1). S'il manque à côté d'Ardoise (dossier « guide »), le guide sur GitHub s'ouvre à la place.",
+    "assistantOpen": "Ouvrir le guide « Assistant »",
+    "assistantHint": "Dans votre navigateur, hors connexion. S'il manque à côté d'Ardoise (dossier « guide »), le guide sur GitHub s'ouvre à la place.",
+    "web": "Guide ouvert sur GitHub (connexion à Internet) : le dossier « guide » est absent à côté d'Ardoise.",
+    "dismiss": "Fermer ce message"
   },
   "about": {
     "section": "À propos",
@@ -847,6 +858,7 @@
     "exportFailed": "l'export n'a pas pu être écrit ({detail}) ; choisissez un autre emplacement et vérifiez qu'il reste de la place",
     "dragUnavailable": "le glisser-déposer vers un autre logiciel n'est pas possible ({detail})",
     "clipboardUnavailable": "le presse-papiers n'est pas disponible ({detail}) ; fermez le logiciel qui l'utilise puis réessayez, ou exportez l'image en PNG",
+    "guideUnavailable": "le navigateur n'a pas pu ouvrir le guide ({detail})",
     "printFailed": "l'impression a échoué ({detail}) ; vérifiez l'imprimante puis réessayez, ou exportez la note en PDF",
     "printUnavailable": "l'impression n'est possible que sous Windows ({detail}) ; exportez la note en PDF",
     "nothingToSplit": "cette découpe ne laisserait rien d'un des deux côtés ; choisissez un instant ou une zone qui sépare la note en deux parties non vides",
@@ -1385,6 +1397,7 @@
         "print": "Imprimer la note",
         "close": "Revenir à la bibliothèque (ferme d'abord la découpe ou la relecture)",
         "quit": "Quitter Ardoise",
+        "guide": "Ouvrir le guide d'utilisation",
         "leaveReplay": "Quitter la relecture",
         "playPause": "Lecture / pause"
       }
@@ -1439,8 +1452,8 @@
       "live": "Raccourcis du mode direct",
       "replay": "Pendant une relecture",
       "presentation": "Dans la fenêtre projetée",
-      "typingEditor": "Ils n'agissent pas pendant que vous tapez dans un champ de texte, sauf Ctrl + S, Ctrl + W, Ctrl + F4 et Ctrl + Q.",
-      "typingLive": "Ils n'agissent pas pendant que vous tapez dans un champ de texte, sauf Ctrl + W, Ctrl + F4 et Ctrl + Q. Espace tourne la page même quand un bouton a le focus."
+      "typingEditor": "Ils n'agissent pas pendant que vous tapez dans un champ de texte, sauf F1, Ctrl + S, Ctrl + W, Ctrl + F4 et Ctrl + Q.",
+      "typingLive": "Ils n'agissent pas pendant que vous tapez dans un champ de texte, sauf F1, Ctrl + W, Ctrl + F4 et Ctrl + Q. Espace tourne la page même quand un bouton a le focus."
     }
   },
   "shortcuts": {
@@ -2091,6 +2104,9 @@
         },
         "quit": {
           "action": "Quitter Ardoise (après confirmation)"
+        },
+        "guide": {
+          "action": "Ouvrir le guide d'utilisation"
         },
         "marks": {
           "action": "Effacer les annotations tracées sur la présentation"

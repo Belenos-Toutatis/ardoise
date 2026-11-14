@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EDITOR_SHORTCUTS } from '../../lib/editor/shortcuts';
 import { setLocale, t } from '../../lib/i18n.svelte';
 import { LIVE_SHORTCUTS } from '../../lib/live-shortcuts';
+import { mockGuide } from '../../lib/mock-about';
 import { chordParts, type Shortcut } from '../../lib/shortcuts';
 import type { SideWhere } from '../../lib/side-panel.svelte';
 import ShortcutsHelp from './ShortcutsHelp.svelte';
@@ -152,5 +153,42 @@ describe('ShortcutsHelp: every entry of both tables', () => {
     expect(target.querySelectorAll('h4')).toHaveLength(0);
     expect(target.querySelectorAll('dl.keys')).toHaveLength(1);
     expect(target.querySelector('dt')!.textContent!.replace(/\s+/g, ' ').trim()).toBe('Ctrl + Z');
+  });
+});
+
+describe('ShortcutsHelp: the user guide', () => {
+  it('has its button at the top of the tab, in both windows and both languages, before the shortcuts', () => {
+    for (const [where, shortcuts] of [
+      ['editor', EDITOR_SHORTCUTS],
+      ['live', LIVE_SHORTCUTS],
+    ] as const) {
+      for (const [locale, label, name] of [
+        ['fr', "Ouvrir le guide d'utilisation", "Guide d'utilisation"],
+        ['en', 'Open the user guide', 'User guide'],
+      ] as const) {
+        setLocale(locale);
+        const { target } = render(where, shortcuts);
+        const block = target.querySelector<HTMLElement>('section.pane-block[data-section="guide"]')!;
+        expect(block.getAttribute('aria-label')).toBe(name);
+        expect(block.querySelector('button[data-action="open-guide"]')!.textContent?.trim()).toBe(label);
+        expect(block.querySelector('.guide-hint')!.textContent).toContain('F1');
+        expect(block.querySelector('.guide-hint')!.textContent).toContain('GitHub');
+        const first = target.querySelector('section.pane-block')!;
+        expect(first).toBe(block);
+        // F1 is also listed with the shortcuts.
+        expect(target.querySelector('dt[data-shortcut="guide"] kbd')!.textContent).toBe('F1');
+        cleanup?.();
+        cleanup = null;
+      }
+    }
+  });
+
+  it('opens the guide in the language of the window', async () => {
+    mockGuide.asked = [];
+    setLocale('en');
+    const { target } = render('editor', EDITOR_SHORTCUTS);
+    target.querySelector<HTMLButtonElement>('button[data-action="open-guide"]')!.click();
+    await Promise.resolve();
+    expect(mockGuide.asked).toEqual([{ page: 'guide', language: 'en' }]);
   });
 });

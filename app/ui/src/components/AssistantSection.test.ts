@@ -3,6 +3,7 @@ import { mount, tick, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api, type BridgeStatus } from '../lib/api';
 import { setLocale, t } from '../lib/i18n.svelte';
+import { mockGuide } from '../lib/mock-about';
 import AssistantSection from './AssistantSection.svelte';
 
 let cleanup: (() => void) | null = null;
@@ -47,7 +48,7 @@ describe('Settings > Assistant (MCP)', () => {
       mcpServers: { ardoise: { command: EXE, args: ['--mcp'] } },
     });
     expect(root.querySelector('[data-slot="assistant-privacy"]')?.textContent).toBe(t('assistant.privacy'));
-    expect(root.textContent).toContain('guide\\assistant.fr.html');
+    expect(root.querySelector('[data-action="open-assistant-guide"]')?.textContent?.trim()).toBe('Ouvrir le guide « Assistant »');
   });
 
   it('read only adds --read-only to both', async () => {
@@ -56,7 +57,21 @@ describe('Settings > Assistant (MCP)', () => {
     await settle();
     expect(snippet(root, 'claude-code')).toMatch(/--mcp --read-only$/);
     expect(JSON.parse(snippet(root, 'claude-desktop')).mcpServers.ardoise.args).toEqual(['--mcp', '--read-only']);
-    expect(root.textContent).toContain('guide\\assistant.en.html');
+    expect(root.querySelector('[data-action="open-assistant-guide"]')?.textContent?.trim()).toBe('Open the "Assistant" guide');
+  });
+
+  it('opens the assistant guide in the language of the interface, from a button that says what happens without the folder', async () => {
+    mockGuide.asked = [];
+    for (const locale of ['fr', 'en'] as const) {
+      const root = await render(locale);
+      const button = root.querySelector<HTMLButtonElement>('[data-action="open-assistant-guide"]')!;
+      expect(button.title).toContain('GitHub');
+      button.click();
+      await settle();
+      expect(mockGuide.asked.at(-1)).toEqual({ page: 'assistant', language: locale });
+      cleanup?.();
+      cleanup = null;
+    }
   });
 
   it('says whether the open app can be driven, in both languages', async () => {
