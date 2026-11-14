@@ -100,6 +100,7 @@
     newBookmarkObject,
     newEquationObject,
     newObjectId,
+    newFrameWrap,
     newTextObject,
     objectBounds,
     objectCentre,
@@ -233,6 +234,7 @@
   import RevisionCompare from './RevisionCompare.svelte';
   import SplitPanel from './SplitPanel.svelte';
   import Toolbar from './Toolbar.svelte';
+  import { textInput } from '../../lib/editor/text-input.svelte';
 
   let {
     path,
@@ -1451,6 +1453,8 @@
   }
 
   function setMode(mode: Mode) {
+    // The Greek palette belongs to the text tool's options: another tool closes it.
+    if (mode !== tools.mode) textInput.paletteOpen = false;
     if (mode !== 'text') endText();
     if (mode !== 'equation') cancelEquation();
     if (mode !== 'bookmark') endBookmark();
@@ -1588,7 +1592,7 @@
     }
     if (!canDraw(current)) return hiddenLayerNotice();
     const style = textSettings(tools);
-    // The tap is the middle of the first line, at its left end.
+    // The tap is the middle of the first line, at its left end; the lines wrap at the page's right edge.
     const object = newTextObject(ink.text, {
       id: newObjectId(),
       layer: current.activeLayer,
@@ -1600,6 +1604,7 @@
       bold: style.bold,
       size: style.size,
       color: tools.color,
+      wrapWidth: newFrameWrap(current.note.page.width, request.at.x, style.size),
     });
     const next = addObjectToDoc(current, object);
     history = replacePresent(history, next);
@@ -2561,6 +2566,7 @@
       leaving,
       owned: modalOpen() || !!exporting || !!printing || !!video || share.panelOpen || !!revisionDialog || !!offer,
       dragging: canvas?.dragging() ?? false,
+      greekPalette: textInput.paletteOpen,
       editingText: textEdit !== null || bookmarkEdit !== null,
       editingEquation: equationEdit !== null,
       split: split !== null,
@@ -2578,6 +2584,9 @@
         return stay();
       case 'cancelDrag':
         return canvas?.cancelGesture();
+      case 'closeGreekPalette':
+        textInput.paletteOpen = false;
+        return textInput.target?.focus();
       case 'endText':
         endText();
         return endBookmark();

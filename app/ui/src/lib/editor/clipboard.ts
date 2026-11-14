@@ -4,7 +4,7 @@
  * else on the clipboard (text, an image, a JSON of another program) is not ours and is ignored.
  * Colour, tool, width and samples travel; the layer does not (pasted strokes go to the active
  * layer of the destination). Text frames travel with the strokes (`objects`, an optional list of the same
- * version: an older reader ignores it): their placement, text, family, bold, size and colour; their id and layer do not
+ * version: an older reader ignores it): their placement, text, family, bold, size, colour and wrap width; their id and layer do not
  * (a paste gives new ones). Equations travel the same way: their placement, LaTeX source, drawing and colour, the
  * drawing checked like a note's (`isEquationObject`) before anything is pasted.
  * Bookmarks travel the same way (their label and place): a cut must not lose one.
@@ -49,7 +49,7 @@ const MAX_TEXT_LENGTH = 100_000;
 const MAX_TEXT_SIZE = 100_000;
 const MAX_OBJECT_SCALE = 1_000;
 
-type ClipboardText = Pick<TextObject, 'kind' | 't' | 'x' | 'y' | 'scale' | 'quarterTurns' | 'text' | 'font' | 'bold' | 'size' | 'color'>;
+type ClipboardText = Pick<TextObject, 'kind' | 't' | 'x' | 'y' | 'scale' | 'quarterTurns' | 'text' | 'font' | 'bold' | 'size' | 'color' | 'wrapWidth'>;
 type ClipboardEquation = Pick<EquationObject, 'kind' | 't' | 'x' | 'y' | 'scale' | 'quarterTurns' | 'latex' | 'path' | 'color'>;
 type ClipboardBookmark = Pick<BookmarkObject, 'kind' | 't' | 'x' | 'y' | 'scale' | 'quarterTurns' | 'label'>;
 type ClipboardObject = ClipboardText | ClipboardEquation | ClipboardBookmark;
@@ -76,8 +76,8 @@ export function encodeClipboard(strokes: readonly Stroke[], objects: readonly Pa
   const carried: ClipboardObject[] = [];
   for (const o of objects) {
     if (o.kind === 'text') {
-      const { kind, t, x, y, scale, quarterTurns, text, font, bold, size, color } = o as TextObject;
-      carried.push({ kind, t, x, y, scale, quarterTurns, text, font, bold, size, color });
+      const { kind, t, x, y, scale, quarterTurns, text, font, bold, size, color, wrapWidth } = o as TextObject;
+      carried.push({ kind, t, x, y, scale, quarterTurns, text, font, bold, size, color, ...(wrapWidth !== undefined ? { wrapWidth } : {}) });
     } else if (isEquationObject(o)) {
       const { kind, t, x, y, scale, quarterTurns, latex, path, color } = o;
       carried.push({ kind, t, x, y, scale, quarterTurns, latex, path, color });
@@ -132,9 +132,12 @@ function textObject(o: Record<string, unknown>): TextObject | null {
   const font = FONT_FAMILIES.find((f) => f === o.font);
   if (o.kind !== 'text' || !rgba || !font || typeof o.text !== 'string' || o.text.length > MAX_TEXT_LENGTH) return null;
   if (typeof o.bold !== 'boolean' || !within(o.size, MAX_TEXT_SIZE) || o.size <= 0) return null;
+  // A frame of a copy made before its wrap width existed does not wrap; one with a damaged width is refused.
+  if (o.wrapWidth !== undefined && (!within(o.wrapWidth, MAX_PAGE_SIDE * MAX_OBJECT_SCALE) || o.wrapWidth <= 0)) return null;
   const placed = placement(o);
   if (!placed) return null;
-  return { kind: 'text', id: '', layer: 0, ...placed, width: 0, height: 0, text: o.text, font, bold: o.bold, size: o.size, color: rgba };
+  const frame: TextObject = { kind: 'text', id: '', layer: 0, ...placed, width: 0, height: 0, text: o.text, font, bold: o.bold, size: o.size, color: rgba };
+  return o.wrapWidth !== undefined ? { ...frame, wrapWidth: o.wrapWidth } : frame;
 }
 
 /** An equation of the clipboard, its box measured from its drawing, or null when it is damaged or its drawing unreadable. */

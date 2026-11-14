@@ -165,9 +165,45 @@ export function transformObject<T extends PageObject>(object: T, m: Affine): T {
   };
 }
 
-/** The style of a text frame. */
-export function textStyle(object: Pick<TextObject, 'font' | 'bold' | 'size'>): TextStyle {
-  return { font: object.font, bold: object.bold, size: object.size };
+/** The style of a text frame (its wrap width too: a frame made before format 1.7 has none and does not wrap). */
+export function textStyle(object: Pick<TextObject, 'font' | 'bold' | 'size' | 'wrapWidth'>): TextStyle {
+  return { font: object.font, bold: object.bold, size: object.size, wrap: object.wrapWidth ?? null };
+}
+
+/** How far from the page's right edge a new frame wraps, device units (1 cm). */
+export const TEXT_WRAP_MARGIN = 1000;
+/** A frame is never made narrower than this many ems of its text, by its side handles or when it is put near the edge. */
+export const MIN_WRAP_EMS = 2;
+/** The widest wrap width, in the frame's units. */
+const MAX_WRAP = 1e6;
+
+/**
+ * The wrap width of a new frame put at `x` on a page `pageWidth` wide, at the size `size`: it wraps at the page's right
+ * edge less `TEXT_WRAP_MARGIN`, and at least `MIN_WRAP_EMS` × 3 ems wide (a frame put at the edge still holds a word).
+ */
+export function newFrameWrap(pageWidth: number, x: number, size: number): number {
+  return Math.min(MAX_WRAP, Math.max(pageWidth - TEXT_WRAP_MARGIN - x, MIN_WRAP_EMS * 3 * size));
+}
+
+/** The page points of a text frame's side handles: the middles of its content's left and right edges. */
+export function wrapHandles(object: TextObject): { left: Vec; right: Vec } {
+  return { left: pagePoint(object, 0, object.height / 2), right: pagePoint(object, object.width, object.height / 2) };
+}
+
+/**
+ * The frame with its wrap width given by a side handle dragged to the page point `p` (its text wraps again there, its
+ * height follows): the right handle sets where the lines end; the left one moves the frame's left edge, its right
+ * boundary (the wrap width, or the box of a frame without one) staying. Never narrower than `MIN_WRAP_EMS` ems. A turned or
+ * scaled frame is measured along its own lines.
+ */
+export function rewrapped(object: TextObject, side: 'left' | 'right', p: Vec, engine: TextEngine): TextObject {
+  const u = contentPoint(object, p).x;
+  const least = MIN_WRAP_EMS * object.size;
+  if (side === 'right') return measureText({ ...object, wrapWidth: Math.min(MAX_WRAP, Math.max(least, u)) }, engine);
+  const right = object.wrapWidth ?? object.width;
+  const left = Math.min(u, right - least);
+  const origin = pagePoint(object, left, 0);
+  return measureText({ ...object, x: origin.x, y: origin.y, wrapWidth: Math.min(MAX_WRAP, right - left) }, engine);
 }
 
 /** The frame with its box measured as the text engine lays it out. */
@@ -288,12 +324,24 @@ export function takesColor(object: PageObject): boolean {
 /** A new text frame (its box measured). */
 export function newTextObject(
   engine: TextEngine,
-  fields: { id: string; layer: number; t: number; x: number; y: number; text: string; font: FontFamily; bold: boolean; size: number; color: Rgba },
+  fields: {
+    id: string;
+    layer: number;
+    t: number;
+    x: number;
+    y: number;
+    text: string;
+    font: FontFamily;
+    bold: boolean;
+    size: number;
+    color: Rgba;
+    /** The width its lines wrap at (`newFrameWrap`); absent: it does not wrap. */
+    wrapWidth?: number;
+  },
 ): TextObject {
-  return measureText(
-    { kind: 'text', scale: 1, quarterTurns: 0, width: 0, height: 0, ...fields, color: { ...fields.color } },
-    engine,
-  );
+  const { wrapWidth, ...rest } = fields;
+  const object: TextObject = { kind: 'text', scale: 1, quarterTurns: 0, width: 0, height: 0, ...rest, color: { ...fields.color } };
+  return measureText(wrapWidth !== undefined && wrapWidth > 0 ? { ...object, wrapWidth } : object, engine);
 }
 
 // --- Bookmarks (SPEC §4.4 « Signets », format 1.6) ----------------------------------------------
@@ -556,9 +604,11 @@ export function changeTexts(note: Note, indices: Iterable<number> | null, change
     changed = true;
     let next: TextObject = { ...o, color: { ...color }, font, bold };
     if (resized) {
-      // The new size replaces the frame's change of scale; its top-left corner on the page stays.
+      // The new size replaces the frame's change of scale; its top-left corner on the page stays, and so does its width
+      // on the page (its text wraps again at the new size).
       const corner = objectBounds(o);
       next = { ...next, size: change.size as number, scale: 1 };
+      if (o.wrapWidth !== undefined) next = { ...next, wrapWidth: Math.min(MAX_WRAP, o.wrapWidth * o.scale) };
       next = measureText(next, engine);
       const box = objectBounds(next);
       next = { ...next, x: next.x + corner.x - box.x, y: next.y + corner.y - box.y };

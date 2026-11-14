@@ -1476,8 +1476,13 @@ sont pas dans le mode direct avec une tablette.
 
 L'outil **Texte** (la touche `T`) pose sur la page un cadre où l'on tape au clavier : touchez ou cliquez la page à l'endroit
 voulu (au stylet, à la souris ou au doigt ; sur un écran tactile, Windows propose son clavier à l'écran), puis tapez. Le texte
-se dessine au fur et à mesure, tel qu'il sera exporté. `Entrée` commence une nouvelle ligne ; une ligne ne passe jamais toute
-seule à la suivante : le cadre s'élargit avec ce que vous tapez. `Échap` (ou un clic ailleurs, ou un autre outil) termine la
+se dessine au fur et à mesure, tel qu'il sera exporté. Le texte **revient à la ligne tout seul** au bord droit de la page
+(moins 1 cm), à partir de l'endroit où le cadre est posé ; `Entrée` commence un nouveau paragraphe. Un mot plus long que la
+ligne est coupé là où il la dépasse. Pour changer la largeur d'un cadre, sélectionnez-le seul avec l'outil **Sélection** et
+faites glisser l'une des **poignées des côtés** (les petites barres au milieu des bords gauche et droit) : le texte revient à la
+ligne à la nouvelle largeur et le cadre s'allonge ou se raccourcit ; les poignées des coins l'agrandissent ou le rapetissent
+toujours en entier. Un cadre tapé avant cette version ne revient pas à la ligne (ses lignes restent celles d'avant) tant que
+vous ne changez pas sa largeur. `Échap` (ou un clic ailleurs, ou un autre outil) termine la
 saisie : le texte reste, et le cadre est sélectionné. Un cadre laissé vide disparaît. Toute la saisie s'annule d'un seul
 `Ctrl + Z`. Pendant la saisie, les touches tapées vont au texte, jamais aux raccourcis de l'éditeur.
 
@@ -1489,9 +1494,16 @@ Sous la barre d'outils, avec l'outil **Texte** ou quand des textes sont sélecti
 ![La barre d'outils avec l'outil Texte choisi : Police (Latin Modern ou Andika), Taille (Petit, Moyen, Grand) et Gras](images/fr/outils-texte.webp)
 
 - **Police** : **Latin Modern** (la police de LaTeX) ou **Andika** (une police dessinée pour l'apprentissage de la lecture).
-  Les deux sont fournies avec Ardoise : le texte est le même sur tous les ordinateurs, dans tous les exports. Les lettres
-  grecques qui manquent à Latin Modern sont prises dans Andika (pas toutes : α, β, γ, δ, θ, λ, μ, π, ρ, σ, φ, χ, ω, Δ, Ω, entre
-  autres).
+  Les deux sont fournies avec Ardoise : le texte est le même sur tous les ordinateurs, dans tous les exports. **Tout
+  l'alphabet grec** (minuscules, majuscules, ϵ ϑ ϕ ϖ ϱ) et les symboles de physique-chimie (µ Ω ° ± × · ≈ ≠ ≤ ≥ → ⇌ ∞ √ ∑ ∫
+  ∂ ∝ ‰ ′ ″, exposants ⁰…⁹ ⁺ ⁻ et indices ₀…₉) s'écrivent dans les deux polices, en gras aussi : ils viennent de Latin Modern
+  Math, la police de mathématiques de la même famille. Un caractère qu'aucune police d'Ardoise ne contient (un émoji, un
+  idéogramme…) est dessiné comme un carré □, et Ardoise le nomme sous le cadre pendant la saisie.
+- **αβγ** (alphabet grec) : ouvre une palette sous la barre, avec les minuscules (et le sigma final ς), les majuscules, les
+  variantes ϵ ϑ ϕ ϖ ϱ, des symboles, les exposants et les indices. Touchez d'abord la page pour taper un texte, puis touchez une
+  lettre : elle s'ajoute au curseur du cadre (à la place du texte sélectionné), et le curseur reste dans le cadre ; la palette
+  reste ouverte pour plusieurs lettres. `Échap` la ferme (un second `Échap` termine la saisie), comme son bouton ou un autre
+  outil. Au clavier : `Tab` jusqu'à la palette, les flèches, puis `Entrée`.
 - **Taille** : **Petit** (4 mm), **Moyen** (6 mm) ou **Grand** (9 mm).
 - **Gras**.
 - La couleur est celle de l'outil : choisissez-la dans les couleurs de la barre.
@@ -1940,6 +1952,12 @@ moins juste. *Relisez toujours le texte* : la reconnaissance peut se tromper.
   la note entière. L'analyse de mise en page de Windows ne fournit que la structure (paragraphes, listes, dessins).
 - *Les corrections l'emportent.* Si un texte corrigé a été enregistré pour la note (par l'assistant, chapitre 14), c'est
   lui qui est exporté, partout, au lieu du texte reconnu.
+- *Le texte tapé y est aussi.* Les cadres de texte et les équations de la page figurent dans le .txt, le Markdown, le Word,
+  le texte copié et l'aperçu, à leur place parmi l'écriture (un texte posé au-dessus d'un paragraphe vient avant lui ; côte à
+  côte, celui de gauche d'abord), chaque ligne tapée gardée, sans les retours à la ligne automatiques du cadre. En Markdown,
+  une équation est écrite entre dollars (`$…$`), que les éditeurs avec formules lisent ; dans Word et dans le .txt, c'est son
+  code LaTeX, lisible et copiable. Une note qui n'a que du texte tapé s'exporte même si Windows ne sait pas lire
+  l'écriture sur cet ordinateur. Les signets ne sont pas exportés comme du texte.
 - *Un trait sous des mots* les souligne : il devient du **gras** en Markdown (qui n'a pas de souligné) et un vrai
   soulignement dans Word. Un trait qui barre des mots les barre (`~~mot~~` en Markdown, texte barré dans Word). Ces
   traits ne sont pas exportés comme des images.
