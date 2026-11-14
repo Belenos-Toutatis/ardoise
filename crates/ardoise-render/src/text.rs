@@ -114,6 +114,7 @@ mod tests {
                     a: 51,
                     ..Rgba::rgb(10, 20, 30)
                 },
+                wrap_width: None,
             },
         );
         object.quarter_turns = quarter_turns;

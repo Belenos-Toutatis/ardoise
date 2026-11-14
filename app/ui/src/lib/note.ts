@@ -129,8 +129,9 @@ export type FontFamily = 'latinModern' | 'andika';
 export const FONT_FAMILIES: readonly FontFamily[] = ['latinModern', 'andika'];
 
 /**
- * A text frame (SPEC §4.4): one line of the page per line of `text` (nothing wraps), one style for
- * the whole frame. `size` is the font's size (its em) in the object's units, device units at scale 1.
+ * A text frame (SPEC §4.4): its text in one style for the whole frame, its lines wrapped at `wrapWidth` (format 1.7) or,
+ * without one, one line of the page per line of `text` (frames made before 1.7). `size` is the font's size (its em) and
+ * `wrapWidth` the width the lines wrap at, both in the object's units, device units at scale 1.
  */
 export interface TextObject extends PageObject {
   kind: 'text';
@@ -139,6 +140,7 @@ export interface TextObject extends PageObject {
   bold: boolean;
   size: number;
   color: Rgba;
+  wrapWidth?: number;
 }
 
 /** A text frame this version can read and draw (a text frame of a font it does not know is kept but not drawn). */
@@ -151,7 +153,9 @@ export function isTextObject(object: PageObject): object is TextObject {
     typeof object.size === 'number' &&
     object.size > 0 &&
     typeof object.color === 'object' &&
-    object.color !== null
+    object.color !== null &&
+    // A wrap width that is not a positive number is a value this version cannot read (`text_body` in Rust).
+    (object.wrapWidth === undefined || (typeof object.wrapWidth === 'number' && Number.isFinite(object.wrapWidth) && object.wrapWidth > 0))
   );
 }
 

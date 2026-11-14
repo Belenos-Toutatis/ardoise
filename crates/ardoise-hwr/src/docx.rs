@@ -1,14 +1,15 @@
 //! A note (or several) as a Word document (`.docx`, Office Open XML), written with the `zip`
 //! crate and plain strings: the title, the date and the tags, then the paragraphs, a bulleted
-//! list for the list items and the drawings as embedded PNG pictures. One A4 portrait section;
-//! each note starts on a new page.
+//! list for the list items, the equations as plain paragraphs of their LaTeX source (Word has no
+//! LaTeX) and the drawings as embedded PNG pictures. One A4 portrait section; each note starts
+//! on a new page.
 
 use std::io::{Cursor, Write};
 
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
-use crate::document::{Block, Document, Drawing, Labels, Mark, Text};
+use crate::document::{Block, Document, Drawing, Labels, Mark, Text, equation_line};
 
 /// EMU (English Metric Units) in a millimetre.
 const EMU_PER_MM: f64 = 36_000.0;
@@ -212,6 +213,11 @@ fn document_xml<'a>(documents: &'a [Document], labels: &Labels) -> (String, Vec<
                     ]),
                     text,
                 )),
+                // Word has no LaTeX: the source stays as a plain paragraph, readable and
+                // copyable.
+                Block::Equation(source) => {
+                    body.push_str(&text_paragraph("", &equation_line(source)));
+                }
                 Block::Drawing(drawing) => {
                     pictures.push(drawing);
                     let number = pictures.len();
@@ -474,6 +480,31 @@ mod tests {
             text_of(&parts, "docProps/core.xml")
                 .contains("<dc:title>Réunion &amp; *plan* #1</dc:title>")
         );
+    }
+
+    #[test]
+    fn an_equation_is_a_plain_paragraph_of_its_source() {
+        let mut document = sample();
+        document.blocks = vec![
+            Block::Paragraph("avant".into()),
+            Block::Equation("E =\n mc^2 & <1>".into()),
+        ];
+        let parts = parts(&to_docx(&[document], &labels()).unwrap());
+        let xml = text_of(&parts, "word/document.xml");
+        let doc = roxmltree::Document::parse(&xml).unwrap();
+        let w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        let paragraphs: Vec<String> = doc
+            .descendants()
+            .filter(|n| n.has_tag_name((w, "p")))
+            .map(|p| {
+                p.descendants()
+                    .filter(|n| n.has_tag_name((w, "t")))
+                    .filter_map(|n| n.text())
+                    .collect()
+            })
+            .collect();
+        assert_eq!(paragraphs.last().unwrap(), "E = mc^2 & <1>");
+        assert_eq!(paragraphs[paragraphs.len() - 2], "avant");
     }
 
     #[test]

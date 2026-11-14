@@ -3,18 +3,24 @@
  * `ardoise-text` compiled to WebAssembly, in the module of the ink (`lib/ink.ts`, `crates/ardoise-ink-wasm/src/text.rs`):
  * the screen draws exactly the glyphs of the exports, from the fonts shipped with the app, never from the PC's.
  *
- * The rules of the layout (`crates/ardoise-text/src/layout.rs`): only a line break starts a new line; glyphs follow
- * each other by their advance widths, without kerning nor ligatures; a character missing from the family comes from
- * the other one; lines are 1.25 × size apart. The editor's text field (`TextField.svelte`) is styled the same way
- * (`textFieldStyle`), so that its caret falls between the glyphs drawn.
+ * The rules of the layout (`crates/ardoise-text/src/layout.rs`): a line break starts a new line, and a frame with a wrap
+ * width (`wrap`, format 1.7) wraps between words, its white space hanging at the end of the line; glyphs follow each other
+ * by their advance widths, without kerning nor ligatures; a character missing from the family comes from Latin Modern
+ * Math, then from the other family (Andika never for Greek); one no face has is a white square (`missing`); lines are
+ * 1.25 × size apart. The editor's text field (`TextField.svelte`) is styled the same way (`textFieldStyle`), so that its
+ * caret falls between the glyphs drawn, and shows the lines as they wrap (`lib/text-field.ts`).
  */
 import type { FontFamily } from './note';
 
-/** What a frame's text looks like: one style for the whole frame. `size`: the font's em, in the frame's units. */
+/**
+ * What a frame's text looks like: one style for the whole frame. `size`: the font's em, in the frame's units; `wrap`: the
+ * width its lines wrap at, in the same units (absent, null or not positive: only line breaks start a line).
+ */
 export interface TextStyle {
   font: FontFamily;
   bold: boolean;
   size: number;
+  wrap?: number | null;
 }
 
 export interface TextGlyph {
@@ -23,6 +29,8 @@ export interface TextGlyph {
   advance: number;
   /** Offset of its character in the text, in UTF-16 code units (a text field's positions). */
   index: number;
+  /** No face has the character: a white square stands for it (`MISSING_CHAR`). */
+  missing: boolean;
 }
 
 export interface TextLine {
@@ -30,9 +38,11 @@ export interface TextLine {
   baseline: number;
   /** Advance width of the line. */
   width: number;
-  /** UTF-16 offsets of its first character and of its end (its line break excluded). */
+  /** UTF-16 offsets of its first character and of its end (its line break excluded; wrapped: where the next line starts). */
   start: number;
   end: number;
+  /** The line ends where the text wrapped (the next line goes on with the same paragraph), not at a line break. */
+  wrapped: boolean;
   glyphs: TextGlyph[];
 }
 
@@ -51,8 +61,8 @@ export interface TextEngine {
   layout(text: string, style: TextStyle): TextLayout;
   /** SVG path data of the glyphs, in the frame's units (origin top-left, y down), to fill with the non-zero rule. */
   path(text: string, style: TextStyle): string;
-  /** The bytes of a font file shipped with the app (to style the text field with it). */
-  fontBytes(font: FontFamily, bold: boolean): Uint8Array;
+  /** The bytes of a font file shipped with the app (`FONT_FACES`' `code`), to style the text field with it. */
+  fontBytes(face: number): Uint8Array;
 }
 
 /** Distance between two lines, in units of the size. */
@@ -74,17 +84,45 @@ export const CSS_FAMILY: Readonly<Record<FontFamily, string>> = {
   andika: 'Ardoise Andika',
 };
 
+/** The CSS family of Latin Modern Math, the face both families take Greek and the mathematical symbols from. */
+export const CSS_MATH_FAMILY = 'Ardoise Latin Modern Math';
+
+/** What stands for a character no face has (`MISSING_CHAR` in Rust): a white square, from Latin Modern Math. */
+export const MISSING_CHAR = '\u25A1';
+
+/**
+ * Andika is not used for the Greek and Coptic block (its Greek is partial: `FontFace::serves` in Rust): its files are
+ * registered for every other character, so that the browser takes Greek from Latin Modern Math, as the layout does.
+ */
+export const ANDIKA_UNICODE_RANGE = 'U+0-36F, U+400-10FFFF';
+
+/** The five font files (`FontFace` in Rust, in its order: `code`), as the text field registers them. */
+export const FONT_FACES: readonly { code: number; family: string; weight: 400 | 700; unicodeRange?: string }[] = [
+  { code: 0, family: CSS_FAMILY.latinModern, weight: 400 },
+  { code: 1, family: CSS_FAMILY.latinModern, weight: 700 },
+  { code: 2, family: CSS_FAMILY.andika, weight: 400, unicodeRange: ANDIKA_UNICODE_RANGE },
+  { code: 3, family: CSS_FAMILY.andika, weight: 700, unicodeRange: ANDIKA_UNICODE_RANGE },
+  // One weight: a bold field takes it as it is (`font-synthesis: none`), with the regular advances the layout uses.
+  { code: 4, family: CSS_MATH_FAMILY, weight: 400 },
+];
+
+/** The wrap width a style lays out with: a positive number, or 0 for none (the module's convention). */
+export function wrapOf(style: Pick<TextStyle, 'wrap'>): number {
+  const wrap = style.wrap;
+  return typeof wrap === 'number' && Number.isFinite(wrap) && wrap > 0 ? wrap : 0;
+}
+
 /** The exports of the module that `textEngine` uses. */
 export interface TextExports {
   memory: WebAssembly.Memory;
   text_alloc(bytes: number): number;
   text_free(ptr: number, bytes: number): void;
-  text_layout(ptr: number, len: number, family: number, bold: number, size: number): number;
+  text_layout(ptr: number, len: number, family: number, bold: number, size: number, wrap: number): number;
   text_layout_result(): number;
-  text_path(ptr: number, len: number, family: number, bold: number, size: number): number;
+  text_path(ptr: number, len: number, family: number, bold: number, size: number, wrap: number): number;
   text_path_result(): number;
-  text_font(family: number, bold: number): number;
-  text_font_len(family: number, bold: number): number;
+  text_font(face: number): number;
+  text_font_len(face: number): number;
 }
 
 /** Results kept per text and style (frames are drawn again at each change of the page). */
@@ -98,7 +136,7 @@ export function textEngine(wasm: TextExports): TextEngine {
   const paths = new Map<string, string>();
 
   function keyOf(text: string, style: TextStyle): string {
-    return `${style.font}|${style.bold ? 1 : 0}|${style.size}|${text}`;
+    return `${style.font}|${style.bold ? 1 : 0}|${style.size}|${wrapOf(style)}|${text}`;
   }
 
   function remember<T>(cache: Map<string, T>, key: string, value: T): T {
@@ -127,7 +165,7 @@ export function textEngine(wasm: TextExports): TextEngine {
     const known = layouts.get(key);
     if (known) return known;
     const flat = withText(text, (ptr, len) => {
-      const count = wasm.text_layout(ptr, len, FONT_CODE[style.font] ?? 0, style.bold ? 1 : 0, style.size);
+      const count = wasm.text_layout(ptr, len, FONT_CODE[style.font] ?? 0, style.bold ? 1 : 0, style.size, wrapOf(style));
       return new Float32Array(wasm.memory.buffer, wasm.text_layout_result(), count).slice();
     });
     let at = 0;
@@ -135,10 +173,10 @@ export function textEngine(wasm: TextExports): TextEngine {
     const [width, height, lineHeight, ascent, descent] = [next(), next(), next(), next(), next()];
     const lines: TextLine[] = [];
     for (let l = next(); l > 0; l--) {
-      const [top, baseline, lineWidth, start, end] = [next(), next(), next(), next(), next()];
+      const [top, baseline, lineWidth, start, end, wrapped] = [next(), next(), next(), next(), next(), next()];
       const glyphs: TextGlyph[] = [];
-      for (let g = next(); g > 0; g--) glyphs.push({ x: next(), advance: next(), index: next() });
-      lines.push({ top, baseline, width: lineWidth, start, end, glyphs });
+      for (let g = next(); g > 0; g--) glyphs.push({ x: next(), advance: next(), index: next(), missing: next() === 1 });
+      lines.push({ top, baseline, width: lineWidth, start, end, wrapped: wrapped === 1, glyphs });
     }
     return remember(layouts, key, { width, height, lineHeight, ascent, descent, lines });
   }
@@ -148,16 +186,15 @@ export function textEngine(wasm: TextExports): TextEngine {
     const known = paths.get(key);
     if (known !== undefined) return known;
     const d = withText(text, (ptr, len) => {
-      const count = wasm.text_path(ptr, len, FONT_CODE[style.font] ?? 0, style.bold ? 1 : 0, style.size);
+      const count = wasm.text_path(ptr, len, FONT_CODE[style.font] ?? 0, style.bold ? 1 : 0, style.size, wrapOf(style));
       return decoder.decode(new Uint8Array(wasm.memory.buffer, wasm.text_path_result(), count));
     });
     return remember(paths, key, d);
   }
 
-  function fontBytes(font: FontFamily, bold: boolean): Uint8Array {
-    const code = FONT_CODE[font] ?? 0;
-    const len = wasm.text_font_len(code, bold ? 1 : 0);
-    return new Uint8Array(wasm.memory.buffer, wasm.text_font(code, bold ? 1 : 0), len).slice();
+  function fontBytes(face: number): Uint8Array {
+    const len = wasm.text_font_len(face);
+    return new Uint8Array(wasm.memory.buffer, wasm.text_font(face), len).slice();
   }
 
   return { layout, path, fontBytes };
@@ -256,8 +293,9 @@ export function tracePath(ctx: PathSink, steps: readonly PathStep[]): void {
 let registered: Promise<void> | null = null;
 
 /**
- * Registers the four font files as web fonts (`CSS_FAMILY`), for the text field that edits a frame; once per window.
- * Without the FontFace API (tests), nothing happens: the frames are drawn from the module's glyphs anyway.
+ * Registers the five font files as web fonts (`FONT_FACES`), for the text field that edits a frame and the letters of the
+ * Greek palette; once per window. Without the FontFace API (tests), nothing happens: the frames are drawn from the
+ * module's glyphs anyway.
  */
 export function registerTextFonts(engine: TextEngine): Promise<void> {
   if (registered) return registered;
@@ -265,13 +303,12 @@ export function registerTextFonts(engine: TextEngine): Promise<void> {
     registered = Promise.resolve();
     return registered;
   }
-  const faces: FontFace[] = [];
-  for (const font of ['latinModern', 'andika'] as const) {
-    for (const bold of [false, true]) {
-      const bytes = engine.fontBytes(font, bold);
-      faces.push(new FontFace(CSS_FAMILY[font], bytes.buffer as ArrayBuffer, { weight: bold ? '700' : '400', style: 'normal' }));
-    }
-  }
+  const faces: FontFace[] = FONT_FACES.map((face) => {
+    const bytes = engine.fontBytes(face.code);
+    const descriptors: FontFaceDescriptors = { weight: String(face.weight), style: 'normal' };
+    if (face.unicodeRange) descriptors.unicodeRange = face.unicodeRange;
+    return new FontFace(face.family, bytes.buffer as ArrayBuffer, descriptors);
+  });
   registered = Promise.all(
     faces.map((face) =>
       face.load().then(
@@ -288,14 +325,23 @@ export function registerTextFonts(engine: TextEngine): Promise<void> {
 }
 
 /**
- * The CSS of a text field that lays text out like `layout` (no kerning, no ligature, no wrapping, the same line height
- * and tab stops), at `px` pixels per unit of the frame.
+ * The CSS families of a frame of `font`, in the order the layout takes a character from them (`fallback_chain` in Rust):
+ * its own, Latin Modern Math, the other family.
+ */
+export function cssFamilies(font: FontFamily): string {
+  const other = font === 'latinModern' ? 'andika' : 'latinModern';
+  return `"${CSS_FAMILY[font]}", "${CSS_MATH_FAMILY}", "${CSS_FAMILY[other]}"`;
+}
+
+/**
+ * The CSS of a text field that lays text out like `layout` (no kerning, no ligature, the same faces in the same order,
+ * line height and tab stops), at `px` pixels per unit of the frame. The field itself never wraps: where the frame wraps,
+ * its value holds a line break (`lib/text-field.ts`).
  */
 export function textFieldStyle(style: TextStyle, px: number): string {
   const size = style.size * px;
-  const other = style.font === 'latinModern' ? 'andika' : 'latinModern';
   return [
-    `font-family: "${CSS_FAMILY[style.font]}", "${CSS_FAMILY[other]}"`,
+    `font-family: ${cssFamilies(style.font)}`,
     `font-weight: ${style.bold ? 700 : 400}`,
     `font-size: ${size}px`,
     `line-height: ${size * LINE_HEIGHT}px`,

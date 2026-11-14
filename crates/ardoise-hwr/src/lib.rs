@@ -10,6 +10,8 @@
 //! - [`ink`]: which strokes of a note are recognised and how they are scaled for the engine;
 //! - [`lines`]: words grouped in lines;
 //! - [`text`]: accent- and case-blind comparison of words;
+//! - [`typed`]: the text frames and equations typed on the page, which the text exports (`.txt`,
+//!   Markdown, Word) put among the handwriting;
 //! - [`synthetic`]: handwriting-like single-stroke glyphs (publishable synthetic notes with a
 //!   known text, for the reference test and the demo library).
 //!
@@ -27,6 +29,7 @@ pub mod structure;
 pub mod synthetic;
 mod system;
 pub mod text;
+pub mod typed;
 
 pub use model::{Bounds, Line, Recognition, Word};
 pub use system::SystemRecognizer;

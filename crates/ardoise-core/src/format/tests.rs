@@ -1009,6 +1009,7 @@ fn fixture_objects_1_4() -> NoteFile {
             bold: false,
             size: 600.0,
             color: Rgba::BLACK,
+            wrap_width: None,
         },
     );
     let mut andika = PageObject::text(
@@ -1023,6 +1024,7 @@ fn fixture_objects_1_4() -> NoteFile {
             bold: true,
             size: 900.0,
             color: Rgba::rgb(0xd8, 0, 0),
+            wrap_width: None,
         },
     );
     andika.scale = 1.5;
@@ -1101,6 +1103,7 @@ fn fixture_objects_1_5() -> NoteFile {
             bold: false,
             size: 600.0,
             color: Rgba::BLACK,
+            wrap_width: None,
         },
     );
     let unreadable = PageObject::from_value(json!({
@@ -1135,6 +1138,7 @@ fn fixture_bookmarks_1_6() -> NoteFile {
             bold: false,
             size: 600.0,
             color: Rgba::BLACK,
+            wrap_width: None,
         },
     );
     let mut start = PageObject::bookmark(
@@ -1174,7 +1178,74 @@ fn fixture_bookmarks_1_6() -> NoteFile {
     NoteFile::new(note)
 }
 
-fn fixtures() -> [(&'static str, NoteFile, FormatVersion); 8] {
+/// Format 1.7: text frames that wrap (`wrapWidth`), one of them scaled and turned; a frame made
+/// before 1.7 (no wrap width, one line per line of its text); a frame whose wrap width is a value
+/// of a later version (kept, not drawn).
+fn fixture_wrap_1_7() -> NoteFile {
+    let mut note = blank_note("00000000-0000-4000-8000-000000000008", "Retour à la ligne");
+    let wrapping = PageObject::text(
+        "00000000-0000-4000-8000-0000000000c1",
+        0,
+        700,
+        1000.0,
+        2000.0,
+        TextBody {
+            text: "La lumière se propage en ligne droite dans un milieu homogène.
+Fin."
+                .to_owned(),
+            font: FontFamily::LatinModern,
+            bold: false,
+            size: 600.0,
+            color: Rgba::rgb(0x1a, 0x3a, 0x8a),
+            wrap_width: Some(9000.5),
+        },
+    );
+    let mut turned = PageObject::text(
+        "00000000-0000-4000-8000-0000000000c2",
+        0,
+        800,
+        25_000.0,
+        3000.0,
+        TextBody {
+            text: "Σ des forces = m·a, avec ε ≈ 10⁻⁴".to_owned(),
+            font: FontFamily::Andika,
+            bold: true,
+            size: 400.0,
+            color: Rgba::BLACK,
+            wrap_width: Some(5000.0),
+        },
+    );
+    turned.scale = 1.5;
+    turned.quarter_turns = 1;
+    let old = PageObject::text(
+        "00000000-0000-4000-8000-0000000000c3",
+        0,
+        900,
+        1000.0,
+        12_000.0,
+        TextBody {
+            text:
+                "Un cadre d'avant, sur une seule très longue ligne qui ne revient jamais à la ligne"
+                    .to_owned(),
+            font: FontFamily::LatinModern,
+            bold: false,
+            size: 400.0,
+            color: Rgba::BLACK,
+            wrap_width: None,
+        },
+    );
+    let later = PageObject::from_value(json!({
+        "kind": "text", "id": "00000000-0000-4000-8000-0000000000c4", "layer": 0,
+        "t": 1000, "x": 1000.0, "y": 16000.0, "scale": 1.0, "quarterTurns": 0,
+        "width": 3000.0, "height": 750.0, "text": "Plus tard", "font": "andika", "bold": false,
+        "size": 600.0, "color": {"r": 0, "g": 0, "b": 0, "a": 255}, "wrapWidth": "page"
+    }))
+    .unwrap();
+    note.objects = vec![wrapping, turned, old, later];
+    NoteFile::new(note)
+}
+
+fn fixtures() -> [(&'static str, NoteFile, FormatVersion); 9] {
     [
         (
             "minimal.ardoise",
@@ -1215,6 +1286,11 @@ fn fixtures() -> [(&'static str, NoteFile, FormatVersion); 8] {
             "bookmarks-1.6.ardoise",
             fixture_bookmarks_1_6(),
             FormatVersion { major: 1, minor: 6 },
+        ),
+        (
+            "wrap-1.7.ardoise",
+            fixture_wrap_1_7(),
+            FormatVersion { major: 1, minor: 7 },
         ),
     ]
 }
@@ -1408,6 +1484,37 @@ fn v1_fixtures_are_read() {
     assert_eq!(labels, ["Définition de la vitesse", "Corrigé"]);
     let rewritten = read_from_bytes(&to_bytes(&marked).unwrap()).unwrap();
     assert_eq!(rewritten, marked);
+
+    // Format 1.7: wrapping frames, checked against values written out by hand.
+    let wrap = read_note(&dir.join("wrap-1.7.ardoise")).unwrap();
+    let list = &wrap.note.objects;
+    assert_eq!(list.len(), 4);
+    let first = list[0].as_text().unwrap();
+    assert_eq!(first.wrap_width, Some(9000.5));
+    let lines = first.layout().lines;
+    assert!(lines.len() >= 3, "it wraps: {}", lines.len());
+    assert!(lines[0].wrapped && !lines[lines.len() - 1].wrapped);
+    // Its box is at most the wrap width wide, as many lines high as it has.
+    assert!(list[0].width <= 9000.5 && list[0].width > 8000.0);
+    assert_eq!(list[0].height, lines.len() as f32 * 750.0);
+    let second = list[1].as_text().unwrap();
+    assert_eq!(
+        (second.wrap_width, list[1].scale, list[1].quarter_turns),
+        (Some(5000.0), 1.5, 1)
+    );
+    // A frame made before 1.7 keeps its one line.
+    let old = list[2].as_text().unwrap();
+    assert_eq!(old.wrap_width, None);
+    assert_eq!(old.layout().lines.len(), 1);
+    // A wrap width of a later version: kept with every key, not drawn.
+    assert!(list[3].as_text().is_none());
+    assert_eq!(list[3].body.kind(), "text");
+    let json = note_json_value(&wrap);
+    assert_eq!(json["objects"][0]["wrapWidth"], 9000.5);
+    assert!(json["objects"][2].get("wrapWidth").is_none());
+    assert_eq!(json["objects"][3]["wrapWidth"], "page");
+    let rewritten = read_from_bytes(&to_bytes(&wrap).unwrap()).unwrap();
+    assert_eq!(rewritten, wrap);
 
     let future = read_note(&dir.join("future-minor.ardoise")).unwrap();
     assert_eq!(future.unknown_fields["stickers"][0]["kind"], "star");
@@ -1817,6 +1924,7 @@ fn text_frame(id: &str, layer: u32) -> PageObject {
             bold: false,
             size: 400.0,
             color: Rgba::BLACK,
+            wrap_width: None,
         },
     )
 }

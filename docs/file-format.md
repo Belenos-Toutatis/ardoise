@@ -1,10 +1,11 @@
 # The `.ardoise` file format
 
 > Developer document, written in English (the planning documents are in French). It describes format
-> **version 1.6** byte by byte (1.1 = 1.0 plus the optional `favorite` field; 1.2 = 1.1 plus the optional
+> **version 1.7** byte by byte (1.1 = 1.0 plus the optional `favorite` field; 1.2 = 1.1 plus the optional
 > `backgroundImage` field and `original.ardoise` member; 1.3 = 1.2 plus the optional `revision.json` member; 1.4 = 1.3
 > plus the optional `objects` field, the page objects such as text frames, §2.2; 1.5 = 1.4 plus page objects of kind
-> `equation`, §2.3; 1.6 = 1.5 plus page objects of kind `bookmark`, §2.2). Requirements: SPEC §3.3 and §3.4. Code:
+> `equation`, §2.3; 1.6 = 1.5 plus page objects of kind `bookmark`, §2.2; 1.7 = 1.6 plus the optional `wrapWidth` of a
+> text frame, §2.2). Requirements: SPEC §3.3 and §3.4. Code:
 > `crates/ardoise-core/src/format.rs` (container, `note.json`), `crates/ardoise-core/src/objects.rs` (page objects) and
 > `crates/ardoise-core/src/format/strokes.rs` (`strokes.bin`). Model: `note.rs` (`ardoise-core`) and `model.rs`
 > (`ardoise-ink`). Committed sample files: `testdata/format/v1/`.
@@ -167,11 +168,12 @@ Text frame (`"kind": "text"`):
 
 | Key | Type | Meaning |
 |---|---|---|
-| `text` | string | the text; only `\n` (or `\r\n`, or a lone `\r`) starts a new line: nothing wraps. |
+| `text` | string | the text; `\n` (or `\r\n`, or a lone `\r`) starts a new line (a paragraph); the lines the frame wraps into are not in the text. |
 | `font` | `"latinModern"` or `"andika"` | the family: Latin Modern Roman 10 or Andika, shipped with Ardoise (`crates/ardoise-text/fonts/`). |
 | `bold` | boolean | the bold face of the family. |
 | `size` | number > 0 | size of the font (its em), in the content's units: device units at scale 1 (the tool offers 400, 600 and 900: 4, 6 and 9 mm). |
 | `color` | `{"r", "g", "b", "a"}` (u8 each) | colour, straight alpha. |
+| `wrapWidth` | number > 0, optional (1.7) | the width the lines wrap at, in the content's units (device units at scale 1, so it scales with the frame); absent: nothing wraps, only a line break starts a line (every frame written before 1.7, which keeps its lines exactly). |
 
 Bookmark (`"kind": "bookmark"`, 1.6): a word or a short phrase at a spot of the page, one line, with a flag. It is **the editor's
 only**: image, SVG, video and print outputs, the replay, the projection and the share on the network do not show it. The library's
@@ -191,10 +193,19 @@ layer of the page when it was put), but **no layer hides it**: it is drawn, sele
 `t` is when it was put (a split at an instant cuts by it) and nothing else: no replay waits for it, and the clock of a writing
 recording ignores it. A bookmark whose `label` is not a string is kept as an object of a kind this version does not know.
 
-The layout of a frame is `ardoise-text`'s (`crates/ardoise-text/src/layout.rs`): glyphs placed by their advance widths, no
-kerning nor ligature, a character missing from the family taken from the other one, a tab to the next multiple of four spaces,
-lines `1.25 × size` apart. Writers write `width` and `height` as this layout measures them (the widest line, the lines'
-height), and a reader measures them again: they are there for readers that do not know the kind.
+The layout of a frame is `ardoise-text`'s (`crates/ardoise-text/src/layout.rs`, `docs/design/page-objects.md` §4): glyphs
+placed by their advance widths, no kerning nor ligature, a character missing from the family taken from Latin Modern Math,
+then from the other family (Andika never for the Greek block), a character no face has drawn as a white square, a tab to the
+next multiple of four spaces, lines `1.25 × size` apart; with a `wrapWidth`, lines also break after white space where the next
+word would cross the width (the white space hangs at the end of the line; a word wider than the line breaks where it crosses
+it). Writers write `width` and `height` as this layout measures them (without a wrap width: the widest line, its trailing
+white space included; with one: the widest line's ink, white space counting up to the wrap width; the lines' height), and a
+reader measures them again: they are there for readers that do not know the kind.
+
+A reader of 1.6 keeps `wrapWidth` as a key it does not know (written back with the frame) and lays the frame out without
+wrapping: one long line per paragraph, its box measured so; the note is not damaged, and 1.7 wraps it again. A `wrapWidth`
+that is not a positive number (a value of a later version) makes the frame one this version cannot read: kept with all its
+keys, drawn nowhere. Writers refuse a `wrapWidth` that is not a finite positive number.
 
 Rules for readers and writers:
 
@@ -502,6 +513,7 @@ Sample files of version 1 (regenerate only when adding one:
 | `testdata/format/v1/revision-1.3.ardoise` | format 1.3: a revision with an account of two entries |
 | `testdata/format/v1/objects-1.4.ardoise` | format 1.4: text frames in both families, one bold, turned and scaled with a key of a later version, on two layers; a text frame in a font this version does not know and an object of an unknown kind (`equation`), both kept |
 | `testdata/format/v1/bookmarks-1.6.ardoise` | format 1.6: bookmarks (one with a key of a later version, one scaled and turned on a hidden layer, one whose label is not a string), a text frame and an object of an unknown kind (`sticker`), all kept |
+| `testdata/format/v1/wrap-1.7.ardoise` | format 1.7: two text frames that wrap (one in Andika bold with Greek, scaled and turned), a frame without wrap width (one line), a frame whose `wrapWidth` is a value of a later version (kept, not drawn) |
 
 ## 6. Library conventions (not part of the file)
 

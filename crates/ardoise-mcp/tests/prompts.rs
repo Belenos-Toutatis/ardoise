@@ -203,6 +203,83 @@ async fn cleaning_up_a_note_names_the_tools_in_the_order_of_the_work() {
     assert!(markdown.contains("Markdown"));
 }
 
+/// The prompts that read a note's text say that `get_note_text` also gives the text typed on the
+/// page (text frames, equations as LaTeX), exact; bookmarks are in `get_note`.
+#[tokio::test(flavor = "current_thread")]
+async fn the_prompts_say_that_the_text_tool_gives_the_typed_text_too() {
+    let en = session().await;
+    let clean = en
+        .prompt("clean_up", json!({ "note": OPTIQUE, "format": "word" }))
+        .await;
+    in_order(
+        &clean,
+        &[
+            "get_note_text",
+            "typed on the keyboard",
+            "text frames",
+            "equations",
+            "LaTeX",
+            "bookmarks",
+            "only in `get_note`",
+        ],
+    );
+    let titles = en.prompt("title_and_tag", json!({})).await;
+    in_order(
+        &titles,
+        &[
+            "get_note_text",
+            "text typed on the page",
+            "equations in LaTeX",
+        ],
+    );
+    let day = day_of(&en, OPTIQUE).await;
+    let summary = en.prompt("lesson_summary", json!({ "date": day })).await;
+    in_order(
+        &summary,
+        &[
+            "get_note_text",
+            "text typed on the page",
+            "equations in LaTeX",
+        ],
+    );
+
+    let fr = session_with(Language::Fr, ServerOptions::default()).await;
+    let clean = fr
+        .prompt("mettre_au_propre", json!({ "note": OPTIQUE }))
+        .await;
+    in_order(
+        &clean,
+        &[
+            "get_note_text",
+            "tapé au clavier",
+            "cadres de texte",
+            "équations",
+            "LaTeX",
+            "signets",
+            "que dans `get_note`",
+        ],
+    );
+    let titles = fr.prompt("titrer_et_etiqueter", json!({})).await;
+    in_order(
+        &titles,
+        &[
+            "get_note_text",
+            "texte tapé sur la page",
+            "équations en LaTeX",
+        ],
+    );
+    let day = day_of(&fr, DEVOIR).await;
+    let summary = fr.prompt("resume_seance", json!({ "date": day })).await;
+    in_order(
+        &summary,
+        &[
+            "get_note_text",
+            "texte tapé sur la page",
+            "équations en LaTeX",
+        ],
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn without_a_note_the_prompt_looks_for_the_last_live_one() {
     let en = session().await;

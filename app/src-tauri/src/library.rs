@@ -694,6 +694,7 @@ pub(crate) mod tests {
                     bold: false,
                     size: 600.0,
                     color: Rgba::BLACK,
+                    wrap_width: None,
                 },
             )
         };

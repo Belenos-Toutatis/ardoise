@@ -325,6 +325,7 @@ fn demo_frame(
             bold,
             size,
             color,
+            wrap_width: None,
         },
     )
 }

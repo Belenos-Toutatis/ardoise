@@ -3,8 +3,8 @@
    * Tools and style: mode (select, pen, the shape tools, eraser, move the page), ink tool, colour (Inkspace palette +
    * custom colours), width, eraser. With a shape tool, three toggles (`shapePrefs`): regular, from the centre, snap to
    * the page's template (docs/design/shape-tools.md). With the text tool (or text frames selected), the family, the size
-   * and bold (docs/design/page-objects.md §5); their buttons and the colours do not take the focus from the frame being
-   * typed (`keepFocus`). With the equation tool (or equations selected), the size (docs/design/equations.md).
+   * and bold (docs/design/page-objects.md §4), and with the text tool the Greek palette (`GreekPalette`); their buttons
+   * and the colours do not take the focus from the frame being typed (`keepFocus`). With the equation tool (or equations selected), the size (docs/design/equations.md).
    */
   import { INKSPACE_COLOR_NAMES, sameColor, toHex, fromHex } from '../../lib/editor/colors';
   import WidthControl from '../WidthControl.svelte';
@@ -17,6 +17,7 @@
   import { TOOLS, type Tool } from '../../lib/ink';
   import { INKSPACE_COLORS, cssColor, type Rgba, type ShapeSettings } from '../../lib/note';
   import StraightenPanel from './StraightenPanel.svelte';
+  import GreekPalette from './GreekPalette.svelte';
 
   let {
     tools,
@@ -287,6 +288,9 @@
       >
         {t('editor.text.bold')}
       </button>
+      {#if tools.mode === 'text'}
+        <GreekPalette font={text.font} bold={text.bold} disabled={locked} />
+      {/if}
       {#if tools.mode === 'text'}
         <span class="label text-help" data-slot="text-help">{t('editor.text.help')}</span>
       {/if}

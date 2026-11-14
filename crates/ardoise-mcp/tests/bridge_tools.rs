@@ -53,6 +53,7 @@ impl Handwriting for NoHandwriting {
     fn structure_of(&self, _note: &Note, _recognition: &Recognition) -> Structure {
         Structure {
             items: Vec::new(),
+            bounds: Vec::new(),
             analyzed: false,
         }
     }

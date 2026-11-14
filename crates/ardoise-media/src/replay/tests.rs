@@ -958,6 +958,7 @@ fn text_at(layer: u32, t: u32, (x, y): (f32, f32), text: &str, color: Rgba) -> P
             bold: true,
             size: 900.0,
             color,
+            wrap_width: None,
         },
     )
 }

@@ -511,6 +511,7 @@ fn code_widths(family: FontFamily, bold: bool) -> Vec<f32> {
         family,
         bold,
         size: 1000.0,
+        wrap: None,
     };
     (FIRST_CODE..=255)
         .map(|code| win_ansi_char(code).map_or(0.0, |c| layout(&c.to_string(), style).width))
@@ -1285,6 +1286,7 @@ mod tests {
                     family,
                     bold,
                     size: 1000.0,
+                    wrap: None,
                 };
                 let line = layout("Wé€ «a»", style).lines.remove(0);
                 for glyph in &line.glyphs {

@@ -105,6 +105,7 @@ b",
                         1.0 + self.unit() * 2000.0
                     },
                     color: Rgba::from_rgba_u32(self.next_u32()),
+                    wrap_width: None,
                 };
                 let (layer, t) = (self.below(u64::from(layers)) as u32, self.next_u32());
                 let (x, y) = (self.coord(), self.coord());

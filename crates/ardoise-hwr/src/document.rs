@@ -1,5 +1,5 @@
 //! A note's recognised content as a structured document: title, date and tags, then paragraphs,
-//! list items and drawings (cropped images). Platform-free; [`crate::markdown`] and
+//! list items, equations and drawings (cropped images). Platform-free; [`crate::markdown`] and
 //! [`crate::docx`] write it. The structure itself comes from [`crate::structure`].
 
 use std::fmt;
@@ -91,6 +91,38 @@ pub enum Block {
     ListItem(Text),
     /// Ink that is not text, as an image.
     Drawing(Drawing),
+    /// An equation typed on the page: its LaTeX source, on one line ([`equation_line`]).
+    /// Markdown writes it between dollar signs (`$…$`), which the Markdown editors with maths
+    /// (Obsidian, Typora, GitHub) read as a formula; Word has no LaTeX, so it holds the source as
+    /// a plain paragraph, readable and copyable.
+    Equation(String),
+}
+
+/// An equation's source on one line: no white space at either end, every run of white space that
+/// holds a line break replaced by one space (the other runs are kept as they are).
+pub fn equation_line(source: &str) -> String {
+    let mut line = String::with_capacity(source.len());
+    let mut run = String::new();
+    for c in source.trim().chars() {
+        if c.is_whitespace() {
+            run.push(c);
+            continue;
+        }
+        flush_run(&mut line, &mut run);
+        line.push(c);
+    }
+    flush_run(&mut line, &mut run);
+    line
+}
+
+/// Appends the run of white space `run` to `line`: one space when it holds a line break.
+fn flush_run(line: &mut String, run: &mut String) {
+    if run.contains(['\n', '\r']) {
+        line.push(' ');
+    } else {
+        line.push_str(run);
+    }
+    run.clear();
 }
 
 /// A drawing cropped from the note, as a PNG file.
@@ -215,6 +247,16 @@ pub(crate) mod tests {
         assert_eq!(Text::plain("  deux   mots "), Text::from("deux mots"));
         assert!(Text::plain(" ").is_empty());
         assert!(Text::default().is_empty());
+    }
+
+    #[test]
+    fn an_equation_source_is_put_on_one_line() {
+        assert_eq!(equation_line("  x^2 + y^2  "), "x^2 + y^2");
+        assert_eq!(equation_line("a =\n  b\r\n\r\n+ c"), "a = b + c");
+        // A run of spaces without a line break stays as typed.
+        assert_eq!(equation_line("a  +  b"), "a  +  b");
+        assert_eq!(equation_line("\\ce{H2O}\n"), "\\ce{H2O}");
+        assert_eq!(equation_line(" \n "), "");
     }
 
     #[test]

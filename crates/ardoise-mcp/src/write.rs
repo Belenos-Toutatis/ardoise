@@ -319,7 +319,7 @@ impl ArdoiseServer {
             .await
     }
 
-    /// Export notes with the app's own exports: png, jpg, webp, svg, pdf, txt (recognised text), md and docx (text with its structure and the drawings), gif, webm and mp4 (replay of the writing, one note; takes seconds to minutes). `path` is an absolute folder, or an absolute file name ending with the format's extension. An existing file is never overwritten: " (2)" is added. Returns the paths written.
+    /// Export notes with the app's own exports: png, jpg, webp, svg, pdf, txt (the note's text), md and docx (text with its structure and the drawings), gif, webm and mp4 (replay of the writing, one note; takes seconds to minutes). The txt, md and docx hold the recognised handwriting (or its correction) and the text typed on the page, in reading order: text frames, and equations as their LaTeX source (between `$` in md, a plain paragraph in docx); where handwriting cannot be recognised on this PC they hold the typed text alone. `path` is an absolute folder, or an absolute file name ending with the format's extension. An existing file is never overwritten: " (2)" is added. Returns the paths written.
     #[tool(
         name = "export_note",
         annotations(

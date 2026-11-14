@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { instantiateInk, type Ink } from './ink';
-import { LINE_HEIGHT, TEXT_SIZES, offsetAt, parsePath, textFieldStyle, tracePath, type TextStyle } from './text';
+import { FONT_FACES, LINE_HEIGHT, TEXT_SIZES, offsetAt, parsePath, textFieldStyle, tracePath, type TextStyle } from './text';
 
 let ink: Ink;
 const LM: TextStyle = { font: 'latinModern', bold: false, size: 1000 };
@@ -98,19 +98,27 @@ describe('glyphs', () => {
 });
 
 describe('fonts', () => {
-  it('are the four files shipped with the app', () => {
+  it('are the five files shipped with the app, in the order of their codes', () => {
     const magic = (bytes: Uint8Array) => Array.from(bytes.slice(0, 4)).map((b) => b.toString(16).padStart(2, '0')).join('');
     // OpenType with CFF outlines ("OTTO"), TrueType (0x00010000).
-    expect(magic(ink.text.fontBytes('latinModern', false))).toBe('4f54544f');
-    expect(magic(ink.text.fontBytes('latinModern', true))).toBe('4f54544f');
-    expect(magic(ink.text.fontBytes('andika', false))).toBe('00010000');
-    expect(ink.text.fontBytes('andika', true).length).toBe(748_748);
-    expect(ink.text.fontBytes('latinModern', false).length).toBe(111_536);
+    expect(FONT_FACES.map((f) => f.code)).toEqual([0, 1, 2, 3, 4]);
+    expect(magic(ink.text.fontBytes(0))).toBe('4f54544f');
+    expect(magic(ink.text.fontBytes(1))).toBe('4f54544f');
+    expect(magic(ink.text.fontBytes(2))).toBe('00010000');
+    expect(ink.text.fontBytes(3).length).toBe(748_748);
+    expect(ink.text.fontBytes(0).length).toBe(111_536);
+    // Latin Modern Math, where Greek and the symbols come from.
+    expect(magic(ink.text.fontBytes(4))).toBe('4f54544f');
+    expect(ink.text.fontBytes(4).length).toBe(733_736);
+    // Andika is registered without the Greek block, so that the browser takes Greek from Latin Modern Math.
+    expect(FONT_FACES.filter((f) => f.unicodeRange).map((f) => f.code)).toEqual([2, 3]);
+    expect(FONT_FACES[2].unicodeRange).toBe('U+0-36F, U+400-10FFFF');
   });
 
   it('style the text field like the layout: no wrapping, kerning nor ligature, the same line height', () => {
     const css = textFieldStyle({ font: 'andika', bold: true, size: TEXT_SIZES.medium }, 0.1);
-    expect(css).toContain('font-family: "Ardoise Andika", "Ardoise Latin Modern"');
+    expect(css).toContain('font-family: "Ardoise Andika", "Ardoise Latin Modern Math", "Ardoise Latin Modern"');
+    expect(textFieldStyle(LM, 0.1)).toContain('font-family: "Ardoise Latin Modern", "Ardoise Latin Modern Math", "Ardoise Andika"');
     expect(css).toContain('font-weight: 700');
     expect(css).toContain('font-size: 60px');
     expect(css).toContain('line-height: 75px');

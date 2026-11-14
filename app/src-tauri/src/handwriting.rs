@@ -27,6 +27,7 @@ use std::time::Duration;
 use ardoise_core::fsutil::write_atomic;
 use ardoise_core::note::Note;
 use ardoise_core::settings::HandwritingLanguage;
+use ardoise_hwr::typed::{TypedBlock, corrected_text, interleaved_text, typed_blocks};
 use ardoise_hwr::{HwrError, Language, Recognition, RecognizerInfo, SystemRecognizer};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -218,7 +219,8 @@ pub fn handwriting_resume(runtime: State<'_, HandwritingRuntime>) -> CommandResu
     Ok(())
 }
 
-/// The recognised text of one note (`NoteText` in `handwriting.ts`).
+/// The text of one note (`NoteText` in `handwriting.ts`): its handwriting, recognised or corrected,
+/// and the text typed on its page.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NoteText {
     pub path: String,
@@ -228,46 +230,64 @@ pub struct NoteText {
     pub text: String,
 }
 
-/// What the text exports read of a note: the recognition of the whole note (the words where the
-/// ink is) and the transcription the user corrected for its ink, which wins. The `.txt` export,
-/// the clipboard and the preview, Markdown and Word all give the same words.
+/// What the text exports read of a note's handwriting: the recognition of the whole note (the
+/// words where the ink is) and the transcription the user corrected for its ink, which wins. The
+/// `.txt` export, the clipboard and the preview, Markdown and Word all give the same words. The
+/// text typed on the page (frames, equations) is not here: it needs no recognition, the exports
+/// take it from the note (`ardoise_hwr::typed`).
 pub(crate) struct NoteReading {
     pub recognition: Arc<Recognition>,
     pub correction: Option<String>,
+    /// The handwriting could not be recognised here (no recognizer on this PC): `recognition` is
+    /// empty, and only the correction, if there is one, has its words.
+    pub unread: bool,
 }
 
 impl NoteReading {
-    /// The note's text, line after line: the correction (its blank lines kept), else the
-    /// recognised lines.
+    /// The note's handwriting as text, line after line: the correction (its blank lines kept),
+    /// else the recognised lines.
     pub fn text(&self) -> String {
         match &self.correction {
             Some(text) => corrected_text(text),
             None => self.recognition.text(),
         }
     }
-}
 
-/// A corrected transcription as text: lines without trailing spaces or `\r`, no blank line at
-/// either end.
-fn corrected_text(text: &str) -> String {
-    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
-    lines.join("\n").trim_matches('\n').to_owned()
+    /// The note's text with the `typed` blocks of its page ([`typed_blocks`]) among the lines of
+    /// the handwriting (`ardoise_hwr::typed::interleaved_text`); [`text`](Self::text) when there
+    /// are none.
+    pub fn text_with(&self, typed: &[TypedBlock]) -> String {
+        if typed.is_empty() {
+            return self.text();
+        }
+        interleaved_text(&self.recognition, self.correction.as_deref(), typed)
+    }
 }
 
 /// Reads `note` for the text exports: its correction, and its recognition from the cache or
 /// recognised now. A note with a correction is still exported when it cannot be recognised
-/// here (no recognizer on this PC): the correction is its text, without positions.
+/// here (no recognizer on this PC): the correction is its text, without positions. So is a note
+/// with typed text on its page: it is read as having no handwriting, and the typed text is its
+/// text; one with neither fails with the recognition's error.
 pub(crate) fn reading_of(indexer: &Indexer, note: &Note) -> Result<NoteReading, HwrError> {
     let correction = indexer.correction_of(note);
     match indexer.recognition_of(note) {
         Ok(recognition) => Ok(NoteReading {
             recognition,
             correction: correction.map(|c| c.text),
+            unread: false,
         }),
         Err(error) => match correction {
             Some(correction) => Ok(NoteReading {
                 recognition: Arc::new(Recognition::empty(correction.language)),
                 correction: Some(correction.text),
+                unread: true,
+            }),
+            // The language of an empty recognition is never read.
+            None if !typed_blocks(note).is_empty() => Ok(NoteReading {
+                recognition: Arc::new(Recognition::empty(Language::Fr)),
+                correction: None,
+                unread: true,
             }),
             None => Err(error),
         },
@@ -275,16 +295,22 @@ pub(crate) fn reading_of(indexer: &Indexer, note: &Note) -> Result<NoteReading, 
 }
 
 /// The text of `note` as the `.txt` export and the clipboard give it: its correction, else its
-/// recognised lines (recognised now when the cache does not have them).
+/// recognised lines (recognised now when the cache does not have them), with the text typed on
+/// its page among them. Without a recognizer, a note with typed text gives that text alone.
 pub(crate) fn plain_text_of(indexer: &Indexer, note: &Note) -> Result<String, HwrError> {
-    match indexer.correction_of(note) {
-        Some(correction) => Ok(corrected_text(&correction.text)),
-        None => Ok(indexer.recognition_of(note)?.text()),
+    let typed = typed_blocks(note);
+    if typed.is_empty() {
+        return match indexer.correction_of(note) {
+            Some(correction) => Ok(corrected_text(&correction.text)),
+            None => Ok(indexer.recognition_of(note)?.text()),
+        };
     }
+    Ok(reading_of(indexer, note)?.text_with(&typed))
 }
 
 /// The text of `sources` (the editor's note as it is in memory, or notes of the library): the
-/// corrected transcription, else the recognition, made now when the cache does not have it.
+/// corrected transcription, else the recognition, made now when the cache does not have it, with
+/// the text typed on the page among it ([`plain_text_of`]).
 fn texts_of(
     indexer: &Indexer,
     context: &AppContext,
@@ -518,6 +544,160 @@ mod tests {
         assert!(reading.recognition.is_empty());
         assert_eq!(reading.recognition.language, Language::Fr);
         assert_eq!(reading.text(), "  Le renard\n\ndort");
+        indexer.shutdown();
+    }
+
+    /// `note` with a frame (two lines, the second a list item) at (1 000, 1 000) and an equation
+    /// at (1 000, 9 000) of its page; `hidden`: both on a layer the note does not show.
+    fn with_typed_text(mut note: Note, hidden: bool) -> Note {
+        use ardoise_core::note::{EquationBody, FontFamily, PageObject, TextBody};
+        let layer = u32::from(hidden);
+        let mut frame = PageObject::text(
+            "cadre",
+            layer,
+            0,
+            1000.0,
+            1000.0,
+            TextBody {
+                text: "Titre\n- pommes".into(),
+                font: FontFamily::Andika,
+                bold: false,
+                size: 400.0,
+                color: ardoise_ink::Rgba::BLACK,
+                wrap_width: None,
+            },
+        );
+        (frame.width, frame.height) = (3000.0, 900.0);
+        let mut equation = PageObject::equation(
+            "formule",
+            layer,
+            0,
+            [1000.0, 9000.0],
+            1.0,
+            EquationBody {
+                latex: "E =\n mc^2".into(),
+                path: String::new(),
+                color: ardoise_ink::Rgba::BLACK,
+            },
+        );
+        (equation.width, equation.height) = (2000.0, 600.0);
+        note.objects = vec![frame, equation];
+        note
+    }
+
+    /// An indexer on `engine`, its cache in `cache`.
+    fn indexer_on(engine: Arc<dyn ardoise_hwr::Recognizer>, cache: &Path) -> Indexer {
+        Indexer::start(Services {
+            background: engine.clone(),
+            on_demand: engine,
+            config: Box::new(|| IndexConfig {
+                library: None,
+                setting: HandwritingLanguage::Auto,
+                interface: Language::Fr,
+            }),
+            busy: Box::new(|| false),
+            notify: Box::new(|_| {}),
+            cache_dir: cache.to_path_buf(),
+            pause_poll: Duration::from_millis(5),
+        })
+    }
+
+    fn source_of(note: Note) -> ExportSource {
+        ExportSource {
+            path: "x".into(),
+            note: Some(note),
+            image_key: None,
+        }
+    }
+
+    #[test]
+    fn typed_text_is_the_text_of_a_note_no_recognizer_can_read() {
+        let settings = tempfile::tempdir().unwrap();
+        let context = context(settings.path());
+        let cache = tempfile::tempdir().unwrap();
+        let indexer = indexer_on(Arc::new(Unsupported), cache.path());
+        let typed = with_typed_text(sample_note("Fiche"), false);
+        // The frame, then the equation on one line, without any recognition.
+        let texts = texts_of(&indexer, &context, vec![source_of(typed.clone())]).unwrap();
+        assert_eq!(texts[0].text, "Titre\n- pommes\nE = mc^2");
+        assert_eq!(
+            text_document(&texts),
+            "Fiche\r\n=====\r\n\r\nTitre\r\n- pommes\r\nE = mc^2\r\n"
+        );
+        let reading = reading_of(&indexer, &typed).unwrap();
+        assert!(reading.unread && reading.recognition.is_empty());
+        // A note with nothing typed that shows (the layer is hidden, or the note has none)
+        // still fails: the code says why.
+        for note in [
+            with_typed_text(sample_note("Cachée"), true),
+            sample_note("Brouillon"),
+        ] {
+            let error = texts_of(&indexer, &context, vec![source_of(note)]).unwrap_err();
+            assert_eq!(error.code(), "handwritingUnsupported");
+        }
+        // A correction of the ink and typed text: the correction, then the typed text.
+        CacheDir::new(cache.path())
+            .set_correction_for(&typed, Language::Fr, "Le renard\ndort")
+            .unwrap();
+        let texts = texts_of(&indexer, &context, vec![source_of(typed)]).unwrap();
+        assert_eq!(texts[0].text, "Le renard\ndort\nTitre\n- pommes\nE = mc^2");
+        indexer.shutdown();
+    }
+
+    /// Reads any ink as two lines, "avant" at (1 000, 5 000) and "après" at (1 000, 15 000).
+    struct TwoLines;
+
+    impl ardoise_hwr::Recognizer for TwoLines {
+        fn recognizers(&self) -> Result<Vec<RecognizerInfo>, HwrError> {
+            Ok(vec![RecognizerInfo {
+                name: "Français".into(),
+                language: Some(Language::Fr),
+            }])
+        }
+
+        fn recognize(
+            &self,
+            _: &[ardoise_ink::Stroke],
+            language: Language,
+        ) -> Result<ardoise_hwr::Recognition, HwrError> {
+            let line = |text: &str, y: f32| {
+                ardoise_hwr::Line::new(vec![ardoise_hwr::Word {
+                    text: text.into(),
+                    alternatives: Vec::new(),
+                    bounds: ardoise_hwr::Bounds {
+                        x: 1000.0,
+                        y,
+                        width: 1500.0,
+                        height: 400.0,
+                    },
+                }])
+            };
+            Ok(ardoise_hwr::Recognition {
+                language,
+                recognizer: String::new(),
+                lines: vec![line("avant", 5000.0), line("après", 15_000.0)],
+            })
+        }
+    }
+
+    #[test]
+    fn typed_text_is_read_among_the_recognised_lines() {
+        let settings = tempfile::tempdir().unwrap();
+        let context = context(settings.path());
+        let cache = tempfile::tempdir().unwrap();
+        let indexer = indexer_on(Arc::new(TwoLines), cache.path());
+        let typed = with_typed_text(sample_note("Fiche"), false);
+        let texts = texts_of(&indexer, &context, vec![source_of(typed.clone())]).unwrap();
+        // The frame is above the first line, the equation between the two.
+        assert_eq!(texts[0].text, "Titre\n- pommes\navant\nE = mc^2\naprès");
+        // Without typed text: the recognised lines, as always.
+        let plain = texts_of(&indexer, &context, vec![source_of(sample_note("Seul"))]).unwrap();
+        assert_eq!(plain[0].text, "avant\naprès");
+        // The reading is the same for the exports that build a document from it.
+        let reading = reading_of(&indexer, &typed).unwrap();
+        assert!(!reading.unread);
+        assert_eq!(reading.text(), "avant\naprès");
+        assert_eq!(reading.text_with(&typed_blocks(&typed)), texts[0].text);
         indexer.shutdown();
     }
 

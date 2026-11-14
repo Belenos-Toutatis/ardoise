@@ -1362,6 +1362,7 @@ fn the_listing_gives_the_typed_text_of_a_note_without_opening_its_ink() {
                 bold: false,
                 size: 600.0,
                 color: ardoise_ink::Rgba::BLACK,
+                wrap_width: None,
             },
         )
     };

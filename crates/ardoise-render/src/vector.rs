@@ -215,6 +215,7 @@ mod tests {
                     bold: false,
                     size: 400.0,
                     color: Rgba::BLACK,
+                    wrap_width: None,
                 },
             )
         };

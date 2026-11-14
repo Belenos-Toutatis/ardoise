@@ -1392,8 +1392,12 @@ with a tablet.
 
 The **Text** tool (the `T` key) puts on the page a frame where you type with the keyboard: tap or click the page where you want
 it (with the pen, the mouse or a finger; on a touch screen, Windows offers its on-screen keyboard), then type. The text is drawn
-as you type, as it will be exported. `Enter` starts a new line; a line never runs on to the next by itself: the frame widens
-with what you type. `Esc` (or a click elsewhere, or another tool) ends the typing: the text stays, and the frame is selected.
+as you type, as it will be exported. The text **wraps by itself** at the page's right edge (less 1 cm), from where the frame
+was put; `Enter` starts a new paragraph. A word longer than the line is cut where it crosses it. To change a frame's width,
+select it alone with the **Select** tool and drag one of its **side handles** (the small bars in the middle of its left and
+right edges): the text wraps again at the new width and the frame grows or shrinks in height; the corner handles still make
+the whole frame larger or smaller. A frame typed before this version does not wrap (its lines stay as they were) until you
+change its width. `Esc` (or a click elsewhere, or another tool) ends the typing: the text stays, and the frame is selected.
 A frame left empty goes away. The whole typing is undone by one `Ctrl + Z`. While you type, the keys go to the text, never to
 the editor's shortcuts.
 
@@ -1404,8 +1408,16 @@ Under the toolbar, with the **Text** tool or when texts are selected:
 ![The toolbar with the Text tool chosen: Font (Latin Modern or Andika), Size (Small, Medium, Large) and Bold](images/en/outils-texte.webp)
 
 - **Font**: **Latin Modern** (the font of LaTeX) or **Andika** (a font designed for learning to read). Both come with
-  Ardoise: the text is the same on every computer and in every export. The Greek letters Latin Modern lacks are taken from
-  Andika (not all of them: α, β, γ, δ, θ, λ, μ, π, ρ, σ, φ, χ, ω, Δ, Ω, among others).
+  Ardoise: the text is the same on every computer and in every export. **The whole Greek alphabet** (lower case, upper case,
+  ϵ ϑ ϕ ϖ ϱ) and the symbols of physics and chemistry (µ Ω ° ± × · ≈ ≠ ≤ ≥ → ⇌ ∞ √ ∑ ∫ ∂ ∝ ‰ ′ ″, superscripts ⁰…⁹ ⁺ ⁻ and
+  subscripts ₀…₉) can be typed in both fonts, in bold too: they come from Latin Modern Math, the maths font of the same family.
+  A character no font of Ardoise has (an emoji, an ideogram…) is drawn as a square □, and Ardoise names it under the frame
+  while you type.
+- **αβγ** (Greek alphabet): opens a palette under the toolbar, with the lower case letters (and the final sigma ς), the upper
+  case letters, the variants ϵ ϑ ϕ ϖ ϱ, symbols, superscripts and subscripts. First touch the page to type a text, then touch a
+  letter: it is added at the frame's cursor (in place of the selected text), and the cursor stays in the frame; the palette
+  stays open for several letters. `Esc` closes it (a second `Esc` ends the typing), as do its button and another tool. With the
+  keyboard: `Tab` to the palette, the arrows, then `Enter`.
 - **Size**: **Small** (4 mm), **Medium** (6 mm) or **Large** (9 mm).
 - **Bold**.
 - The colour is the tool's: choose it among the toolbar's colours.
@@ -1842,6 +1854,12 @@ could not analyse the layout, Ardoise says so: the structure is then guessed fro
   recognition of the whole note. Windows' layout analysis only supplies the structure (paragraphs, lists, drawings).
 - *Corrections win.* If a corrected text has been saved for the note (by the assistant, chapter 14), that is what is
   exported, everywhere, instead of the recognised text.
+- *Typed text is there too.* The page's text frames and equations are in the .txt, the Markdown, the Word file, the copied
+  text and the preview, in their place among the handwriting (a text put above a paragraph comes before it; side by side, the
+  left one first), each typed line kept, without the frame's automatic line wrapping. In Markdown an equation is written
+  between dollar signs (`$…$`), which editors with maths support read; in Word and in the .txt it is its LaTeX code, readable
+  and copyable. A note with only typed text is exported even when Windows cannot read handwriting on this computer. Bookmarks
+  are not exported as text.
 - *A line under words* underlines them: it becomes **bold** in Markdown (which has no underline) and a real underline in
   Word. A line struck through words strikes them (`~~word~~` in Markdown, struck text in Word). These lines are not
   exported as images.

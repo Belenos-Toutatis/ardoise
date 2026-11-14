@@ -199,7 +199,7 @@ fn clean_up_text(
                  Format demandé : {format_name}.\n\n\
                  Procède dans cet ordre.\n\
                  1. Regarde la note. Appelle `get_note` (avec `strokes: \"summary\"`) pour la taille de la page, les calques et les traits, puis `render_note` pour la page entière à une définition lisible (dpi 100 à 150). Zoome ensuite avec `render_note` et `region` (en millimètres depuis le coin haut gauche de la page) sur les zones denses, les formules, les schémas et les graphiques, avec un dpi plus élevé (200 à 300). La reconnaissance d'écriture se trompe sur les formules, les symboles et les schémas : l'image fait foi.\n\
-                 2. Lis le texte reconnu avec `get_note_text` : chaque ligne a sa position en millimètres, ce qui permet de la retrouver sur l'image, et la structure (paragraphes, listes, dessins avec leur zone et leurs traits) aide à retrouver la mise en page. Corrige-le d'après l'image.\n\
+                 2. Lis le texte reconnu avec `get_note_text` : chaque ligne a sa position en millimètres, ce qui permet de la retrouver sur l'image, et la structure (paragraphes, listes, dessins avec leur zone et leurs traits) aide à retrouver la mise en page. Corrige-le d'après l'image. Le texte tapé au clavier sur la page (cadres de texte, équations) n'est pas reconnu : `get_note_text` le donne tel qu'il a été saisi, exact (`typed_frames`, `equations` avec leur source LaTeX, `typed_text`, et dans la structure, à sa place parmi l'écriture), recopie-le sans le corriger ; les signets (mots posés à des endroits de la page) ne sont que dans `get_note`.\n\
                  3. Écris un document propre et fidèle. N'invente rien : ne complète pas le cours, ne corrige pas silencieusement une erreur de fond (signale-la à la fin), ne change ni les valeurs ni les unités. Garde l'ordre et la hiérarchie de la page : titres, listes, tableaux, formules, unités ; les schémas (circuits, montages, rayons lumineux, molécules, courbes) sont redessinés avec les moyens du format. {rules}\n\
                  4. Enregistre le document avec tes propres outils de fichiers si tu en as, à l'endroit que l'utilisateur indique (par défaut son dossier de travail), sans écraser un fichier existant. Sinon donne-le dans ta réponse. {export}\n\
                  5. Termine par la liste de ce qui reste incertain : mots illisibles, symboles ou valeurs devinés, schémas simplifiés, erreurs de fond rencontrées, avec leur position sur la page (en millimètres) pour que l'utilisateur vérifie.\n\n\
@@ -228,7 +228,7 @@ fn clean_up_text(
                  Requested format: {format_name}.\n\n\
                  Proceed in this order.\n\
                  1. Look at the note. Call `get_note` (with `strokes: \"summary\"`) for the page size, the layers and the strokes, then `render_note` for the whole page at a readable resolution (100 to 150 dpi). Then zoom with `render_note` and `region` (in millimetres from the top-left corner of the page) on dense areas, formulas, diagrams and graphs, at a higher dpi (200 to 300). Handwriting recognition gets formulas, symbols and diagrams wrong: the image is the reference.\n\
-                 2. Read the recognised text with `get_note_text`: each line has its position in millimetres, which lets you find it on the image, and the structure (paragraphs, list items, drawings with their area and strokes) helps to recover the layout. Correct it from the image.\n\
+                 2. Read the recognised text with `get_note_text`: each line has its position in millimetres, which lets you find it on the image, and the structure (paragraphs, list items, drawings with their area and strokes) helps to recover the layout. Correct it from the image. Text typed on the keyboard on the page (text frames, equations) is not recognised: `get_note_text` gives it exactly as it was entered (`typed_frames`, `equations` with their LaTeX source, `typed_text`, and in the structure, in its place among the handwriting), copy it without correcting it; bookmarks (words put at spots of the page) are only in `get_note`.\n\
                  3. Write a faithful, clean document. Invent nothing: do not complete the lesson, do not silently fix a mistake of substance (flag it at the end), change neither values nor units. Keep the order and hierarchy of the page: titles, lists, tables, formulas, units; diagrams (circuits, set-ups, light rays, molecules, curves) are redrawn with the means of the format. {rules}\n\
                  4. Save the document with your own file tools if you have them, where the user says (by default their working folder), without overwriting an existing file. Otherwise give it in your reply. {export}\n\
                  5. End with the list of what remains uncertain: unreadable words, guessed symbols or values, simplified diagrams, mistakes of substance, with their position on the page (in millimetres) so that the user can check.\n\n\
@@ -386,7 +386,7 @@ fn title_and_tag_text(
                 "Tu aides à donner un titre et des étiquettes aux notes d'Ardoise qui n'en ont pas. Une note « sans titre » a un titre vide (l'application affiche alors sa date de création).\n\n\
                  Notes sans titre {scope} : {total}, les plus récentes d'abord.\n{list}\n\n\
                  Procède dans cet ordre.\n\
-                 1. Pour chaque note de la liste (si elle est incomplète, `list_notes` avec `binder` donne les autres : ne garde que celles dont `title` est vide), appelle `render_note` (page entière, dpi 80 à 100) pour la voir et `get_note_text` pour son texte reconnu. L'image fait foi : la reconnaissance se trompe sur les formules et les schémas. Une note vide ou illisible n'a rien à recevoir : dis-le.\n\
+                 1. Pour chaque note de la liste (si elle est incomplète, `list_notes` avec `binder` donne les autres : ne garde que celles dont `title` est vide), appelle `render_note` (page entière, dpi 80 à 100) pour la voir et `get_note_text` pour son texte (l'écriture reconnue, plus le texte tapé sur la page, exact : cadres de texte et équations en LaTeX). L'image fait foi : la reconnaissance se trompe sur les formules et les schémas. Une note vide ou illisible n'a rien à recevoir : dis-le.\n\
                  2. Propose un titre court et précis (3 à 8 mots, sans la date, qui dit de quoi parle la note : « Loi d'Ohm - exercices ») et 1 à 4 étiquettes courtes en minuscules. Regarde d'abord les étiquettes qui existent (`list_tags`) et réutilise-les plutôt que d'en créer de proches. N'utilise aucun nom d'élève.\n\
                  {apply}"
             )
@@ -408,7 +408,7 @@ fn title_and_tag_text(
                 "You are helping to give a title and tags to the Ardoise notes that have none. An \"untitled\" note has an empty title (the app then shows its creation date).\n\n\
                  Untitled notes {scope}: {total}, newest first.\n{list}\n\n\
                  Proceed in this order.\n\
-                 1. For each note of the list (if it is incomplete, `list_notes` with `binder` gives the others: keep only those whose `title` is empty), call `render_note` (whole page, 80 to 100 dpi) to see it and `get_note_text` for its recognised text. The image is the reference: recognition gets formulas and diagrams wrong. An empty or unreadable note has nothing to receive: say so.\n\
+                 1. For each note of the list (if it is incomplete, `list_notes` with `binder` gives the others: keep only those whose `title` is empty), call `render_note` (whole page, 80 to 100 dpi) to see it and `get_note_text` for its text (the recognised handwriting, plus the text typed on the page, exact: text frames and equations in LaTeX). The image is the reference: recognition gets formulas and diagrams wrong. An empty or unreadable note has nothing to receive: say so.\n\
                  2. Propose a short, precise title (3 to 8 words, without the date, saying what the note is about: \"Ohm's law - exercises\") and 1 to 4 short lowercase tags. Look at the existing tags first (`list_tags`) and reuse them instead of creating close ones. Use no student's name.\n\
                  {apply}"
             )
@@ -440,7 +440,7 @@ fn lesson_summary_text(
                 "Tu rédiges, pour le cahier de textes, un court résumé d'une séance d'après les notes d'Ardoise. Date de la séance : {day}.{class}\n\n\
                  Notes de la séance, dans l'ordre où elles ont été prises ({total}) :\n{list}\n{none}\n\
                  Procède dans cet ordre.\n\
-                 1. Pour chaque note, lis `get_note_text` (structure comprise) et regarde `render_note` pour les schémas, formules et tableaux : l'image fait foi, la reconnaissance se trompe sur les formules et les symboles.\n\
+                 1. Pour chaque note, lis `get_note_text` (écriture reconnue et texte tapé sur la page, cadres de texte et équations en LaTeX, exacts ; structure comprise) et regarde `render_note` pour les schémas, formules et tableaux : l'image fait foi, la reconnaissance se trompe sur les formules et les symboles.\n\
                  2. Rédige, prêt à copier :\n\
                  - une ligne de titre pour la séance ;\n\
                  - « Contenu de la séance » : 3 à 6 puces courtes (notions, définitions, expériences, exercices), au plus près de ce qui est écrit, avec le vocabulaire du programme de collège ;\n\
@@ -464,7 +464,7 @@ fn lesson_summary_text(
                 "You are writing, for the class log (cahier de textes), a short summary of a lesson from the Ardoise notes. Date of the lesson: {day}.{class}\n\n\
                  Notes of the lesson, in the order they were taken ({total}):\n{list}\n{none}\n\
                  Proceed in this order.\n\
-                 1. For each note, read `get_note_text` (structure included) and look at `render_note` for diagrams, formulas and tables: the image is the reference, recognition gets formulas and symbols wrong.\n\
+                 1. For each note, read `get_note_text` (recognised handwriting and text typed on the page, text frames and equations in LaTeX, exact; structure included) and look at `render_note` for diagrams, formulas and tables: the image is the reference, recognition gets formulas and symbols wrong.\n\
                  2. Write, ready to copy:\n\
                  - one title line for the lesson;\n\
                  - \"Lesson content\": 3 to 6 short bullets (concepts, definitions, experiments, exercises), as close as possible to what is written, in the vocabulary of the lower secondary curriculum;\n\

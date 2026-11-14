@@ -962,6 +962,7 @@ fn frame(id: &str, layer: u32, t: u32, x: f32, y: f32) -> PageObject {
             bold: false,
             size: 400.0,
             color: Rgba::BLACK,
+            wrap_width: None,
         },
     )
 }

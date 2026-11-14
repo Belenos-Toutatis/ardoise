@@ -71,8 +71,11 @@
     objectTransform,
     objectsInLasso,
     objectsOf,
+    replaceObject,
+    rewrapped,
     textAt,
     textStyle,
+    wrapHandles,
     type BookmarkLook,
   } from '../../lib/editor/objects';
   import { offsetAt } from '../../lib/text';
@@ -87,7 +90,7 @@
     pointerKind,
     type TouchAction,
   } from '../../lib/gestures';
-  import { corners, grabAt as grabOnFrame } from '../../lib/selection-grab';
+  import { GRAB_TOLERANCE, corners, grabAt as grabOnFrame } from '../../lib/selection-grab';
   import { touchPrefs } from '../../lib/touch-prefs.svelte';
   import { placedImage } from '../../lib/editor/image';
   import { MIN_CROP } from '../../lib/editor/ops';
@@ -279,6 +282,8 @@
     | { kind: 'zone'; id: number; points: Vec[] }
     | { kind: 'move'; id: number; start: Vec }
     | { kind: 'scale'; id: number; anchor: Vec; start: Vec }
+    /** A side handle of the one text frame selected: its width changes, its text wraps again (`rewrapped`). */
+    | { kind: 'wrap'; id: number; index: number; side: 'left' | 'right'; object: TextObject }
     | { kind: 'crop'; id: number; start: Vec }
     /** The text tool: a press that is a tap when it ends where it began (screen pixels). */
     | { kind: 'text'; id: number; start: Vec; screen: Vec; bookmark: boolean };
@@ -540,6 +545,34 @@
     );
   });
 
+  /**
+   * The text frame whose side handles show: the selection is that one frame alone, with the selection tool (or after a
+   * barrel-button lasso). Its side handles change the width its lines wrap at; the corner handles still scale it.
+   */
+  const wrapFrame = $derived.by(() => {
+    if (readonly || split || dragAffine || !(tools.mode === 'select' || barrelActive) || shown.selection.length > 0) return null;
+    const picked = objectSelection(shown);
+    if (picked.length !== 1) return null;
+    const object = objectsOf(shown.note)[picked[0]];
+    return object && isTextObject(object) ? { index: picked[0], object, handles: wrapHandles(object) } : null;
+  });
+  /** The side handles are drawn across the frame's lines: upright for an upright frame, flat for a turned one. */
+  const wrapUpright = $derived(wrapFrame ? wrapFrame.object.quarterTurns % 2 === 0 : true);
+
+  /** A press on a side handle of the text frame selected, as a drag, or null. */
+  function wrapGrab(e: PointerEvent): Drag | null {
+    if (!wrapFrame) return null;
+    const p = pagePoint(e);
+    const reach = GRAB_TOLERANCE[pointerKind(e)].handle / view.scale;
+    for (const side of ['right', 'left'] as const) {
+      const h = wrapFrame.handles[side];
+      if (Math.abs(p.x - h.x) <= reach && Math.abs(p.y - h.y) <= reach) {
+        return { kind: 'wrap', id: pointerId(e), index: wrapFrame.index, side, object: wrapFrame.object };
+      }
+    }
+    return null;
+  }
+
   function measure() {
     const width = stage?.clientWidth ?? 0;
     const height = stage?.clientHeight ?? 0;
@@ -764,6 +797,8 @@
    */
   function frameGrab(e: PointerEvent): Drag | null {
     if (!selectionBox) return null;
+    const side = wrapGrab(e);
+    if (side) return side;
     const p = pagePoint(e);
     const grab = grabOnFrame(selectionBox, p, view.scale, pointerKind(e));
     if (!grab) return null;
@@ -1012,6 +1047,11 @@
       case 'crop':
         cropRect = rectFromCorners(drag.start, pagePoint(e));
         break;
+      case 'wrap': {
+        const next = rewrapped(drag.object, drag.side, pagePoint(e), ink.text);
+        transient = { ...doc, note: replaceObject(doc.note, drag.index, next) };
+        break;
+      }
     }
   }
 
@@ -1153,6 +1193,10 @@
         if (!cancelled && dragAffine) onchange(transformSelection(doc, dragAffine));
         dragAffine = null;
         break;
+      case 'wrap':
+        if (!cancelled && transient && transient !== doc) onchange(transient);
+        transient = null;
+        break;
       case 'crop': {
         const rect = cropRect && intersection(cropRect, { x: 0, y: 0, width: page.width, height: page.height });
         cropRect = null;
@@ -1289,6 +1333,25 @@
             height={HANDLE_PX / view.scale}
           />
         {/each}
+        {#if wrapFrame}
+          {#each ['left', 'right'] as const as side}
+            {@const h = wrapFrame.handles[side]}
+            {@const long = (HANDLE_PX * 2.2) / view.scale}
+            {@const thin = (HANDLE_PX * 0.8) / view.scale}
+            <rect
+              class="handle wrap-handle"
+              class:flat={!wrapUpright}
+              data-slot="wrap-handle-{side}"
+              x={h.x - (wrapUpright ? thin : long) / 2}
+              y={h.y - (wrapUpright ? long : thin) / 2}
+              width={wrapUpright ? thin : long}
+              height={wrapUpright ? long : thin}
+              rx={thin / 2}
+            >
+              <title>{t('editor.text.wrapHandle')}</title>
+            </rect>
+          {/each}
+        {/if}
       {/if}
     {/if}
     {#if lasso}
@@ -1496,6 +1559,16 @@
     stroke-width: 1.5px;
     vector-effect: non-scaling-stroke;
     cursor: nwse-resize;
+  }
+
+  /* The side handles of a text frame: its width (where its lines wrap). */
+  .handle.wrap-handle {
+    fill: var(--accent);
+    cursor: ew-resize;
+  }
+
+  .handle.wrap-handle.flat {
+    cursor: ns-resize;
   }
 
   .lasso {

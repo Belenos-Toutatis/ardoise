@@ -12,7 +12,7 @@ use ardoise_core::format::NoteFile;
 use ardoise_core::library::{self, FileStamp, Library, SavedNote};
 use ardoise_core::note::{A4_LANDSCAPE, Background, Layer, Note, Origin, PageSize, Timing};
 use ardoise_core::ops::{self, NewNote};
-use ardoise_hwr::structure::{DrawingArea, Item, Structure, from_recognition, ink_boxes};
+use ardoise_hwr::structure::{DrawingArea, Item, Structure, ink_boxes};
 use ardoise_hwr::{Bounds, HwrError, Language, Line, Recognition, Word};
 use ardoise_ink::{Point, Rgba, ShapeTuning, Stroke, Tool};
 use ardoise_mcp::write::{ExportOutcome, ExportRequest, ExportTarget, MergeLayout, WriteServices};
@@ -76,6 +76,8 @@ pub struct Fake {
     /// The drawings that "Windows' ink analysis" finds, by note id (stroke indices); a note
     /// without an entry gets no analysis (the layout heuristics, `analyzed: false`).
     pub drawings: Mutex<HashMap<String, Vec<usize>>>,
+    /// The recogniser fails (no recognizer on this PC): `HwrError::Unsupported`.
+    pub failing: std::sync::atomic::AtomicBool,
 }
 
 pub fn fold(text: &str) -> String {
@@ -88,6 +90,9 @@ impl Handwriting for Fake {
         note: &Note,
         language: Option<Language>,
     ) -> Result<Arc<Recognition>, HwrError> {
+        if self.failing.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(HwrError::Unsupported);
+        }
         let lines = self
             .by_id
             .lock()
@@ -130,12 +135,10 @@ impl Handwriting for Fake {
                     bounds: Bounds::default(),
                     strokes: strokes.clone(),
                 })],
+                bounds: vec![Bounds::default()],
                 analyzed: true,
             },
-            None => Structure {
-                items: from_recognition(recognition, &ink_boxes(note)),
-                analyzed: false,
-            },
+            None => Structure::from_recognition(recognition, &ink_boxes(note)),
         }
     }
 

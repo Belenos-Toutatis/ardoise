@@ -1,10 +1,10 @@
 /**
  * What Escape does in the editor, by steps, the smallest first (SPEC §4.4 « Échap dans l'éditeur », docs/questions.md Q20,
- * docs/design/interface.md, "Escape in the editor"): the action in progress (a gesture; typing in a text frame, which
- * ends with the text kept; an equation being written, which ends the same way: put down or updated when its code is
- * valid), then the panel or the tool mode that is open, then the selection, then the editor goes back to the library
- * as the « Bibliothèque » button does, asking whether to save when there are unsaved changes (docs/questions.md Q21).
- * One press does one step.
+ * docs/design/interface.md, "Escape in the editor"): the action in progress (a gesture; the Greek palette of the text
+ * tool, which closes first; typing in a text frame, which ends with the text kept; an equation being written, which
+ * ends the same way: put down or updated when its code is valid), then the panel or the tool mode that is open, then
+ * the selection, then the editor goes back to the library as the « Bibliothèque » button does, asking whether to save
+ * when there are unsaved changes (docs/questions.md Q21). One press does one step.
  * Pure, so that the order is tested alone; `Editor.svelte` gathers the state and does what the step says.
  */
 
@@ -16,6 +16,8 @@ export interface EscapeState {
   owned: boolean;
   /** A gesture is under way: a stroke, a shape, a lasso, a move, an erasing… */
   dragging: boolean;
+  /** The Greek palette of the text tool is open (it closes before the typing ends). */
+  greekPalette?: boolean;
   /** A text frame is being typed (its field has the key: `typing` is true too). */
   editingText?: boolean;
   /** The equation tool's panel is open (an equation being written, not yet put down or updated). */
@@ -43,6 +45,8 @@ export type EscapeStep =
   | 'stay'
   /** The gesture under way is dropped without changing the note. */
   | 'cancelDrag'
+  /** The Greek palette closes; the typing goes on (the focus back in the frame). */
+  | 'closeGreekPalette'
   /** The text frame being typed is left, its text kept (an empty frame goes). */
   | 'endText'
   /**
@@ -64,6 +68,7 @@ export function escapeStep(state: EscapeState): EscapeStep {
   if (state.leaving) return 'stay';
   if (state.owned) return 'ignore';
   if (state.dragging) return 'cancelDrag';
+  if (state.greekPalette) return 'closeGreekPalette';
   if (state.editingText) return 'endText';
   if (state.editingEquation) return 'endEquation';
   if (state.split) return 'closeSplit';

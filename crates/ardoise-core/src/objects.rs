@@ -39,8 +39,8 @@ const PLACEMENT_KEYS: [&str; 10] = [
     "height",
 ];
 
-/// Keys of a text frame's body.
-const TEXT_KEYS: [&str; 5] = ["text", "font", "bold", "size", "color"];
+/// Keys of a text frame's body (`wrapWidth`: format 1.7).
+const TEXT_KEYS: [&str; 6] = ["text", "font", "bold", "size", "color", "wrapWidth"];
 
 /// Keys of a bookmark's body.
 const BOOKMARK_KEYS: [&str; 1] = ["label"];
@@ -116,8 +116,9 @@ fn read_equation_path(data: &str) -> Result<Path, ardoise_text::PathDataError> {
     Path::from_svg(data, EQUATION_MAX_PATH_BYTES, EQUATION_MAX_COORDINATE)
 }
 
-/// A text frame: one line of the page per line of `text`, in one style (SPEC §4.4: two families,
-/// three sizes, a colour, bold or not, no formatting inside a frame).
+/// A text frame: its text in one style (SPEC §4.4: two families, three sizes, a colour, bold or
+/// not, no formatting inside a frame), its lines wrapped at `wrap_width` (format 1.7) or, without
+/// one, one line of the page per line of `text`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextBody {
     pub text: String,
@@ -126,6 +127,9 @@ pub struct TextBody {
     /// Size of the font (its em), in the object's units: device units at scale 1.
     pub size: f32,
     pub color: Rgba,
+    /// Width at which the lines wrap, in the object's units (greater than zero); `None`: they
+    /// do not wrap, only a line break starts a line (every frame made before format 1.7).
+    pub wrap_width: Option<f32>,
 }
 
 impl TextBody {
@@ -134,6 +138,7 @@ impl TextBody {
             family: self.font,
             bold: self.bold,
             size: self.size,
+            wrap: self.wrap_width,
         }
     }
 
@@ -158,6 +163,7 @@ impl BookmarkBody {
             family: FontFamily::Andika,
             bold: false,
             size: BOOKMARK_FONT_SIZE,
+            wrap: None,
         }
     }
 
@@ -597,6 +603,9 @@ impl Serialize for PageObject {
                 map.insert("bold".into(), Value::Bool(body.bold));
                 map.insert("size".into(), number(body.size));
                 map.insert("color".into(), color(body.color)?);
+                if let Some(width) = body.wrap_width {
+                    map.insert("wrapWidth".into(), number(width));
+                }
             }
             ObjectBody::Equation(body) => {
                 map.insert("latex".into(), Value::String(body.latex.clone()));
@@ -664,6 +673,13 @@ fn text_body(map: &Map<String, Value>) -> Option<TextBody> {
         color: match get("color") {
             None => Rgba::BLACK,
             Some(value) => serde_json::from_value(value.clone()).ok()?,
+        },
+        wrap_width: match get("wrapWidth") {
+            None => None,
+            Some(value) => {
+                let width = value.as_f64()? as f32;
+                Some((width.is_finite() && width > 0.0).then_some(width)?)
+            }
         },
     })
 }
@@ -802,6 +818,7 @@ mod tests {
             bold: true,
             size: 600.0,
             color: Rgba::rgb(200, 0, 0),
+            wrap_width: None,
         }
     }
 
@@ -816,6 +833,44 @@ mod tests {
         assert!(value["width"].as_f64().unwrap() > 0.0);
         let back: PageObject = serde_json::from_value(value).unwrap();
         assert_eq!(back, object);
+    }
+
+    #[test]
+    fn a_wrap_width_round_trips_and_a_value_this_version_cannot_read_keeps_the_frame() {
+        let mut body = hello();
+        body.text = "Bonjour à tous les élèves de la classe".into();
+        body.wrap_width = Some(2500.0);
+        let object = PageObject::text("w", 0, 10, 100.0, 200.0, body.clone());
+        let value = serde_json::to_value(&object).unwrap();
+        assert_eq!(value["wrapWidth"], 2500.0);
+        let back: PageObject = serde_json::from_value(value).unwrap();
+        assert_eq!(back, object);
+        // The frame wraps: more than one line, its box no wider than the width.
+        assert!(back.as_text().unwrap().layout().lines.len() > 1);
+        assert!(back.width <= 2500.0 && back.height > 750.0);
+        // Without one, no key is written.
+        let plain = PageObject::text("p", 0, 10, 100.0, 200.0, hello());
+        assert!(
+            serde_json::to_value(&plain)
+                .unwrap()
+                .get("wrapWidth")
+                .is_none()
+        );
+        for bad in [
+            json!(0.0),
+            json!(-3.0),
+            json!("page"),
+            json!(null),
+            json!({"mm": 50}),
+        ] {
+            let mut value = serde_json::to_value(&object).unwrap();
+            value["wrapWidth"] = bad.clone();
+            let read = PageObject::from_value(value.clone()).unwrap();
+            assert!(read.as_text().is_none(), "{bad}");
+            assert_eq!(read.body.kind(), "text");
+            assert_eq!(serde_json::to_value(&read).unwrap()["wrapWidth"], bad);
+        }
+        assert!(is_known_key("text", "wrapWidth"));
     }
 
     #[test]

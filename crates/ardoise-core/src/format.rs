@@ -96,8 +96,9 @@ pub struct FormatVersion {
 
 impl FormatVersion {
     /// The version this code writes, and the newest it reads.
-    /// 1.5: page objects of kind `equation`; 1.6: of kind `bookmark`.
-    pub const CURRENT: FormatVersion = FormatVersion { major: 1, minor: 6 };
+    /// 1.5: page objects of kind `equation`; 1.6: of kind `bookmark`; 1.7: the `wrapWidth` of a
+    /// text frame (its lines wrap).
+    pub const CURRENT: FormatVersion = FormatVersion { major: 1, minor: 7 };
 }
 
 impl fmt::Display for FormatVersion {
@@ -495,9 +496,11 @@ fn validate(note: &Note) -> Result<(), FormatError> {
         ]
         .iter()
         .all(|v| v.is_finite());
-        let size_ok = object
-            .as_text()
-            .is_none_or(|text| text.size.is_finite() && text.size > 0.0);
+        let size_ok = object.as_text().is_none_or(|text| {
+            text.size.is_finite()
+                && text.size > 0.0
+                && text.wrap_width.is_none_or(|w| w.is_finite() && w > 0.0)
+        });
         if !finite || object.scale <= 0.0 || !size_ok {
             return Err(FormatError::InvalidNote(format!(
                 "object {index} has a placement or a size that is not a finite positive number"

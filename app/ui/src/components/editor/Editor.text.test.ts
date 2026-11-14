@@ -223,11 +223,15 @@ describe('the text tool', () => {
       ['Delete', {}],
       ['Backspace', {}],
       ['a', { ctrlKey: true }],
-      ['z', { ctrlKey: true }],
       ['0', { ctrlKey: true }],
     ] as [string, KeyboardEventInit][]) {
       expect(await v.key(k, init, f), k).toBe(true);
     }
+    // Ctrl + Z and Ctrl + Y are the field's own undo and redo (`FieldHistory`): taken by the field, not the editor's.
+    expect(await v.key('z', { ctrlKey: true }, f)).toBe(false);
+    expect(f.value).toBe('');
+    expect(await v.key('y', { ctrlKey: true }, f)).toBe(false);
+    expect(f.value).toBe('pe');
     expect(v.mode()).toBe('Texte');
     expect(v.field()).not.toBeNull();
     expect(v.strokes()).toBe(1);

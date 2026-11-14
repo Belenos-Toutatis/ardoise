@@ -6,8 +6,11 @@
 //! or the transcription the user corrected ([`NoteReading`]). The structure (paragraphs, list
 //! items, drawings, underlined words) comes from Windows' ink analysis, or from layout
 //! heuristics on the recognised lines when it is not available (`ardoise_hwr::structure`,
-//! platform-free). The files are built by `ardoise_hwr::markdown` and `ardoise_hwr::docx`; this
-//! module reads the notes, crops the drawings out of them and writes the files atomically.
+//! platform-free). The text typed on the page (text frames, equations) is put among them in
+//! reading order, and is the whole text where nothing can be recognised
+//! (`ardoise_hwr::typed`). The files are built by `ardoise_hwr::markdown` and
+//! `ardoise_hwr::docx`; this module reads the notes, crops the drawings out of them and writes
+//! the files atomically.
 
 use std::collections::VecDeque;
 use std::fs;
@@ -22,6 +25,7 @@ use ardoise_hwr::document::{Block, Document, Drawing, Labels};
 use ardoise_hwr::docx::to_docx;
 use ardoise_hwr::markdown::to_markdown;
 use ardoise_hwr::structure::{DrawingArea, Item, Structure, structure_of};
+use ardoise_hwr::typed::{document_blocks, typed_blocks};
 use ardoise_render::{
     Image, NoteView, RenderOptions, encode_png_at, paper_color, render_note, scale_for_dpi,
 };
@@ -233,14 +237,40 @@ fn structure_key(note: &Note, reading: &NoteReading) -> u64 {
     hasher.finish()
 }
 
-/// The structure of `note`, read as `reading`, by `recognizer`'s ink analysis (or the layout
-/// heuristics); found again in `known` when it holds it, and kept there.
+/// The structure of `note`, read as `reading`: the handwriting's ([`handwriting_structure`]) with
+/// the text typed on the page (frames, equations) among it. The typed text is put in each time,
+/// after the cache: the page's objects change without the ink doing so.
 pub fn structure_for(
     note: &Note,
     reading: &NoteReading,
     recognizer: &dyn Recognizer,
     known: Option<&Structures>,
 ) -> Arc<Structure> {
+    let handwriting = handwriting_structure(note, reading, recognizer, known);
+    let typed = typed_blocks(note);
+    if typed.is_empty() {
+        return handwriting;
+    }
+    Arc::new(Structure::clone(&handwriting).with_typed(&typed))
+}
+
+/// The structure of the handwriting of `note`, read as `reading`, by `recognizer`'s ink analysis
+/// (or the layout heuristics); found again in `known` when it holds it, and kept there. A note
+/// whose handwriting could not be recognised here and has no correction has none: nothing tells
+/// the handwriting from the drawings, so its ink is left out.
+fn handwriting_structure(
+    note: &Note,
+    reading: &NoteReading,
+    recognizer: &dyn Recognizer,
+    known: Option<&Structures>,
+) -> Arc<Structure> {
+    if reading.unread && reading.correction.is_none() {
+        return Arc::new(Structure {
+            items: Vec::new(),
+            bounds: Vec::new(),
+            analyzed: false,
+        });
+    }
     let key = structure_key(note, reading);
     if let Some(found) = known.and_then(|known| known.get(key)) {
         return found;
@@ -276,11 +306,12 @@ pub fn document_of(
     let blocks = structure
         .items
         .iter()
-        .filter_map(|item| match item {
-            Item::Paragraph(text) => Some(Block::Paragraph(text.clone())),
-            Item::ListItem(text) => Some(Block::ListItem(text.clone())),
-            Item::Drawing(_) if drawings => images.next().map(Block::Drawing),
-            Item::Drawing(_) => None,
+        .flat_map(|item| match item {
+            Item::Paragraph(text) => vec![Block::Paragraph(text.clone())],
+            Item::ListItem(text) => vec![Block::ListItem(text.clone())],
+            Item::Drawing(_) if drawings => images.next().map(Block::Drawing).into_iter().collect(),
+            Item::Drawing(_) => Vec::new(),
+            Item::Typed(block) => document_blocks(block),
         })
         .collect();
     let title = source.note.title.trim();
@@ -750,6 +781,7 @@ mod tests {
         NoteReading {
             recognition: Arc::new(page_text(Language::Fr)),
             correction: correction.map(str::to_owned),
+            unread: false,
         }
     }
 
@@ -833,6 +865,7 @@ mod tests {
                 bold: true,
                 size: 900.0,
                 color: Rgba::BLACK,
+                wrap_width: None,
             },
         )];
         // What the crop is taken from: the strokes asked for, no object.
@@ -844,10 +877,16 @@ mod tests {
         let drawing_of = |source: &LoadedSource| {
             let fake = Fake::new(true);
             let structure = structure_for(&source.note, &reading(None), &fake, None);
-            match document_of(source, &structure, true).unwrap().blocks.pop() {
-                Some(Block::Drawing(drawing)) => drawing,
-                other => panic!("a drawing, got {other:?}"),
-            }
+            // The frame's text is in the document too (the typed text is exported): the drawing
+            // is the one block that is a picture.
+            let blocks = document_of(source, &structure, true).unwrap().blocks;
+            blocks
+                .into_iter()
+                .find_map(|block| match block {
+                    Block::Drawing(drawing) => Some(drawing),
+                    _ => None,
+                })
+                .expect("a drawing")
         };
         assert_eq!(drawing_of(&typed), drawing_of(&plain));
     }
@@ -921,6 +960,7 @@ mod tests {
         let other = NoteReading {
             recognition: Arc::new(misread),
             correction: None,
+            unread: false,
         };
         structure_for(&note, &other, &fake, Some(&known));
         let mut moved = note.clone();
@@ -993,6 +1033,190 @@ mod tests {
         assert_eq!(documents[0].blocks[0], Block::Paragraph("relu".into()));
         assert_eq!(documents[0].blocks[1], Block::ListItem("poires".into()));
         assert_eq!(documents[0].drawings().count(), 1);
+        indexer.shutdown();
+    }
+
+    /// `note` with a frame above everything (its second line a list item) and an equation under
+    /// everything else on its page.
+    fn with_typed_text(mut note: Note) -> Note {
+        use ardoise_core::note::{EquationBody, FontFamily, PageObject, TextBody};
+        let mut frame = PageObject::text(
+            "cadre",
+            0,
+            0,
+            1000.0,
+            0.0,
+            TextBody {
+                text: "Titre\n- a".into(),
+                font: FontFamily::Andika,
+                bold: false,
+                size: 400.0,
+                color: Rgba::BLACK,
+                wrap_width: None,
+            },
+        );
+        (frame.width, frame.height) = (3000.0, 600.0);
+        let mut equation = PageObject::equation(
+            "formule",
+            0,
+            0,
+            [1000.0, 6500.0],
+            1.0,
+            EquationBody {
+                latex: "x^2".into(),
+                path: String::new(),
+                color: Rgba::BLACK,
+            },
+        );
+        (equation.width, equation.height) = (2000.0, 500.0);
+        note.objects = vec![equation, frame];
+        note
+    }
+
+    #[test]
+    fn the_typed_text_is_exported_among_the_handwriting_and_never_cached() {
+        let mut typed = source();
+        typed.note = with_typed_text(typed.note);
+        let fake = Fake::new(true);
+        let known = Structures::default();
+        let structure = structure_for(&typed.note, &reading(None), &fake, Some(&known));
+        // The frame above the page, the equation under it, the handwriting as it was between.
+        let document = document_of(&typed, &structure, true).unwrap();
+        assert_eq!(
+            document.blocks[..4],
+            [
+                Block::Paragraph("Titre".into()),
+                Block::ListItem("a".into()),
+                Block::Paragraph("lu".into()),
+                Block::ListItem("pommes".into()),
+            ]
+        );
+        assert!(matches!(document.blocks[4], Block::Drawing(_)));
+        assert_eq!(document.blocks[5], Block::Equation("x^2".into()));
+        assert_eq!(document.blocks.len(), 6);
+        assert_eq!(structure.drawings(), 1);
+        // Without the drawings, the typed text is still there.
+        let plain = document_of(
+            &typed,
+            &Structure::clone(&structure).without_drawings(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(plain.blocks.len(), 5);
+        assert_eq!(plain.blocks[4], Block::Equation("x^2".into()));
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("fiche.md");
+        write_markdown(&destination, &[document], &labels()).unwrap();
+        let text = fs::read_to_string(&destination).unwrap();
+        assert!(
+            text.contains("\nTitre\n\n- a\n\nlu\n\n- pommes\n\n!["),
+            "{text}"
+        );
+        assert!(text.contains("\n$x^2$\n"), "{text}");
+        // The cache holds the handwriting alone: the page's objects can change without the ink
+        // doing so, and the analysis is not run again.
+        let mut bare = typed.note.clone();
+        bare.objects.clear();
+        let again = structure_for(&bare, &reading(None), &fake, Some(&known));
+        assert_eq!(fake.analyses.load(Ordering::SeqCst), 1);
+        assert!(
+            again
+                .items
+                .iter()
+                .all(|item| !matches!(item, Item::Typed(_)))
+        );
+    }
+
+    /// No engine, as where Windows has no handwriting recognizer.
+    struct Down;
+
+    impl Recognizer for Down {
+        fn recognizers(&self) -> Result<Vec<RecognizerInfo>, HwrError> {
+            Err(HwrError::Unsupported)
+        }
+
+        fn recognize(&self, _: &[Stroke], _: Language) -> Result<Recognition, HwrError> {
+            Err(HwrError::Unsupported)
+        }
+    }
+
+    #[test]
+    fn a_note_no_recognizer_can_read_exports_its_typed_text_alone() {
+        let settings = tempfile::tempdir().unwrap();
+        let context = context(settings.path());
+        let cache = tempfile::tempdir().unwrap();
+        let down = Arc::new(Down);
+        let indexer = Indexer::start(Services {
+            background: down.clone(),
+            on_demand: down,
+            config: Box::new(|| IndexConfig {
+                library: None,
+                setting: HandwritingLanguage::Auto,
+                interface: Language::Fr,
+            }),
+            busy: Box::new(|| false),
+            notify: Box::new(|_| {}),
+            cache_dir: cache.path().to_path_buf(),
+            pause_poll: Duration::from_millis(5),
+        });
+        let sources = |note: Note| {
+            vec![ExportSource {
+                path: "Fiche.ardoise".into(),
+                note: Some(note),
+                image_key: None,
+            }]
+        };
+        let known = Structures::default();
+        // The note has ink, which nothing can tell from a drawing: it is left out.
+        let typed = with_typed_text(source().note);
+        let found = structures_of(&indexer, &context, sources(typed.clone()), &known).unwrap();
+        assert_eq!(found[0].1.drawings(), 0);
+        let (documents, analyzed) =
+            documents_of(&indexer, &context, sources(typed.clone()), true, &known).unwrap();
+        assert!(!analyzed);
+        assert_eq!(
+            documents[0].blocks,
+            [
+                Block::Paragraph("Titre".into()),
+                Block::ListItem("a".into()),
+                Block::Equation("x^2".into()),
+            ]
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("fiche.md");
+        assert_eq!(
+            write_markdown(&md, &documents, &labels()).unwrap(),
+            std::slice::from_ref(&md)
+        );
+        let text = fs::read_to_string(&md).unwrap();
+        assert!(text.ends_with("Titre\n\n- a\n\n$x^2$\n"), "{text}");
+        let docx = dir.path().join("fiche.docx");
+        assert_eq!(
+            write_docx(&docx, &documents, &labels()).unwrap(),
+            std::slice::from_ref(&docx)
+        );
+        assert_eq!(&fs::read(&docx).unwrap()[..2], b"PK");
+        // The same note without a recognizer and without typed text still fails, with the
+        // reason.
+        let error =
+            documents_of(&indexer, &context, sources(source().note), true, &known).unwrap_err();
+        assert_eq!(error.code(), "handwritingUnsupported");
+        // A correction of its ink comes first, the typed text after it.
+        CacheDir::new(cache.path())
+            .set_correction_for(&typed, Language::Fr, "relu\n- poires")
+            .unwrap();
+        let (documents, _) =
+            documents_of(&indexer, &context, sources(typed), true, &known).unwrap();
+        assert_eq!(
+            documents[0].blocks,
+            [
+                Block::Paragraph("relu".into()),
+                Block::ListItem("poires".into()),
+                Block::Paragraph("Titre".into()),
+                Block::ListItem("a".into()),
+                Block::Equation("x^2".into()),
+            ]
+        );
         indexer.shutdown();
     }
 

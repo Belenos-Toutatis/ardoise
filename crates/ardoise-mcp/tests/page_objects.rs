@@ -398,6 +398,140 @@ async fn get_note_text_gives_the_typed_text_apart_from_the_recognised_lines() {
     assert_eq!(plain["typed_frames"], json!([]));
 }
 
+/// The kinds and texts of the typed items of a `structure`, in order.
+fn typed_items(text: &Value) -> Vec<(String, String)> {
+    text["structure"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["kind"] == "typed_text" || i["kind"] == "equation")
+        .map(|i| {
+            (
+                i["kind"].as_str().unwrap().to_owned(),
+                i["text"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_structure_has_the_typed_text_among_the_handwriting() {
+    let session = session().await;
+    add_fiche(&session);
+    let text = session.ok("get_note_text", json!({ "note": FICHE })).await;
+    // Visible frames only, each with its box; the handwriting's items are still there.
+    assert_eq!(
+        typed_items(&text),
+        [
+            ("typed_text".to_owned(), "Les métaux".to_owned()),
+            (
+                "typed_text".to_owned(),
+                "Cuivre : conducteur\nFer : magnétique".to_owned()
+            ),
+        ]
+    );
+    let items = text["structure"]["items"].as_array().unwrap();
+    // The definition is under the line the recogniser read: after it.
+    let definition = items
+        .iter()
+        .rposition(|i| i["kind"] == "typed_text")
+        .unwrap();
+    assert!(items[definition]["bounds_mm"]["y"].as_f64().unwrap() > 100.0);
+    assert!(items[definition]["bounds_mm"]["width"].as_f64().unwrap() > 0.0);
+    assert!(
+        items[..definition].iter().any(|i| i["kind"] == "paragraph"),
+        "the line comes first: {items:?}"
+    );
+    assert_eq!(text["structure"]["source"], "layout_heuristics");
+    assert!(text.get("recognition").is_none());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_equation_is_an_item_of_the_structure_with_its_latex() {
+    let session = session().await;
+    add_chimie(&session);
+    let text = session.ok("get_note_text", json!({ "note": CHIMIE })).await;
+    // The equation of the visible layer, not the hidden one.
+    assert_eq!(
+        typed_items(&text),
+        [(
+            "equation".to_owned(),
+            r"\ce{CH4 + 2O2 -> CO2 + 2H2O}".to_owned()
+        )]
+    );
+    let item = text["structure"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["kind"] == "equation")
+        .unwrap();
+    assert_eq!(item["bounds_mm"]["x"], 20.0);
+    assert_eq!(item["bounds_mm"]["width"], 6.0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn where_handwriting_cannot_be_read_the_typed_text_still_is() {
+    use std::sync::atomic::Ordering;
+
+    let session = session().await;
+    add_fiche(&session);
+    add_chimie(&session);
+    session.harness.fake.failing.store(true, Ordering::SeqCst);
+    let text = session.ok("get_note_text", json!({ "note": FICHE })).await;
+    // No line, no handwriting, and the reason; the typed text is all of the structure.
+    assert_eq!(text["lines"], json!([]));
+    assert_eq!(text["text"], "");
+    assert_eq!(text["is_correction"], false);
+    assert_eq!(text["recognition"]["available"], false);
+    assert_eq!(text["recognition"]["code"], "handwritingUnsupported");
+    assert!(!text["recognition"]["message"].as_str().unwrap().is_empty());
+    assert_eq!(text["structure"]["source"], "typed_text_only");
+    let items = text["structure"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "{items:?}");
+    assert_eq!(
+        typed_items(&text),
+        [
+            ("typed_text".to_owned(), "Les métaux".to_owned()),
+            (
+                "typed_text".to_owned(),
+                "Cuivre : conducteur\nFer : magnétique".to_owned()
+            ),
+        ]
+    );
+    assert_eq!(
+        text["typed_text"],
+        "Les métaux\nCuivre : conducteur\nFer : magnétique"
+    );
+    assert_eq!(text["typed_frames"].as_array().unwrap().len(), 3);
+    let equation = session.ok("get_note_text", json!({ "note": CHIMIE })).await;
+    assert_eq!(
+        typed_items(&equation),
+        [(
+            "equation".to_owned(),
+            r"\ce{CH4 + 2O2 -> CO2 + 2H2O}".to_owned()
+        )]
+    );
+    assert_eq!(equation["equations"].as_array().unwrap().len(), 2);
+
+    // A correction of the handwriting is still its text.
+    session
+        .ok(
+            "set_note_text",
+            json!({ "note": FICHE, "text": "Les métaux conduisent l'électricité" }),
+        )
+        .await;
+    let corrected = session.ok("get_note_text", json!({ "note": FICHE })).await;
+    assert_eq!(corrected["text"], "Les métaux conduisent l'électricité");
+    assert_eq!(corrected["is_correction"], true);
+    assert_eq!(corrected["recognition"]["available"], false);
+
+    // Without typed text on the page, the error stays what it was.
+    let error = session
+        .failure("get_note_text", json!({ "note": OPTIQUE }))
+        .await;
+    assert_eq!(error["code"], "handwritingUnsupported");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn the_search_finds_a_note_by_the_text_of_its_frames() {
     let session = session().await;

@@ -6,13 +6,15 @@
 //! plain function `fn(&Host, Args) -> ToolResult` that the tests also call.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use ardoise_core::format::BackgroundFile;
 use ardoise_core::library::NoteEntry;
 use ardoise_core::note::Note;
-use ardoise_hwr::Language;
-use ardoise_hwr::structure::Item;
+use ardoise_hwr::structure::{Item, Structure};
 use ardoise_hwr::text::fold;
+use ardoise_hwr::typed::{TypedKind, typed_blocks};
+use ardoise_hwr::{Language, Recognition};
 use ardoise_render::{
     Image, LabelSpot, NoteView, Picture, RenderOptions, draw_labels, encode_png_at, render_note,
     ruling,
@@ -90,7 +92,7 @@ pub struct ListNotesArgs {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct SearchNotesArgs {
-    /// Words to find: a note matches when every word is in its title, tags or binder, or begins a word of its recognised handwriting. Accents and case are ignored.
+    /// Words to find: a note matches when every word is in its title, tags or binder, in the text typed in its text frames or the source of its equations, in the label of a bookmark, or begins a word of its recognised handwriting. Accents and case are ignored.
     pub query: String,
     /// How many notes to return (default 20, at most 200).
     #[schemars(range(min = 1, max = 200))]
@@ -283,7 +285,7 @@ impl ArdoiseServer {
         self.blocking(move |host| get_note(host, args)).await
     }
 
-    /// The handwriting of a note as text: the recognised lines with their bounding boxes in millimetres, and its structure (paragraphs, list items, drawings with their bounds and stroke indices) when it can be found. Reads the note now if it was not read yet, which can take a few seconds. The recognition makes mistakes, especially on formulas and diagrams: compare with `render_note`. If a corrected transcription is stored for the ink as it is now, `text` is that one, `is_correction` is true and `recognised_text` is the recogniser's. Text typed in the page's text frames is not recognised: `typed_frames` gives each frame's exact text with its box in millimetres (`source: "typed"`, every layer, with `visible`), `equations` each equation's LaTeX source with its box (`source: "equation"`), and `typed_text` the text of the visible frames and the source of the visible equations in reading order, joined by line breaks; read them with the lines, as the page's text.
+    /// The text of a note: its handwriting, recognised, and the text typed on the page. The handwriting: the recognised lines with their bounding boxes in millimetres, and its structure (paragraphs, list items, drawings with their bounds and stroke indices) when it can be found. Reads the note now if it was not read yet, which can take a few seconds. The recognition makes mistakes, especially on formulas and diagrams: compare with `render_note`. If a corrected transcription is stored for the ink as it is now, `text` is that one, `is_correction` is true and `recognised_text` is the recogniser's. Text typed in the page's text frames is not recognised, it is exact: `typed_frames` gives each frame's text with its box in millimetres (`source: "typed"`, every layer, with `visible`), `equations` each equation's LaTeX source with its box (`source: "equation"`; chemistry in `\ce{…}`), and `typed_text` the text of the visible frames and the source of the visible equations in reading order, joined by line breaks. The visible ones are also in `structure.items`, among the handwriting in reading order, as `{"kind": "typed_text" | "equation", "text", "bounds_mm"}`: read the page's text from there. Bookmarks are not text: `get_note` lists them. Where handwriting cannot be recognised on this PC (no recognizer for the language) a page that holds typed text is still read: `lines` is empty, `structure` has the typed items only (`source: "typed_text_only"`) and `recognition` is `{"available": false, "code", "message"}`; a page without typed text is then an error.
     #[tool(
         name = "get_note_text",
         annotations(
@@ -785,14 +787,42 @@ pub fn get_note_text(host: &Host, args: GetNoteTextArgs) -> ToolResult {
     let entry = find_note(&library, &args.note)?;
     let loaded = read_note(&library, &entry)?;
     let note = &loaded.file.note;
+    let typed = typed_blocks(note);
     // Kept with the note's path and version: the next search finds its text.
-    let recognition = host.handwriting.recognition_at(
+    let read = host.handwriting.recognition_at(
         &loaded.path,
         &loaded.stamp,
         note,
         args.language.map(Language::from),
-    )?;
-    let structure = host.handwriting.structure_of(note, &recognition);
+    );
+    // Typed text needs no recognition: a page that holds some is still read where the
+    // handwriting cannot be (no recognizer on this PC), without any line, and says why.
+    let (recognition, unreadable, structure) = match read {
+        Ok(recognition) => {
+            // The handwriting's structure (the app finds it once), the typed text put in it.
+            let structure = host
+                .handwriting
+                .structure_of(note, &recognition)
+                .with_typed(&typed);
+            (recognition, None, structure)
+        }
+        Err(error) if !typed.is_empty() => {
+            let language = args
+                .language
+                .map_or(host.environment.language(), Language::from);
+            let structure = Structure {
+                items: Vec::new(),
+                bounds: Vec::new(),
+                analyzed: false,
+            };
+            (
+                Arc::new(Recognition::empty(language)),
+                Some(error),
+                structure.with_typed(&typed),
+            )
+        }
+        Err(error) => return Err(error.into()),
+    };
     let lines: Vec<_> = recognition
         .lines
         .iter()
@@ -809,6 +839,14 @@ pub fn get_note_text(host: &Host, args: GetNoteTextArgs) -> ToolResult {
                 "bounds_mm": RectMm::from(area.bounds),
                 "strokes": area.strokes,
             }),
+            Item::Typed(block) => json!({
+                "kind": match block.kind {
+                    TypedKind::Text => "typed_text",
+                    TypedKind::Equation => "equation",
+                },
+                "text": block.text,
+                "bounds_mm": RectMm::from(block.bounds),
+            }),
         })
         .collect();
     // A transcription corrected with `set_note_text` replaces the recogniser's text (the lines
@@ -823,12 +861,23 @@ pub fn get_note_text(host: &Host, args: GetNoteTextArgs) -> ToolResult {
         "is_correction": correction.is_some(),
         "lines": lines,
         "structure": {
-            "source": if structure.analyzed { "ink_analysis" } else { "layout_heuristics" },
+            "source": match (&unreadable, structure.analyzed) {
+                (Some(_), _) => "typed_text_only",
+                (None, true) => "ink_analysis",
+                (None, false) => "layout_heuristics",
+            },
             "items": items,
         },
     });
     if correction.is_some() {
         result["recognised_text"] = recognised.into();
+    }
+    if let Some(error) = unreadable {
+        result["recognition"] = json!({
+            "available": false,
+            "code": error.code(),
+            "message": error.to_string(),
+        });
     }
     // Text typed on the keyboard is not recognised: it is exact, and a correction of the
     // handwriting does not concern it. Its frames come apart from the lines, flagged `typed`,

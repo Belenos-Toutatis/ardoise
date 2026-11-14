@@ -2,6 +2,13 @@
 
 ## Non publié
 
+### Ajouté (demandes de l'utilisateur du 2026-11-14 : texte tapé)
+
+- **Le texte tapé revient à la ligne tout seul** : un nouveau cadre revient à la ligne au bord droit de la page (moins 1 cm), à partir de l'endroit où il est posé ; `Entrée` commence un paragraphe, un mot plus long que la ligne est coupé. Un cadre sélectionné seul a deux **poignées sur les côtés** qui changent sa largeur (le texte revient à la ligne, la hauteur suit) ; les poignées des coins l'agrandissent toujours en entier. Les cadres tapés avant gardent leurs lignes tant qu'on ne change pas leur largeur. Même mise en page à l'écran et dans tous les exports ; le format des notes passe en 1.7 (clé `wrapWidth`, qu'une version plus ancienne garde).
+- **Grec complet et symboles** dans les deux polices, en gras aussi : minuscules, majuscules, ϵ ϑ ϕ ϖ ϱ, µ Ω ° ± × · ≈ ≠ ≤ ≥ → ⇌ ∞ √ ∑ ∫ ∂ ∝ ‰ ′ ″, exposants et indices, pris dans **Latin Modern Math** (GUST e-foundry 1.959, licence GUST Font License, fichier officiel non modifié, 0,7 Mo de plus). Un caractère qu'aucune police n'a est dessiné comme un carré et nommé sous le cadre.
+- **Palette « αβγ »** dans les options de l'outil Texte : l'alphabet grec (minuscules et majuscules), les variantes, des symboles, exposants et indices ; une lettre touchée s'ajoute au curseur du cadre, sans quitter la saisie ; `Échap` la ferme avant de terminer la saisie.
+- **Le texte tapé dans les exports texte** : cadres de texte et équations (code LaTeX, entre `$…$` en Markdown) figurent dans le .txt, le Markdown, le Word, « Copier le texte », l'aperçu, et `get_note_text` / `export_note` de l'assistant, à leur place parmi l'écriture ; une note qui n'a que du texte tapé s'exporte même sans reconnaissance d'écriture.
+
 ### Modifié et ajouté (demandes de l'utilisateur du 2026-11-14 : trois confirmations et un Ctrl+Z)
 
 - **Changer d'outil (ou annuler, lancer la relecture ou la découpe, tourner la page, revenir à la bibliothèque, fermer la fenêtre, exporter…) n'abandonne plus une équation en cours d'écriture sans le dire** : quand le champ contient un code qui n'est pas sur la page (une nouvelle équation, ou une équation de la page dont le code a changé), Ardoise demande « L'équation en cours n'est pas posée. » avec **Poser** (**Mettre à jour** pour une équation de la page ; seulement si le code est correct), **Abandonner** et **Continuer l'écriture** (`Échap` répond cela). Un champ vide ou inchangé ne demande rien ; `Entrée`, `Échap` et **Annuler** dans le panneau ne changent pas. Après **Annuler** (annuler la dernière action), la question n'offre pas **Poser**. L'assistant (MCP) ne déplace plus l'éditeur sous une équation en cours d'écriture.
