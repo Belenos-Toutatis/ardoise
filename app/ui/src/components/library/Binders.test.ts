@@ -104,7 +104,7 @@ describe('deleting a binder', () => {
     await vi.waitFor(() => expect(binderItem('Classe')).not.toBeNull());
     expect(binderOf('Cours de physique')).toBe('Classe/3e B');
     expect(mockLibrary().trash.size).toBe(0);
-    expect(ui.q('.activity-offer')?.textContent).toContain('Classeur « Classe » rétabli avec sa note.');
+    expect(ui.q('.activity-offer')?.textContent).toContain('Suppression du classeur annulée : « Classe » est rétabli avec sa note.');
   });
 
   it('counts every note, in English too', async () => {
@@ -129,7 +129,7 @@ describe('deleting a binder', () => {
     expect(ui.q('.activity-offer')?.textContent).toContain('Classeur « Vide » supprimé.');
     await ui.click(ui.button('Annuler', ui.q('.activity-offer')!));
     await vi.waitFor(() => expect(binderItem('Vide')).not.toBeNull());
-    expect(ui.q('.activity-offer')?.textContent).toContain('Classeur « Vide » rétabli.');
+    expect(ui.q('.activity-offer')?.textContent).toContain('Suppression du classeur annulée : « Vide » est rétabli.');
   });
 
   it('says which folders stay because they hold other files', async () => {

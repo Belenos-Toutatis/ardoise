@@ -119,7 +119,7 @@ Les captures montrent le programme avec des notes de démonstration et une table
 
     ![La fenêtre Exporter : formats PNG, JPG, WebP, SVG et PDF, résolution et texte reconnu](images/fr/exporter-note.webp)
 
-13. **Retrouvez la note.** Revenez à la bibliothèque (**Bibliothèque**, ou `Échap` qui enregistre et revient) et tapez
+13. **Retrouvez la note.** Revenez à la bibliothèque (**Bibliothèque**, ou `Échap` : Ardoise vous demande d'enregistrer) et tapez
     quelques lettres dans **Rechercher une note** (`Ctrl + F`) : Ardoise cherche dans les titres, les étiquettes, les
     signets, les textes tapés et l'écriture manuscrite (chapitre [7](#7-la-bibliothèque)).
 
@@ -1154,7 +1154,13 @@ la plus récente d'abord ; votre choix revient dès que vous rouvrez un classeur
   de classeur, quel que soit le tri.
 - **Au clavier** : `Alt + flèche gauche` ou `Alt + flèche droite` déplace la carte qui a le focus (ou la sélection) d'une place ;
   `Alt + Début` ou `Alt + Fin` la met au début ou à la fin. Le lecteur d'écran annonce la nouvelle place (« Beta déplacée en
-  position 1 sur 3 »).
+  position 1 sur 3 »). Une touche maintenue (`Alt + flèche` répétée) compte pour un seul rangement.
+- **Annuler un rangement** : `Ctrl + Z` (ou le bouton **Annuler** du message qui s'affiche après le rangement) remet l'ordre
+  précédent et dit ce qui est revenu : « Rangement annulé : « Beta » est revenue à sa place. » (ou « Rangement annulé : 3 notes sont
+  revenues à leur place. »). Plusieurs rangements s'annulent un par un, dans l'ordre inverse, même quand leurs messages ont
+  disparu ; la liste est vidée quand vous quittez le classeur ou changez le tri. Ardoise **n'écrase jamais un ordre plus récent** :
+  si l'ordre du classeur a changé depuis (un autre ordinateur, la synchronisation, une note copiée), elle ne fait rien et le dit :
+  « Rangement non annulé : l'ordre du classeur a changé depuis… Le nouvel ordre est conservé. »
 - **Le classeur parent** montre ses propres notes d'abord, puis celles de chaque sous-classeur, dans l'ordre de ce
   sous-classeur (les sous-classeurs dans l'ordre de la barre latérale). Une carte ne se déplace que parmi les notes de son
   classeur : on range un sous-classeur en l'ouvrant ou en glissant sa note à côté d'une note du même sous-classeur.
@@ -1297,8 +1303,11 @@ Les notes de la corbeille sont supprimées définitivement après 30 jours.
 bas de la bibliothèque (« 3 notes mises à la corbeille. ») avec un bouton **Annuler** qui restaure les notes. Il reste
 quelques secondes (8), et tant que la souris ou le clavier est dessus. `Ctrl + Z` fait la même chose depuis la
 bibliothèque (hors d'un champ de texte, et pas dans l'éditeur, qui a son propre **Annuler**). Les messages **Annuler**
-de **Tourner** et de la suppression d'un classeur marchent de la même façon, et `Ctrl + Z` annule la plus récente de
-ces actions. Si une note ne peut pas aller à la corbeille (elle a été supprimée entre-temps sur un autre ordinateur,
+de **Tourner**, de **Dupliquer**, de **Changer la date…** et de la suppression d'un classeur marchent de la même façon, et
+`Ctrl + Z` annule la plus récente de ces actions ; le rangement des cartes d'un classeur s'annule aussi (voir « Ordre du classeur »).
+**Chaque annulation est suivie d'un message qui dit ce qui a été annulé** (« Mise à la corbeille annulée : « Liste de courses »
+est de retour dans son classeur. », « Copie annulée : « Cours (copie) » est à la corbeille. », « Changement de date annulé : … »),
+lu à voix haute par un lecteur d'écran et qui disparaît seul au bout de quelques secondes. Si une note ne peut pas aller à la corbeille (elle a été supprimée entre-temps sur un autre ordinateur,
 par exemple), les autres y vont quand même ; celle-là est signalée et reste sélectionnée.
 
 ### Notes en conflit et fichiers illisibles
@@ -1325,8 +1334,9 @@ rétablir n'ont pas de limite pendant que la note est ouverte.
 cours (un trait, une forme, un lasso, un déplacement, la question qu'Ardoise pose à l'écran) ou termine la saisie d'un texte, d'un signet ou
 d'une équation en gardant ce qui est écrit (une équation au code incorrect reste dans son panneau) ; sinon il ferme le panneau ou
 l'outil ouvert (la découpe, la relecture, le recadrage à la main, le réglage de **Redresser les formes**) ; sinon il enlève
-la sélection ; sinon il **enregistre la note et revient à la bibliothèque**, comme le bouton **Bibliothèque** mais sans poser
-la question des modifications : l'enregistrement est la réponse. Si l'enregistrement échoue (note modifiée ailleurs entre-temps,
+la sélection ; sinon il **revient à la bibliothèque**, exactement comme le bouton **Bibliothèque** : si la note a des modifications non
+enregistrées, Ardoise pose la même question (**Enregistrer et revenir**, **Revenir sans enregistrer**, **Rester** ; `Échap` répond
+**Rester**) ; sans modification, il revient aussitôt. Si l'enregistrement échoue (note modifiée ailleurs entre-temps,
 disque plein), la note reste ouverte et le message dit pourquoi. Pendant l'enregistrement d'une narration, `Échap` ne
 quitte jamais la note : un message demande d'arrêter l'enregistrement d'abord. Dans un champ de saisie (le titre, le nom d'un
 calque, une liste de choix) et dans une fenêtre ouverte (export, impression…), `Échap` reste celui du champ ou de la fenêtre ;
@@ -1513,10 +1523,19 @@ LaTeX entre `$…$` : touchez ou cliquez la page à l'endroit voulu (au stylet, 
 tapez le code dans **Code LaTeX** ; l'**aperçu** montre au fur et à mesure ce qui sera posé. **Poser** (ou `Entrée`, ou `Échap`
 comme pour un texte) met l'équation sur la page, à l'endroit touché, et la sélectionne ; `Maj + Entrée` commence une nouvelle
 ligne dans le code. Avec un champ vide, `Échap` ferme le panneau sans rien poser ; avec un code incorrect, le panneau reste
-ouvert, le code et son erreur dedans, pour que vous le corrigiez : rien n'est perdu. **Annuler** (ou un autre outil) ferme le
+ouvert, le code et son erreur dedans, pour que vous le corrigiez : rien n'est perdu. **Annuler** ferme le
 panneau sans rien changer. Tant que l'équation n'est pas posée, la page ne change pas ; une fois posée, un seul `Ctrl + Z` la
 retire. Pendant que vous tapez, les touches vont au code, jamais aux raccourcis
 de l'éditeur. La première fois, l'outil met une seconde à se charger.
+
+*Une équation n'est jamais perdue sans qu'on vous le demande.* Si le champ contient un code qui n'est pas sur la page (une
+nouvelle équation, ou une équation de la page dont vous avez changé le code) et que vous faites autre chose qui fermerait le
+panneau (choisir un autre outil, annuler, la relecture, la découpe, une autre page, **Bibliothèque**, fermer la fenêtre,
+exporter…), Ardoise répond d'abord : « L'équation en cours n'est pas posée. » avec trois boutons : **Poser** (ou **Mettre à jour**,
+seulement si le code est correct : l'équation est posée, puis ce que vous demandiez se fait), **Abandonner** (le code est jeté, puis
+ce que vous demandiez se fait) et **Continuer l'écriture** (rien ne change ; `Échap` répond cela aussi). Un champ vide, ou une
+équation rouverte sans changement, ne pose aucune question. Après **Annuler** (annuler la dernière action), la question n'a pas de bouton **Poser** :
+poser l'équation pour l'annuler aussitôt n'aurait pas de sens.
 
 Si le code n'est pas correct, l'aperçu le dit avec le message de MathJax (en anglais, par exemple « Missing close brace » pour
 une accolade oubliée) et l'équation ne peut pas être posée : rien n'est corrigé ni deviné à votre place. Ardoise refuse aussi un
@@ -2259,7 +2278,8 @@ l'impression d'Ardoise (jamais l'impression de la fenêtre comme une page web). 
 | `Échap` | Désélectionner |
 | `F2` | Renommer la note |
 | `Suppr` | Mettre la note (ou la sélection) à la corbeille |
-| `Ctrl + Z` | Annuler la dernière action dont le message **Annuler** est affiché (mise à la corbeille, **Tourner**, suppression d'un classeur) |
+| `Ctrl + Z` | Annuler la dernière action : mise à la corbeille, **Dupliquer**, **Changer la date…**, **Tourner**, suppression d'un classeur, rangement des cartes d'un classeur (plusieurs rangements, un par un) ; un message dit ce qui a été annulé |
+| `Alt + ←`, `Alt + →`, `Alt + Début`, `Alt + Fin` | Dans un classeur trié par **Ordre du classeur** : déplacer la carte (ou la sélection) d'une place, ou au début, ou à la fin |
 
 ### Éditeur
 
@@ -2272,7 +2292,7 @@ l'impression d'Ardoise (jamais l'impression de la fenêtre comme une page web). 
 | `Ctrl + A` | Tout sélectionner (les traits et les textes du calque choisi) |
 | `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copier, couper, coller des traits et des textes |
 | `Suppr` ou `Retour arrière` | Supprimer la sélection |
-| `Échap` | Par étapes, un appui par étape : abandonner le geste en cours, terminer la saisie d'un texte ou d'une équation (ce qui est écrit reste ; une équation au code incorrect reste dans son panneau) ; fermer la découpe, la relecture, le recadrage ou le réglage de **Redresser les formes** ; désélectionner ; enregistrer la note et revenir à la bibliothèque (jamais pendant l'enregistrement d'une narration) |
+| `Échap` | Par étapes, un appui par étape : abandonner le geste en cours, terminer la saisie d'un texte ou d'une équation (ce qui est écrit reste ; une équation au code incorrect reste dans son panneau) ; fermer la découpe, la relecture, le recadrage ou le réglage de **Redresser les formes** ; désélectionner ; revenir à la bibliothèque, en demandant d'enregistrer s'il y a des modifications (jamais pendant l'enregistrement d'une narration) |
 | `Maj`, `Alt` (tenues pendant le tracé d'une forme) | Inverser **Forme régulière** (`Maj`) ou **Depuis le centre** (`Alt`) pour ce tracé |
 | `Alt + ←`, `Alt + →` | **Page précédente**, **Page suivante** (la note d'avant, la note d'après dans la bibliothèque) |
 | `V`, `P`, `E`, `T`, `M`, `B`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Texte**, **Équation**, **Signet**, **Déplacer la page** |

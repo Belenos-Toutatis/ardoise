@@ -191,8 +191,8 @@
         "other": "{count} notes could not be copied:"
       },
       "undone": {
-        "one": "The copy is in the trash.",
-        "other": "The {count} copies are in the trash."
+        "one": "Copy undone: \"{title}\" is in the trash.",
+        "other": "Copies undone: {count} copies are in the trash."
       },
       "undoFailed": {
         "one": "One copy could not be moved to the trash:",
@@ -210,7 +210,7 @@
       "applying": "Changing…",
       "error": "The date could not be changed: {message}",
       "done": "Date of \"{title}\" changed.",
-      "undone": "Date of \"{title}\" put back.",
+      "undone": "Date change undone: \"{title}\" has its old date back.",
       "undoFailed": "The date could not be put back:"
     },
     "order": {
@@ -219,7 +219,13 @@
       "moved": "{title} moved to position {position} of {count}.",
       "movedMany": "{count} notes moved from position {position} of {total}.",
       "atStart": "Already at the start of the binder.",
-      "atEnd": "Already at the end of the binder."
+      "atEnd": "Already at the end of the binder.",
+      "undone": {
+        "one": "Rearrangement undone: \"{title}\" is back where it was.",
+        "other": "Rearrangement undone: {count} notes are back where they were."
+      },
+      "undoRefused": "Rearrangement not undone: the binder's order has changed since (a note copied, another computer, a sync). The new order is kept.",
+      "undoFailed": "The rearrangement could not be undone: {message}"
     },
     "turn": {
       "button": "Turn",
@@ -242,8 +248,8 @@
         "other": "{count} notes could not be turned:"
       },
       "undone": {
-        "one": "The note is back the way it was.",
-        "other": "The {count} notes are back the way they were."
+        "one": "Turn undone: \"{title}\" is back the way it was.",
+        "other": "Turn undone: {count} notes are back the way they were."
       },
       "undoFailed": {
         "one": "One note could not be turned back:",
@@ -267,8 +273,8 @@
         "other": "{count} notes moved to the trash."
       },
       "restored": {
-        "one": "Note restored.",
-        "other": "{count} notes restored."
+        "one": "Move to the trash undone: \"{title}\" is back in its binder.",
+        "other": "Move to the trash undone: {count} notes are back in their binders."
       },
       "progress": "Restoring the notes: {done} of {total}",
       "failed": {
@@ -333,10 +339,10 @@
         "other": "{count} notes could not be moved to the trash (they stay in their binder):"
       },
       "restored": {
-        "one": "Binder \"{name}\" restored with its note.",
-        "other": "Binder \"{name}\" restored with its {count} notes."
+        "one": "Binder deletion undone: \"{name}\" is back with its note.",
+        "other": "Binder deletion undone: \"{name}\" is back with its {count} notes."
       },
-      "restoredEmpty": "Binder \"{name}\" restored."
+      "restoredEmpty": "Binder deletion undone: \"{name}\" is back."
     },
     "printNone": "Select the notes to print, or open a binder."
   },
@@ -950,7 +956,8 @@
     "pageDoubtful": "A page of the Xiaomi tablet was not received cleanly, and the tablet may no longer hold it: what came is kept apart (the _ardoise\\rescued-pages\\doubtful folder of the library, or a doubtful folder under Ardoise\\blackboard-rescue in this PC's local data) and was not made into a note. If a note of that page was made, check it, and keep the diagnostic log.",
     "pageNotSaved": "A page of the Xiaomi tablet could be written neither in the library nor on this PC, and the tablet no longer holds it: Ardoise keeps it in memory and will try again at the next sync. Do not close Ardoise until then; make the library reachable or free some room, then sync again.",
     "sheetBoardPosition": "This page of the Xiaomi tablet is not the same way round as the tablet is held: a wide page is continued with the tablet held wide (buttons on the right or on the left), an upright page with the tablet held upright (buttons at the bottom or at the top). To continue it, choose a position of the same way round as the page in the Xiaomi tablet's settings, hold the tablet that way, then resume live mode; or resume live mode on another sheet. Nothing was written on the note.",
-    "boardPositionFixed": "This live mode writes on a page of the Xiaomi tablet that keeps its shape (a resumed sheet, or a page written over an image): only the two positions of the same way round as that page are possible until live mode ends. The position did not change."
+    "boardPositionFixed": "This live mode writes on a page of the Xiaomi tablet that keeps its shape (a resumed sheet, or a page written over an image): only the two positions of the same way round as that page are possible until live mode ends. The position did not change.",
+    "orderChanged": "the order of this binder has changed since; it was not modified ({detail})"
   },
   "editor": {
     "back": "Library",
@@ -1089,6 +1096,16 @@
         "tag": "Equation numbers (\\tag) are not supported.",
         "tooLarge": "This equation is too large to be placed on the page.",
         "unavailable": "The Equation tool could not load: {message}"
+      },
+      "ask": {
+        "title": "Equation not placed",
+        "message": "The equation being written has not been placed.",
+        "messageEdit": "The changes to the equation have not been placed.",
+        "invalid": "The code is empty or incorrect: nothing can be placed.",
+        "place": "Place",
+        "update": "Update",
+        "drop": "Drop it",
+        "keep": "Keep writing"
       }
     },
     "bookmark": {
@@ -1389,7 +1406,7 @@
         "selectAll": "Select all (the strokes, texts and equations of the chosen layer)",
         "clipboard": "Copy, cut, paste strokes, texts and equations",
         "delete": "Delete the selection",
-        "escape": "Esc, in steps: cancels the gesture under way, finishes typing a text, a bookmark (the text stays) or an equation (placed if its code is valid); else closes the open split, replay, crop or “Straighten shapes” setting; else deselects; else saves the note and goes back to the library (not while a sound is being recorded)",
+        "escape": "Esc, in steps: cancels the gesture under way, finishes typing a text, a bookmark (the text stays) or an equation (placed if its code is valid); else closes the open split, replay, crop or “Straighten shapes” setting; else deselects; else goes back to the library, asking whether to save if there are changes (not while a sound is being recorded)",
         "fit": "Fit: the whole page",
         "fitWidth": "Width: the page across the window",
         "pages": "Previous page, next page (the note before, the note after)",

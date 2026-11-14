@@ -740,7 +740,7 @@ New:
 | `editor.keys.list.selectAll` | Tout sélectionner (les traits du calque choisi) | Select all (the strokes of the chosen layer) |
 | `editor.keys.list.clipboard` | Copier, couper, coller des traits | Copy, cut, paste strokes |
 | `editor.keys.list.delete` | Supprimer la sélection | Delete the selection |
-| `editor.keys.list.escape` | Échap, par étapes : annule le geste en cours ; sinon ferme la découpe, la relecture, le recadrage ou le réglage de « Redresser les formes » ouverts ; sinon désélectionne ; sinon enregistre la note et revient à la bibliothèque (pas pendant un enregistrement sonore) | Esc, in steps: cancels the gesture under way; else closes the open split, replay, crop or “Straighten shapes” setting; else deselects; else saves the note and goes back to the library (not while a sound is being recorded) |
+| `editor.keys.list.escape` | Échap, par étapes : annule le geste en cours ; sinon ferme la découpe, la relecture, le recadrage ou le réglage de « Redresser les formes » ouverts ; sinon désélectionne ; sinon revient à la bibliothèque, en demandant d’enregistrer s’il y a des modifications (pas pendant un enregistrement sonore) | Esc, in steps: cancels the gesture under way; else closes the open split, replay, crop or “Straighten shapes” setting; else deselects; else goes back to the library, asking whether to save if there are changes (not while a sound is being recorded) |
 | `editor.keys.list.fit` | Ajuster : la page entière | Fit: the whole page |
 | `editor.keys.list.fitWidth` | Largeur : la page sur toute la largeur | Width: the page across the window |
 | `editor.keys.list.pages` | Page précédente, page suivante (la note d'avant, celle d'après) | Previous page, next page (the note before, the note after) |

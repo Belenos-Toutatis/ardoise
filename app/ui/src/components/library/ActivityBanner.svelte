@@ -3,9 +3,10 @@
    * The library's longer operations (`lib/library-activity.svelte.ts`): progress with « Arrêter »,
    * the notes that failed with their reasons, and the notice with « Annuler » shown for a few
    * seconds (it stays while the pointer or the focus is on it; Ctrl+Z undoes the latest one from
-   * the library, so that the keyboard does not have to reach it in time). Stuck to the bottom of
-   * the library and placed after its content, so that it never pushes the cards away under the
-   * pointer.
+   * the library, so that the keyboard does not have to reach it in time, and then the steps the activity
+   * keeps beyond their notice). Every notice is a polite live region, but one that something else
+   * already reads out (the free order's). Stuck to the bottom of the library and placed after its
+   * content, so that it never pushes the cards away under the pointer.
    */
   import { onDestroy } from 'svelte';
   import { t } from '../../lib/i18n.svelte';
@@ -20,7 +21,7 @@
   /** Ctrl+Z in the library (not in a text field, nor with an editor open: it has its own undo). */
   function onkeydown(event: KeyboardEvent) {
     if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'z') return;
-    if (event.defaultPrevented || !activity.latestUndoable || document.querySelector('.editor')) return;
+    if (event.defaultPrevented || !activity.canUndo || document.querySelector('.editor')) return;
     const target = event.target instanceof Element ? event.target : null;
     if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
     event.preventDefault();
@@ -59,10 +60,11 @@
     {/if}
 
     {#each activity.offers as offer (offer.id)}
-      {@const latest = offer.id === activity.latestUndoable?.id}
+      {@const latest = offer.id === activity.nextUndoId}
       <div
         class="banner inline-banner notice activity-offer"
-        role="status"
+        role={offer.live ? 'status' : undefined}
+        aria-live={offer.live ? 'polite' : undefined}
         onmouseenter={() => activity.hold()}
         onmouseleave={() => activity.release()}
         onfocusin={() => activity.hold()}

@@ -252,7 +252,6 @@ describe('a right click on the page', () => {
     await view.rightClick(x, y);
     await view.choose('Supprimer');
     const left = view.paths();
-    await view.key('Escape');
     await view.rightClick(100, 100);
     expect(view.entry('Annuler').getAttribute('aria-disabled')).toBeNull();
     await view.choose('Annuler');

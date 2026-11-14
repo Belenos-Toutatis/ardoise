@@ -17,7 +17,7 @@
 //   that drag back over the page as drag events made by the browser itself (not events built by the test). So the page's real drag
 //   handlers, the insertion mark, the drop on a card and the drop on a sidebar binder run in the real window; whether the
 //   operating system hands a drag to the window is still a manual check (docs/hardware-tests.md style, on the PC).
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -163,7 +163,7 @@ export const q20Journeys = [
       await check('« Annuler » (Ctrl + Z) : la copie est à la corbeille', async () => {
         await app.key('z', { ctrl: true });
         await app.waitFor(`document.querySelectorAll('.note-card').length === 8`, 'the copy gone');
-        await app.waitFor(`[...document.querySelectorAll('.activity-offer')].some((o) => o.textContent.includes(${j(l('library.duplicate.undone.one'))}))`, 'the notice of the undo');
+        await app.waitFor(`[...document.querySelectorAll('.activity-offer')].some((o) => o.textContent.includes(${j(fill(l('library.duplicate.undone.one'), { title: `${original} (${word})` }))}))`, 'the notice of the undo');
         if (noteFiles(app.library).some((f) => f.includes(`(${word})`))) throw new Error('the copy is still in the library');
       });
 
@@ -260,6 +260,42 @@ export const q20Journeys = [
         await keyOnCard(app, 'Alpha', 'ArrowLeft', { alt: true });
         await waitForTitles(app, ['Alpha', 'Beta', 'Gamma'], 'Alpha already first');
         await app.waitFor(`document.querySelector('[data-slot="order-announcement"]')?.textContent.trim() === ${j(l('library.order.atStart'))}`, 'the announcement at the start');
+        await keyOnCard(app, 'Gamma', 'ArrowLeft', { alt: true });
+        await keyOnCard(app, 'Gamma', 'ArrowLeft', { alt: true });
+        await waitForTitles(app, ['Gamma', 'Alpha', 'Beta'], 'Gamma first');
+      });
+
+      await check('Ctrl + Z : les rangements s’annulent un par un, avec un message qui dit ce qui est revenu', async () => {
+        const said = (message) => app.waitFor(`[...document.querySelectorAll('.activity-offer')].some((o) => o.textContent.includes(${j(message)}))`, message);
+        await app.key('z', { ctrl: true });
+        await waitForTitles(app, ['Alpha', 'Gamma', 'Beta'], 'the last move undone');
+        await said(fill(l('library.order.undone.one'), { title: 'Gamma' }));
+        await app.key('z', { ctrl: true });
+        await waitForTitles(app, ['Alpha', 'Beta', 'Gamma'], 'the move before undone');
+        const ids = await app.evaluate(`window.__TAURI_INTERNALS__.invoke('library_list').then((l) => l.notes.filter((n) => n.binder === ${j(BINDER)}).map((n) => [n.title, n.id]))`);
+        const byTitle = Object.fromEntries(ids);
+        if (j(orderFile(app).notes) !== j([byTitle.Alpha, byTitle.Beta, byTitle.Gamma])) throw new Error(`the order file holds ${j(orderFile(app).notes)}`);
+        // Moved again, then another computer's order lands: the undo is refused, the file keeps theirs.
+        await keyOnCard(app, 'Gamma', 'ArrowLeft', { alt: true });
+        await keyOnCard(app, 'Gamma', 'ArrowLeft', { alt: true });
+        await waitForTitles(app, ['Gamma', 'Alpha', 'Beta'], 'Gamma first again');
+        // The grid follows a move at once and the file is written behind it: wait for the file before another computer's lands.
+        const mine = j([byTitle.Gamma, byTitle.Alpha, byTitle.Beta]);
+        for (let i = 0; j(orderFile(app)?.notes) !== mine; i++) {
+          if (i > 100) throw new Error(`the order file never held the moves: ${j(orderFile(app))}`);
+          await sleep(100);
+        }
+        const file = join(app.library, ...BINDER.split('/'), ORDER_FILE);
+        const theirs = [byTitle.Alpha, byTitle.Beta, byTitle.Gamma];
+        writeFileSync(file, JSON.stringify({ version: 1, changed: Date.now() + 3_600_000, notes: theirs }, null, 2));
+        // The library may or may not have read it yet: either way the undo is refused and the file keeps theirs.
+        await sleep(300);
+        await app.key('z', { ctrl: true });
+        await app.waitFor(`document.querySelector('.activity-failures')?.textContent.includes(${j(l('library.order.undoRefused'))})`, 'the refusal');
+        if (j(orderFile(app).notes) !== j(theirs)) throw new Error(`the undo overwrote the newer order: ${j(orderFile(app).notes)}`);
+        await app.click('.activity-failures button');
+        await waitForTitles(app, ['Alpha', 'Beta', 'Gamma'], 'the newer order shown');
+        // Back to the order the next checks expect.
         await keyOnCard(app, 'Gamma', 'ArrowLeft', { alt: true });
         await keyOnCard(app, 'Gamma', 'ArrowLeft', { alt: true });
         await waitForTitles(app, ['Gamma', 'Alpha', 'Beta'], 'Gamma first');

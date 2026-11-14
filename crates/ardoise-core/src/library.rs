@@ -250,6 +250,13 @@ pub enum LibraryError {
         /// The file involved.
         path: PathBuf,
     },
+    /// A binder's order is not the one the caller expected (the undo of a rearrangement meets an
+    /// order written since, by another computer or a sync): nothing is written.
+    #[error("the order in {} is not the one expected; it was not changed", path.display())]
+    OrderChanged {
+        /// The order file.
+        path: PathBuf,
+    },
     /// A date that cannot be a note's creation date (before 1970 or after the year 9999).
     #[error("{created} is not a possible creation date")]
     InvalidDate {
@@ -284,6 +291,7 @@ impl LibraryError {
             LibraryError::InvalidTagColor { .. } => "invalidTagColor",
             LibraryError::TagColorsNewer { .. } => "tagColorsNewer",
             LibraryError::OrderNewer { .. } => "orderNewer",
+            LibraryError::OrderChanged { .. } => "orderChanged",
             LibraryError::InvalidDate { .. } => "invalidDate",
             LibraryError::Watch { .. } => "libraryWatch",
         }

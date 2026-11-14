@@ -6,6 +6,7 @@
    */
   import { untrack } from 'svelte';
   import type { AppState } from '../../lib/api';
+  import type { WindowClose } from '../../lib/editor/window-close';
   import Editor from './Editor.svelte';
 
   let {
@@ -15,6 +16,7 @@
     onclose,
     onsaved,
     onpage,
+    windowClose,
   }: {
     initial: string;
     pages: string[];
@@ -22,6 +24,7 @@
     onclose: () => void;
     onsaved: (path: string) => void;
     onpage: (path: string) => void;
+    windowClose?: WindowClose;
   } = $props();
   let path = $state(untrack(() => initial));
   let pages = $state.raw(untrack(() => initialPages));
@@ -34,12 +37,18 @@
   export function setPages(next: string[]) {
     pages = next;
   }
+
+  /** The screen gives the editor another note (what `Home` does when another note is opened). */
+  export function setPath(next: string) {
+    path = next;
+  }
 </script>
 
 <Editor
   {path}
   {app}
   {pages}
+  {windowClose}
   {onclose}
   onsaved={(saved) => {
     path = saved;

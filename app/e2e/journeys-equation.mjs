@@ -343,6 +343,42 @@ export const equationJourneys = [
         const colours = (file) => j([...file.note.objects.map((o) => rgba(o.color)), ...file.strokes.map((s) => rgba(s.color))]);
         if (colours(undone) !== colours(before)) throw new Error(`one Ctrl + Z did not give every colour back: ${colours(undone)}`);
       });
+
+      await check('un code non posé : changer d’outil demande confirmation ; Échap continue l’écriture, « Abandonner » jette le code, « Poser » le pose', async () => {
+        const asking = `document.querySelector('[data-slot="equation-ask-message"]')`;
+        const count = `document.querySelectorAll(${j(EQUATIONS)}).length`;
+        const before = await app.evaluate(count);
+        await writeAt(app, { x: AT.x, y: AT.y - 4000 }, SPEED);
+        await previewed(app);
+        await app.click('.toolbar .tool', l('editor.modes.pen'));
+        await app.waitFor(`${asking} !== null`, 'the question about the equation', 30_000);
+        const message = await app.evaluate(`${asking}.textContent.trim()`);
+        if (message !== l('editor.equation.ask.message')) throw new Error(`the question says ${j(message)}`);
+        // Nothing changed while it is asked: the panel and the code are there, and the tool did not move.
+        if ((await app.evaluate(`document.querySelector(${j(FIELD)})?.value`)) !== SPEED) throw new Error('the code went');
+        // Escape is « Continuer l'écriture »: the panel stays, the focus goes back to the field.
+        await app.key('Escape');
+        await app.waitFor(`${asking} === null`, 'the question to go');
+        await app.waitFor(`document.activeElement?.matches(${j(FIELD)}) === true`, 'the field focused again');
+        if ((await app.evaluate(`document.querySelector(${j(PANEL)}) !== null`)) !== true) throw new Error('Escape on the question closed the panel');
+        if ((await app.evaluate(count)) !== before) throw new Error('Escape on the question put the equation down');
+        // « Abandonner »: the code goes, the pen is chosen.
+        await app.click('.toolbar .tool', l('editor.modes.pen'));
+        await app.waitFor(`${asking} !== null`, 'the question again');
+        await app.click('[data-action="equation-ask-drop"]');
+        await app.waitFor(`document.querySelector(${j(PANEL)}) === null`, 'the panel closed');
+        if ((await app.evaluate(count)) !== before) throw new Error('« Abandonner » put the equation down');
+        if ((await app.evaluate(`document.querySelector('.toolbar .tool[aria-pressed="true"]')?.title`)) !== l('editor.modes.pen')) throw new Error('the pen was not chosen');
+        // « Poser »: the equation is put down, then the eraser is chosen.
+        await writeAt(app, { x: AT.x, y: AT.y - 4000 }, SPEED);
+        await previewed(app);
+        await app.click('.toolbar .tool', l('editor.modes.eraser'));
+        await app.waitFor(`${asking} !== null`, 'the question a third time', 30_000);
+        await app.waitFor(`document.querySelector('[data-action="equation-ask-place"]')?.disabled === false`, '« Poser » to be possible');
+        await app.click('[data-action="equation-ask-place"]');
+        await app.waitFor(`${count} === ${before + 1}`, 'the equation put down');
+        if ((await app.evaluate(`document.querySelector('.toolbar .tool[aria-pressed="true"]')?.title`)) !== l('editor.modes.eraser')) throw new Error('the eraser was not chosen');
+      });
     },
   },
 ];

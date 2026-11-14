@@ -395,7 +395,7 @@ Live's Page and Fond tabs, the editor's Projection tab (projector, projected are
 
 ## Escape in the editor, in steps
 
-SPEC §4.4 « Échap dans l'éditeur » (Q20). `lib/editor/escape.ts` is the order, pure (`escapeStep`); `Editor.svelte` (`onescape`) gathers the state and does what the step says. One press does one step, a key held down (`repeat`) none after the first, and `Ctrl`, `Alt` or `Meta` + Esc is not this (`Shift` + Esc is). The steps, the smallest first:
+SPEC §4.4 « Échap dans l'éditeur » (Q20; the last step changed on 2026-11-14, Q21). `lib/editor/escape.ts` is the order, pure (`escapeStep`); `Editor.svelte` (`onescape`) gathers the state and does what the step says. One press does one step, a key held down (`repeat`) none after the first, and `Ctrl`, `Alt` or `Meta` + Esc is not this (`Shift` + Esc is). The steps, the smallest first:
 
 1. **The unsaved-changes question** is open: « Rester » (`stay`), as before.
 2. **A dialog** the editor does not own (`modalOpen()`, the export, print, video and share dialogs, the revision dialogs, the draft offer) answers Esc itself: the editor does nothing.
@@ -403,9 +403,26 @@ SPEC §4.4 « Échap dans l'éditeur » (Q20). `lib/editor/escape.ts` is the ord
 4. **A panel**: the cutting panel (`cancelSplit`, even from its own title field, as before), then the setting of « Redresser les formes » (`closeShapes(true)`, the focus back on its small button), then, once the focus is not in a text field, a select or an editable element (those keep their Esc: the title field gives the title back, a layer's name too), **a question inside the editor**: the deletion of the narration (`confirmDelete`) and the choice of the page of a PDF or the orientation of an image in the Fond tab (`BackgroundImageSection.cancelQuestion()`, nothing while its import runs).
 5. **A tool mode**: the replay (`leaveReplay`, which refuses while a narration is recorded: a notice says so instead of doing nothing), then the manual crop (back to the selection tool). The drawing tools are no mode to close: choosing the line tool is not opening anything.
 6. **The selection** is cleared.
-7. **Back to the library**: `leaveSaving`, which is the back button's path (`leaveRefused`: nothing during a narration recording or a video export, each with its notice) without the question: unsaved changes (or a title typed and not committed) go through `saveAndLeave`, so the writes queued are waited for, a failed save or rename keeps the editor open with its banner (`saveError`, `conflict`, `titleError`), and a conflict leaves « Enregistrer comme copie ». A second press while it saves does nothing (`escapeLeaving`).
+7. **Back to the library**: `back()`, the back button's own function (`leaveRefused`: nothing during a narration recording or a video export, each with its notice), so the question is **the button's**, the same dialog with the same three answers: with unsaved changes (or a title typed and not committed) « Enregistrer et revenir » (`saveAndLeave`: the writes queued are waited for, a failed save or rename keeps the editor open with its banner (`saveError`, `conflict`, `titleError`), and a conflict leaves « Enregistrer comme copie »), « Revenir sans enregistrer » or « Rester »; with nothing unsaved the editor goes back at once. While the question is open step 1 applies: Esc answers « Rester ». The first version of this step saved without asking (`leaveSaving`); the user asked for the question on 2026-11-14 (Q21: a press that saves and leaves without a word was too easy to hit). A held key asks once: the dialog's own Esc ignores the repeats of the press that opened it (`Modal`).
+
+**An equation being written is asked about first** (`askEquation`, `equations.md` §4) by everything that closes its panel, so by this step's `back()` too, but not by Esc's own step for the equation (it ends it, putting it down when valid, as it does a text frame; Esc never gets to this last step while the panel is open).
 
 What the table in `lib/editor/shortcuts.ts` calls `escape` is this key (the entry was `deselect`). In a replay the key is the replay's own (`leaveReplay`, in `lib/editor/keys.ts`), handled by the same function.
+
+## Undoing in the library
+
+`Ctrl + Z` (not in a text field, not with an editor open: it has its own) and the « Annuler » button of a notice undo what the library just did, through `LibraryActivity` (`lib/library-activity.svelte.ts`, drawn by `ActivityBanner.svelte`). What can be undone: the trash (also of a binder), a duplication, a change of date, a turn, and, since 2026-11-14 (Q21), **a rearrangement of the free order of a binder** (drag between the cards, `Alt + arrow`, `Alt + Home`/`End`). No redo exists, so none was added.
+
+**One pattern for every undo.** The action's notice offers « Annuler » for 8 seconds (it stays while the pointer or the focus is on it); the undo ends with `activity.undone(message)`: a plain notice (no button) that **says what was undone and what became of the notes**, polite to a screen reader (`role="status"`, `aria-live="polite"`), gone after the same delay, in the same banner (light and dark follow the banner's own colours). The texts: « Mise à la corbeille annulée : « Titre » est de retour dans son classeur. », « Copie annulée : « Titre (copie) » est à la corbeille. », « Changement de date annulé : « Titre » a retrouvé sa date. », « Rotation annulée : 3 notes ont retrouvé leur sens d'origine. », « Suppression du classeur annulée : « Classe » est rétabli avec ses 3 notes. », « Rangement annulé : « Titre » est revenue à sa place. » (several: « … : 3 notes sont revenues à leur place. »). An undo that cannot be done says so under the failures (`activity.refused`, `role="alert"`, until dismissed) and changes nothing.
+
+**Ctrl + Z undoes the newest thing there is** (`nextUndoId`): a notice still on display, or a step the activity keeps beyond its notice (`show(…, { keep: true })`, at most 50). Only the free order uses the second: one rearranges, then steps back several times, long after the notice went. The notice of a move is a `group` (`order`): a new move replaces the notice before it, the older steps stay reachable by `Ctrl + Z`. It is not a live region (`silent`): the grid's own `announcement` already tells a screen reader « Beta déplacée en position 1 sur 3 ».
+
+**Rules of the free order's undo** (`LibraryState.undoOrder`, `library-order.md` §2):
+
+- Each move is a step (`before`, `after`, the titles). The undo goes **through the queue of the order writes** (`#orderChain`), after the moves still being written, then the listing is read again.
+- **The moves of a held key are one step**: a repeated `Alt + arrow` (`event.repeat`) takes over the step of the same cards if it is the newest thing there is to undo. Pressed again, not held, each press is a step.
+- **Never over a newer order.** The undo writes the former order only if the order the library holds is the one the step wrote (as far as notes still there go: a copy that was undone and is in the trash does not count), and Rust checks it again on the file it replaces (`set_binder_order` with `expected`: `orderChanged`). Otherwise it is refused with « Rangement non annulé : l'ordre du classeur a changé depuis (une note copiée, un autre ordinateur, une synchronisation). Le nouvel ordre est conservé. » and the older steps of that binder, which could not be applied either, are forgotten.
+- **The history is dropped with the view of the binder or the sort** (`LibraryState.view` and `order` are accessors): what `Ctrl + Z` undoes must be what the user has in front of them; a rearrangement of a binder one cannot see is the surprise to avoid. Showing the same binder again keeps it. A move the library could not write leaves no step.
 
 ## Closing and quitting
 
@@ -413,7 +430,7 @@ What the table in `lib/editor/shortcuts.ts` calls `escape` is this key (the entr
 
 - **A modal** closes as with Esc, if it may (`dismissible`), so a screen under it leaves those keys alone (`modalOpen()`).
 - **The library**: Esc and those keys close the side panel, except a tablet test under way, which only stops by its button. With nothing open they do nothing: closing the app by a key meant for a dialog is the accident to avoid.
-- **The editor**: they cancel a split, leave the replay, then go back to the library by the back button's rules. Esc has its own steps, below.
+- **The editor**: they cancel a split, leave the replay, then go back to the library by the back button's rules (the question about unsaved changes, and, before it, the one about an equation being written). Esc has its own steps, above.
 - **Live mode**: they act as Esc does, without deselecting first (`liveKeyAction`); in the presentation window, `Ctrl + Q` closes the window, since the question about quitting belongs to the control window.
 - **`Ctrl + Q`** is handled once, in `App.svelte`, so that it also works on the first-run wizard. It goes through the same guards as `Alt + F4`, except that live mode asks first (`askBeforeQuitting`): `Alt + F4` there still ends without a question, and loses nothing.
 

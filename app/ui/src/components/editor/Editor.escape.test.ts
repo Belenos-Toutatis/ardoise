@@ -2,9 +2,9 @@
 /// <reference types="node" />
 /**
  * Escape in the editor, by steps (SPEC §4.4, docs/questions.md Q20; `lib/editor/escape.ts`): the gesture under way, then
- * the panel or tool mode that is open, then the selection, then the note is saved and the editor goes back to the
- * library, through the back button's own path (nothing during a recording, the failing save keeps the editor open).
- * Dialogs and a field typed in keep their own Escape. The order alone is `lib/editor/escape.test.ts`.
+ * the panel or tool mode that is open, then the selection, then the editor goes back to the library through the back
+ * button's own path (docs/questions.md Q21: the same question when there are unsaved changes, nothing during a
+ * recording, the failing save keeps the editor open). Dialogs and a field typed in keep their own Escape. The order alone is `lib/editor/escape.test.ts`.
  */
 import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -338,32 +338,100 @@ describe('step 3: the selection', () => {
   });
 });
 
-describe('step 4: the note is saved and the editor goes back to the library', () => {
-  it('leaves at once when nothing is unsaved', async () => {
+describe('step 4: the editor goes back to the library, asking whether to save, as the back button does', () => {
+  /** The question that is open, as its title, its text and its buttons. */
+  const question = () => {
+    const dialog = document.querySelector('[role="alertdialog"]');
+    return dialog
+      ? { title: dialog.querySelector('h2')?.textContent, text: dialog.querySelector('p')?.textContent, buttons: [...dialog.querySelectorAll('button')].map((b) => b.textContent?.trim()) }
+      : null;
+  };
+  const answer = async (label: string) => {
+    [...document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')].find((b) => b.textContent?.trim() === label)!.click();
+    await tick();
+  };
+
+  it('leaves at once when nothing is unsaved, with no question', async () => {
     const { escape, onclose } = await render();
     expect(await escape()).toBe(false);
     expect(onclose).toHaveBeenCalledTimes(1);
+    expect(question()).toBeNull();
   });
 
-  it('saves the changes first, without the question, then leaves', async () => {
+  it('asks the question of the back button when there are unsaved changes, and saves nothing yet', async () => {
+    const saveNote = vi.spyOn(api, 'saveNote');
+    const { change, escape, onclose, dirty, q } = await render();
+    await change();
+    expect(await escape()).toBe(false);
+    const byEscape = question();
+    expect(byEscape).toEqual({
+      title: 'Modifications non enregistrées',
+      text: "Cette note a des modifications qui n'ont pas été enregistrées.",
+      buttons: ['Enregistrer et revenir', 'Revenir sans enregistrer', 'Rester'],
+    });
+    expect(saveNote).not.toHaveBeenCalled();
+    expect(onclose).not.toHaveBeenCalled();
+    expect(dirty()).toBe('yes');
+    // The very same question as the button's.
+    await answer('Rester');
+    expect(question()).toBeNull();
+    q<HTMLButtonElement>('.editor-top button.ghost')!.click();
+    await tick();
+    expect(question()).toEqual(byEscape);
+  });
+
+  it('« Enregistrer et revenir » saves the changes, then leaves', async () => {
     const saveNote = vi.spyOn(api, 'saveNote');
     const { change, escape, onclose, onsaved, path } = await render();
     await change();
     await escape();
+    await answer('Enregistrer et revenir');
     await vi.waitFor(() => expect(onclose).toHaveBeenCalledTimes(1));
     expect(saveNote).toHaveBeenCalledTimes(1);
     expect(onsaved).toHaveBeenCalledWith(path);
     // The saved note holds the stroke drawn.
     expect(mockLibrary().notes.get(path)!.note.strokes).toHaveLength(4);
-    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(question()).toBeNull();
   });
 
-  it('presses once, leaves once: a second press while it saves does nothing more', async () => {
+  it('« Revenir sans enregistrer » leaves and the note stays as it was on the disk', async () => {
+    const saveNote = vi.spyOn(api, 'saveNote');
+    const { change, escape, onclose, path } = await render();
+    await change();
+    await escape();
+    await answer('Revenir sans enregistrer');
+    await vi.waitFor(() => expect(onclose).toHaveBeenCalledTimes(1));
+    expect(saveNote).not.toHaveBeenCalled();
+    expect(mockLibrary().notes.get(path)!.note.strokes).toHaveLength(3);
+  });
+
+  it('« Rester » keeps the editor open with its changes, and Escape gives the same answer while the question is open', async () => {
+    const saveNote = vi.spyOn(api, 'saveNote');
+    const { change, escape, onclose, dirty } = await render();
+    await change();
+    await escape();
+    await answer('Rester');
+    expect(question()).toBeNull();
+    expect(onclose).not.toHaveBeenCalled();
+    expect(dirty()).toBe('yes');
+    // Asked again, and Escape is « Rester » (it does not leave, it does not save).
+    await escape();
+    expect(question()).not.toBeNull();
+    await escape();
+    expect(question()).toBeNull();
+    expect(onclose).not.toHaveBeenCalled();
+    expect(saveNote).not.toHaveBeenCalled();
+    expect(dirty()).toBe('yes');
+  });
+
+  it('a key held down asks once', async () => {
     const { change, escape, onclose } = await render();
     await change();
-    await Promise.all([escape(), escape()]);
-    await vi.waitFor(() => expect(onclose).toHaveBeenCalled());
-    expect(onclose).toHaveBeenCalledTimes(1);
+    await escape();
+    await escape({ repeat: true });
+    await escape({ repeat: true });
+    expect(question()).not.toBeNull();
+    expect(onclose).not.toHaveBeenCalled();
   });
 
   it('a key held down is one press', async () => {
@@ -381,12 +449,14 @@ describe('step 4: the note is saved and the editor goes back to the library', ()
     const { change, escape, onclose, q, dirty } = await render();
     await change();
     await escape();
+    await answer('Enregistrer et revenir');
     await vi.waitFor(() => expect(q('.editor-banner[role="alert"]')).not.toBeNull());
     expect(q('.editor-banner[role="alert"]')!.textContent).toContain("Impossible d'enregistrer la note");
     expect(onclose).not.toHaveBeenCalled();
     expect(dirty()).toBe('yes');
-    // The way out is still there: a press after the failure tries again, and fails the same.
+    // The way out is still there: asked again, a save tries again, and fails the same.
     await escape();
+    await answer('Enregistrer et revenir');
     await vi.waitFor(() => expect(vi.mocked(api.saveNote)).toHaveBeenCalledTimes(2));
     expect(onclose).not.toHaveBeenCalled();
   });
@@ -396,9 +466,24 @@ describe('step 4: the note is saved and the editor goes back to the library', ()
     const { change, escape, onclose, q } = await render();
     await change();
     await escape();
+    await answer('Enregistrer et revenir');
     await vi.waitFor(() => expect(q('.editor-banner[role="alert"] strong')).not.toBeNull());
     expect(q('.editor-banner[role="alert"] strong')!.textContent).toBe("Vos modifications n'ont pas été enregistrées");
     expect(onclose).not.toHaveBeenCalled();
+  });
+
+  it('asks in English too', async () => {
+    setLocale('en');
+    const { change, escape, onclose } = await render();
+    await change();
+    await escape();
+    expect(question()).toEqual({
+      title: 'Unsaved changes',
+      text: 'This note has changes that have not been saved.',
+      buttons: ['Save and go back', 'Go back without saving', 'Stay'],
+    });
+    await answer('Go back without saving');
+    await vi.waitFor(() => expect(onclose).toHaveBeenCalledTimes(1));
   });
 
   it('waits for a title typed and not yet renamed: it is saved with the note', async () => {

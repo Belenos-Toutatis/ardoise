@@ -137,7 +137,7 @@
     } else if (event.altKey && !event.ctrlKey && !event.metaKey && lib.canReorder && key in MOVES) {
       // The keyboard's way to reorder the free order of a binder (the drag's alternative).
       event.preventDefault();
-      void lib.moveCards(note.path, MOVES[key]).then((moved) => moved && onmoved?.(note.path));
+      void lib.moveCards(note.path, MOVES[key], event.repeat).then((moved) => moved && onmoved?.(note.path));
     } else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(key)) {
       onnavigate(event, index);
     }

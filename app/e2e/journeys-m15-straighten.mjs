@@ -296,7 +296,7 @@ export const straightenSettingJourneys = [
     },
   },
   {
-    name: 'outils de tracé : ligne, rectangle, ellipse, les trois boutons, l’aimant sur le quadrillé 5 mm ; Échap par étapes jusqu’à la bibliothèque',
+    name: 'outils de tracé : ligne, rectangle, ellipse, les trois boutons, l’aimant sur le quadrillé 5 mm ; Échap par étapes jusqu’à la question de la bibliothèque',
     // Q20 (SPEC §4.4, « Outils de tracé » and « Échap dans l'éditeur »). Written without a run (the window cannot be driven
     // from the session that wrote it): the selectors are the toolbar's (`[data-slot="shape-options"]`, `data-action="shape-
     // regular|centre|snap"`), the Page tab's template select and the ones of the journeys above. A shape is one stroke: its
@@ -400,7 +400,7 @@ export const straightenSettingJourneys = [
         if ((await app.evaluate(`document.querySelector('.editor') !== null`)) !== true) throw new Error('Escape left the editor');
       });
 
-      await check('Échap par étapes : désélectionne, puis enregistre et revient à la bibliothèque', async () => {
+      await check('Échap par étapes : désélectionne, puis pose la question de la bibliothèque, enregistre et revient', async () => {
         await app.click(tool('select'));
         // Ctrl+A rather than a lasso: the landscape sheet is taller than the window.
         await app.key('a', { ctrl: true });
@@ -410,6 +410,10 @@ export const straightenSettingJourneys = [
         if ((await app.evaluate(`document.querySelector('.editor') !== null`)) !== true) throw new Error('the first Escape left the editor');
         if ((await app.evaluate(`document.querySelector('.editor').dataset.dirty`)) !== 'yes') throw new Error('the note is not unsaved before the last step');
         await app.key('Escape');
+        // The last step asks what the Library button asks (Q21): the note is still here, unsaved, until the answer.
+        await app.waitFor(`document.querySelector('[role="alertdialog"]') !== null`, 'the question about the unsaved changes');
+        if ((await app.evaluate(`document.querySelector('.editor') !== null`)) !== true) throw new Error('Escape left without asking');
+        await app.click('[role="alertdialog"] .actions button', l('editor.leave.save'));
         await app.waitFor(`document.querySelector('.editor') === null`, 'the library');
         await app.waitFor(`document.querySelectorAll('.note-card').length > 0`, 'the library cards');
         // Saved on the way: opening the note again shows the three shapes.

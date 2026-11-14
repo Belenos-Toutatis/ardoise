@@ -2,8 +2,9 @@
  * What Escape does in the editor, by steps, the smallest first (SPEC §4.4 « Échap dans l'éditeur », docs/questions.md Q20,
  * docs/design/interface.md, "Escape in the editor"): the action in progress (a gesture; typing in a text frame, which
  * ends with the text kept; an equation being written, which ends the same way: put down or updated when its code is
- * valid), then the panel or the tool mode that is open, then the selection, then the note is saved and the editor goes
- * back to the library. One press does one step.
+ * valid), then the panel or the tool mode that is open, then the selection, then the editor goes back to the library
+ * as the « Bibliothèque » button does, asking whether to save when there are unsaved changes (docs/questions.md Q21).
+ * One press does one step.
  * Pure, so that the order is tested alone; `Editor.svelte` gathers the state and does what the step says.
  */
 
@@ -56,7 +57,7 @@ export type EscapeStep =
   | 'leaveReplay'
   | 'leaveCrop'
   | 'deselect'
-  /** Save the note and go back to the library, as the back button does (nothing while a recording runs). */
+  /** Go back to the library, as the back button does: it asks to save when there are changes (nothing while a recording runs). */
   | 'leave';
 
 export function escapeStep(state: EscapeState): EscapeStep {

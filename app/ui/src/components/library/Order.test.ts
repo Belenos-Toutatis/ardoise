@@ -511,7 +511,7 @@ describe('changing the date of a note', () => {
 
     await view.click(view.button('Annuler'));
     await vi.waitFor(() => expect(view.titles()).toEqual(['Réunion parents', 'Liste de courses', 'Cours de physique']));
-    expect(view.q('.activity-offer')?.textContent).toContain('rétablie');
+    expect(view.q('.activity-offer')?.textContent).toContain('Changement de date annulé : « Réunion parents » a retrouvé sa date.');
   });
 
   it('« Aujourd\'hui » fills the field with now', async () => {

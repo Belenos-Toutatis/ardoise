@@ -134,6 +134,34 @@
     place();
   }
 
+  /** The code in the field. */
+  export function current(): string {
+    return source;
+  }
+
+  /**
+   * The drawing of what is typed is made now (the editor's question about leaving needs to know whether it is valid):
+   * `valid` when the code can be put down, `invalid` when it is empty or has an error. An Enter waiting for the drawing is
+   * forgotten.
+   */
+  export async function settle(): Promise<'valid' | 'invalid'> {
+    placeWhenReady = false;
+    if (source.trim() === '') return 'invalid';
+    if (drawnFor !== source || converting) {
+      clearTimeout(timer);
+      timer = undefined;
+      await redraw(source);
+    }
+    return ready ? 'valid' : 'invalid';
+  }
+
+  /** Puts down what is typed when it is valid and drawn (the editor's question « Poser »); false when it cannot be. */
+  export function put(): boolean {
+    if (!ready || !drawing) return false;
+    onplace(source, drawing);
+    return true;
+  }
+
   /** The focus back in the field, its selection as it was (the custom colour's picker takes it). */
   export function focusField() {
     field?.focus({ preventScroll: true });

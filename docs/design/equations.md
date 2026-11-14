@@ -94,12 +94,36 @@ refuse an equation they could not read back. The clipboard checks a pasted equat
   (`lib/editor/escape.ts`: `endEquation`, at the step of a text's typing) ends the panel as Enter does, the work kept, as for
   a text frame (`EquationPanel.finish`): a valid source is put down or updates the equation (once its drawing is ready, if it
   was being made); an empty field closes the panel, nothing put down (an equation reopened and emptied stays as it was); an
-  invalid source keeps the panel open with its error, every press (the panel's hint says so). « Annuler », another tool, undo
-  or redo, the replay, the split, another note: the panel closes, the page unchanged by it (a colour or a size given meanwhile
-  to the equation reopened is a step of its own, kept). A tap while a new
+  invalid source keeps the panel open with its error, every press (the panel's hint says so). « Annuler » drops the code, the
+  page unchanged by it (a colour or a size given meanwhile to the equation reopened is a step of its own, kept). Anything else
+  that would close the panel asks first (below). A tap while a new
   equation is written only moves where it will go (on another equation too: the typed source is never thrown away);
   an equation deleted while its panel is open is put back as it was (place, size, colour), rewritten; with the chosen
   layer hidden, the panel stays open.
+- **The question** (`Editor.askEquation`, 2026-11-14). When the field holds code that is not on the page, **everything that
+  would close the panel first asks** « L'équation en cours n'est pas posée. » with **Poser** (only for a valid code; « Mettre à jour »
+  for an equation of the page whose code was changed, « Les changements de l'équation ne sont pas posés. »), **Abandonner** and
+  **Continuer l'écriture** (Escape and Ctrl + W give this answer). « Poser » puts it down (one step, selected) and then does what was
+  asked; « Abandonner » drops the panel and does it; « Continuer » does nothing and gives the focus back to the field. An incorrect or
+  empty code cannot be put down: « Poser » is disabled and the question says « Le code est vide ou incorrect : rien ne peut être posé. ».
+  *What is on the page* means: a new equation with some code (spaces are no code), or an equation of the page whose code, trimmed,
+  differs from the one it had. An empty or unchanged field asks nothing (nothing is lost). The panel asks the editor to draw what is
+  typed before the question (`EquationPanel.settle`), so the question knows whether the code is valid.
+
+  | Way out | What happens |
+  |---|---|
+  | Another tool, by the toolbar or by a key pressed outside the field | the question, then the tool |
+  | Undo or redo (button, `Ctrl + Z`/`Y` outside the field) | the question **without « Poser »** (putting the equation down to undo it at once is no answer) |
+  | The replay, the split panel | the question, then the replay or the split |
+  | A tap on the page with the panel of an equation of the page open with changes, a double click on another equation, the text or bookmark tool's tap | the question, then the new panel (a tap while a **new** equation is written only moves where it goes, as before) |
+  | « Page précédente / suivante », `Alt + ←/→`, another note given by the screen, « Ouvrir l'original » | the question, then the move (which asks about unsaved changes as usual); if the writing goes on, the screen follows this note again |
+  | « Bibliothèque », `Ctrl + W` / `Ctrl + F4` (Escape is not one: it ends the equation first) | the question, then the usual question about unsaved changes |
+  | « Reprendre en mode direct » | the question, then the usual one |
+  | The window closed (close button, `Alt + F4`, `Ctrl + Q`) | the close is held back, the question, then the window closes (or the question about unsaved changes comes first); in a browser tab the browser's own prompt holds it |
+  | Export, print, video, « Copier l'image » | the question first, so that the output has the equation (« Poser » then opens the dialog) |
+  | `Ctrl + P` | as Escape: a valid code is put down, then the print dialog opens; an invalid code stays in the panel under the dialog (nothing lost) |
+  | The assistant (MCP) moving the editor to another note | refused while the field holds code not on the page (`blocker`) |
+  | « Recharger » after a change on the disk, restoring a draft as a copy | **not asked**: those replace the whole page on purpose |
 - **Placement**: a new equation's left end at the tap, its middle at the tap's height (as a text frame's first line); its time
   is the one a stroke drawn now would take (the sound's clock during a writing recording).
 - **Size and colour**: one colour for the whole equation (`color`). The equation rewritten stays selected while its panel is
@@ -124,8 +148,9 @@ refuse an equation they could not read back. The clipboard checks a pasted equat
 ## 6. Choices that could have gone another way
 
 - Escape **ends** the equation being written as Enter does (the work kept, as a text's typing; asked by the user on
-  2026-11-14): only « Annuler » drops it. An invalid source cannot end, so Escape leaves its panel open. Another tool still drops
-  it (the text tool keeps a frame then).
+  2026-11-14): only « Annuler » drops it. An invalid source cannot end, so Escape leaves its panel open. Another tool used to drop
+  it silently (the text tool keeps a frame then); since 2026-11-14 it **asks** (the user: « Changer d'outil abandonne une équation en
+  cours d'écriture : fais un message demandant confirmation »), as everything else that closes the panel.
 - Enter puts the equation down; Shift + Enter is a new line in the source.
 - Display style always (`\frac` full size, limits above and below); no inline style.
 - No equation numbers (`\tag` refused), no colours inside an equation (one colour for the whole of it: the user's choice of

@@ -56,8 +56,8 @@
    *   The narration the note stores is known from its opening (`OpenedNote.narration`), not only in a replay.
    *
    * Escape acts by steps, the smallest first (`lib/editor/escape.ts`, `onescape`): the gesture under way, then the panel
-   * or the tool mode that is open, then the selection, then the note is saved and the editor goes back to the library
-   * (`leaveSaving`, which refuses while a narration is recorded). The shape tools (`lib/editor/shape-tools.ts`) are the
+   * or the tool mode that is open, then the selection, then the editor goes back to the library as the « Bibliothèque »
+   * button does (`back`: it asks to save when there are changes, and refuses while a narration is recorded). The shape tools (`lib/editor/shape-tools.ts`) are the
    * canvas's; the editor only gives it the snap grid of the page's template (`SnapGridWatch`).
    *
    * The text tool (SPEC §4.4, docs/design/page-objects.md §5): a tap asks for a frame (`startText`); what is typed
@@ -77,8 +77,9 @@
    * click with the selection tool too); the panel converts the LaTeX with MathJax (loaded the first time) into our own
    * drawing, and « Poser » / « Mettre à jour » makes one undoable step of it (`placeEquation`). Escape ends it as Enter
    * does, the work kept as with a text frame (`endEquation`: an empty field puts nothing down, an invalid code keeps the
-   * panel open with its error); « Annuler », another tool, undo or another note drop it (`cancelEquation`), the page
-   * unchanged. The equation rewritten stays selected while its panel is open, so that the colours and the sizes act on
+   * panel open with its error); « Annuler » drops it (`cancelEquation`), the page unchanged. Anything else that would close
+   * the panel (another tool, undo, the replay, the split, another note, leaving the editor, the window, an export) first
+   * asks, when the field holds code that is not on the page (`askEquation`, docs/design/equations.md §4). The equation rewritten stays selected while its panel is open, so that the colours and the sizes act on
    * it (each change one undoable step); a new one takes the tool's colour, which the swatches change meanwhile.
    */
   import { tick, untrack } from 'svelte';
@@ -375,8 +376,6 @@
     const template = doc?.note.background.template;
     if (page && template) untrack(() => snap.follow(page, template));
   });
-  /** Escape is saving the note to leave: a second press waits for it. */
-  let escapeLeaving = false;
   /** What the video export dialog exports; null while it is closed. */
   let video = $state.raw<ExportSource | null>(null);
   /** The video export dialog is exporting: the window must not close under it. */
@@ -463,6 +462,15 @@
   let equationSessions = 0;
   /** The panel while it is open (Escape asks it to end, `endEquation`). */
   let equationView = $state<ReturnType<typeof EquationPanel>>();
+  /**
+   * The question « L'équation en cours n'est pas posée. » while it is asked: whether the code can be put down (valid),
+   * whether « Poser » is offered at all (`place`: not for an undo, which would take it away at once), whether it is an
+   * equation of the page that was changed (`changed`, not a new one), what to do once it is answered (`proceed`) and what to
+   * do when the writing goes on (`keep`).
+   */
+  let equationAsk = $state.raw<{ valid: boolean; place: boolean; changed: boolean; proceed: () => void; keep?: () => void } | null>(null);
+  /** The code of the panel is being drawn for the question: a second request waits for it. */
+  let equationChecking = false;
   /** The selected equations the tool's size acts on. */
   const equationTargets = $derived.by((): number => {
     if (!doc) return 0;
@@ -635,22 +643,29 @@
   // a rename or a copy) is already open.
   $effect(() => {
     const next = path;
-    untrack(() => {
-      if (next === currentPath) return;
-      // Unsaved edits are never dropped silently, nor writes still queued (opening drops them).
-      if (doc && (dirty || titleEdited())) {
-        switching = next;
-        resuming = false;
-        leaving = true;
-      } else if (pendingWrites > 0) {
-        void settled().then(() => {
-          if (alive && next !== currentPath) void open(next);
-        });
-      } else {
-        void open(next);
-      }
-    });
+    untrack(() => followPath(next));
   });
+
+  /**
+   * The screen gave another note: this editor moves on to it, by the rules of leaving it. An equation being written is
+   * asked about first (the screen follows this note again if the writing goes on).
+   */
+  function followPath(next: string) {
+    if (next === currentPath) return;
+    if (askEquation(() => followPath(path), () => notifySaved(currentPath))) return;
+    // Unsaved edits are never dropped silently, nor writes still queued (opening drops them).
+    if (doc && (dirty || titleEdited())) {
+      switching = next;
+      resuming = false;
+      leaving = true;
+    } else if (pendingWrites > 0) {
+      void settled().then(() => {
+        if (alive && next !== currentPath) void open(next);
+      });
+    } else {
+      void open(next);
+    }
+  }
 
   // The setting's panel goes when its button does (another tool, the split panel, replay).
   $effect(() => {
@@ -706,7 +721,9 @@
                   ? 'a dialog of the revision (what changed, compare) is open in the editor: the teacher must close it first'
                   : split
                     ? 'the split panel is open in the editor: the teacher must finish or cancel it first'
-                    : leaving
+                    : equationUnsettled()
+                      ? 'an equation is being written in the editor: the teacher must put it down or drop it first'
+                      : leaving
                       ? 'the editor is asking whether to save its changes: the teacher must answer first'
                       : dirty || titleEdited()
                         ? 'the note open in the editor has unsaved changes: the teacher must save or close it first'
@@ -1239,22 +1256,16 @@
     return true;
   }
 
+  /**
+   * The back button, Ctrl + W and Escape's last step: back to the library, once the question is answered when there are
+   * unsaved changes (save, go back without saving, stay). An equation being written is asked about first. A save or a
+   * rename that fails keeps the editor open, with its error in view.
+   */
   function back() {
-    if (leaveRefused()) return;
+    if (leaveRefused() || equationAsk) return;
+    if (askEquation(back)) return;
     if (dirty || titleEdited()) leaving = true;
     else close();
-  }
-
-  /**
-   * Escape's last step: the note is saved and the editor goes back to the library, by the rules of the back button
-   * (nothing during a recording or a video export; the writes still queued are waited for), without the question:
-   * the save is the answer. A save or a rename that fails keeps the editor open, with its error in view.
-   */
-  function leaveSaving() {
-    if (leaveRefused() || escapeLeaving || leaving) return;
-    if (!dirty && !titleEdited()) return close();
-    escapeLeaving = true;
-    void saveAndLeave().finally(() => (escapeLeaving = false));
   }
 
   /**
@@ -1265,6 +1276,7 @@
     if (!onresume || resumeHint !== null) return;
     if (recorder.busy) return showNotice(t('editor.replay.recordingBusy'), true);
     if (videoRunning) return showNotice(t('videoExport.closeBusy'), true);
+    if (askEquation(resumeLive)) return;
     if (dirty || titleEdited()) {
       resuming = true;
       leaving = true;
@@ -1322,9 +1334,10 @@
    * for, and a rename that failed keeps the note here.
    */
   async function goTo(target: string, busy: 'editor.pages.videoBusy' | 'editor.revision.videoBusy') {
-    if (leaving) return;
+    if (leaving || equationAsk) return;
     if (recorder.busy) return showNotice(t('editor.replay.recordingBusy'), true);
     if (videoRunning) return showNotice(t(busy), true);
+    if (askEquation(() => void goTo(target, busy))) return;
     const ask = () => {
       switching = target;
       closing = false;
@@ -1354,6 +1367,15 @@
       return true;
     }
     if (!alive) return false;
+    // An equation being written: asked about first (a browser tab cannot ask, its own prompt holds the close back).
+    if (equationAsk) return true;
+    if (equationUnsettled()) {
+      if (!windowClose.destroy) return true;
+      askEquation(() => {
+        if (!holdClose()) void closeWindow();
+      });
+      return true;
+    }
     if (!dirty && !titleEdited() && pendingWrites === 0) {
       if (!shapesSaver.busy) return false;
       // The setting of "Redresser les formes" is still being kept (the debounce, or a write under
@@ -1451,6 +1473,8 @@
   }
 
   function setMode(mode: Mode) {
+    // Another tool drops the equation being written: asked first when its code is not on the page.
+    if (mode !== 'equation' && askEquation(() => setMode(mode))) return;
     if (mode !== 'text') endText();
     if (mode !== 'equation') cancelEquation();
     if (mode !== 'bookmark') endBookmark();
@@ -1465,13 +1489,25 @@
    * the source typed stays.
    */
   function startEquation(request: { kind: 'new'; at: Vec } | { kind: 'edit'; index: number; at: Vec }) {
-    if (!doc || !history || replaying || split) return;
+    if (!doc || !history || replaying || split || equationAsk) return;
     endText();
     endBookmark();
     if (tools.mode !== 'equation') tools = { ...tools, mode: 'equation' };
     if (equationEdit && equationEdit.id === null) {
       equationEdit = { ...equationEdit, at: request.at };
       return;
+    }
+    // The panel of an equation of the page is open: another one, or a new one, takes its place only once the changes
+    // made to it are put down or let go.
+    const reopened = request.kind === 'edit' ? objectsOf(doc.note)[request.index] : undefined;
+    if (equationEdit && reopened?.id !== equationEdit.id) {
+      if (
+        askEquation(() => {
+          cancelEquation();
+          startEquation(request);
+        })
+      )
+        return;
     }
     if (request.kind === 'new') {
       if (!canDraw(doc)) return hiddenLayerNotice();
@@ -1544,6 +1580,81 @@
   }
 
   /**
+   * The panel is open and its field holds code that is not on the page: a new equation with some code, or an equation of the
+   * page whose code was changed. An empty or unchanged field is nothing to lose.
+   */
+  function equationUnsettled(): boolean {
+    const edit = equationEdit;
+    if (!edit || !equationView) return false;
+    const code = equationView.current().trim();
+    return edit.id === null ? code !== '' : code !== edit.latex.trim();
+  }
+
+  /**
+   * What would close the equation panel (another tool, undo, the replay, the split, another note, leaving the editor, the
+   * window, an export) asks first when `equationUnsettled`: « L'équation en cours n'est pas posée. » with « Poser »
+   * (when the code is valid: it is put down, and `proceed` goes on), « Abandonner » (the panel is dropped, `proceed` goes
+   * on) and « Continuer l'écriture » (nothing changes; Escape gives this answer; `keep` runs). Returns true when it asks
+   * (the caller stops: `proceed` is its way on), false when there is nothing to ask (the caller goes on itself).
+   * `place` false leaves « Poser » out (undo and redo).
+   */
+  function askEquation(proceed: () => void, keep?: () => void, place = true): boolean {
+    // A question under way (or being prepared: a second click meanwhile) takes the request: nothing is dropped behind it.
+    if (equationAsk || equationChecking) return true;
+    if (!equationUnsettled()) return false;
+    const [view, edit] = [equationView, equationEdit];
+    if (!view || !edit) return false;
+    equationChecking = true;
+    // The drawing of what is typed is made now, so that the question knows whether it can be put down.
+    void view.settle().then((state) => {
+      equationChecking = false;
+      if (equationEdit !== edit) return proceed();
+      equationAsk = { valid: place && state === 'valid', place, changed: edit.id !== null, proceed, keep };
+    });
+    return true;
+  }
+
+  /** `action`, once the equation being written is answered for (what an export or a copy of the page shows must have it). */
+  function unlessWriting(action: () => void) {
+    if (!askEquation(() => unlessWriting(action))) action();
+  }
+
+  /** « Poser » / « Mettre à jour » of the question: the code is put down, then what was asked goes on. */
+  function answerEquationPlace() {
+    const ask = equationAsk;
+    if (!ask?.valid) return;
+    equationAsk = null;
+    equationView?.put();
+    // A hidden layer keeps the panel open with its notice: nothing goes on then.
+    if (equationEdit === null) ask.proceed();
+    else void giveFieldBack();
+  }
+
+  /** « Abandonner »: the panel and its code are dropped, then what was asked goes on. */
+  function answerEquationDrop() {
+    const ask = equationAsk;
+    if (!ask) return;
+    equationAsk = null;
+    cancelEquation();
+    ask.proceed();
+  }
+
+  /** « Continuer l'écriture » (and Escape): nothing changes, the focus is back in the field. */
+  function answerEquationKeep() {
+    const ask = equationAsk;
+    if (!ask) return;
+    equationAsk = null;
+    ask.keep?.();
+    void giveFieldBack();
+  }
+
+  /** The focus back in the field once the dialog is gone (it gives the focus back to what had it before, after our call). */
+  async function giveFieldBack() {
+    await tick();
+    equationView?.focusField();
+  }
+
+  /**
    * Escape: the panel ends as with Enter, the work kept (`EquationPanel.finish`): a valid code is put down or updates the
    * equation reopened, an empty field closes the panel with nothing put down, an invalid code keeps it open.
    */
@@ -1567,7 +1678,14 @@
 
   /** A tap of the text tool: typing in a frame of the chosen layer, or in a new frame put there. */
   function startText(request: { kind: 'new'; at: { x: number; y: number } } | { kind: 'edit'; index: number; caret: number }) {
-    if (!doc || !history || !ink || replaying || split) return;
+    if (!doc || !history || !ink || replaying || split || equationAsk) return;
+    if (
+      askEquation(() => {
+        cancelEquation();
+        startText(request);
+      })
+    )
+      return;
     cancelEquation();
     // The frame asked for, by its id: ending the typing of another one may remove that one (left empty) and move indices.
     const wanted = request.kind === 'edit' ? objectsOf(history.present.note)[request.index]?.id : undefined;
@@ -1654,7 +1772,14 @@
 
   /** A tap of the bookmark tool: typing in the label of the bookmark under it, or in a new one put there. */
   function startBookmark(request: { kind: 'new'; at: { x: number; y: number } } | { kind: 'edit'; index: number }) {
-    if (!doc || !history || !ink || replaying || split) return;
+    if (!doc || !history || !ink || replaying || split || equationAsk) return;
+    if (
+      askEquation(() => {
+        cancelEquation();
+        startBookmark(request);
+      })
+    )
+      return;
     // The bookmark asked for, by its id: ending the typing of another one may remove that one (left empty) and move indices.
     const wanted = request.kind === 'edit' ? objectsOf(history.present.note)[request.index]?.id : undefined;
     endText();
@@ -1786,6 +1911,7 @@
   }
 
   function doUndo() {
+    if (equationAsk || askEquation(doUndo, undefined, false)) return;
     endText();
     endBookmark();
     cancelEquation();
@@ -1793,6 +1919,7 @@
   }
 
   function doRedo() {
+    if (equationAsk || askEquation(doRedo, undefined, false)) return;
     endText();
     endBookmark();
     cancelEquation();
@@ -1809,7 +1936,7 @@
 
   /** Whether the editing keys are free to act now (no dialog, split panel or replay). */
   function canEditNow(target: EventTarget | null): boolean {
-    return !!doc && !leaving && !offer && !exporting && !video && !split && !replaying && !share.panelOpen && !isTyping(target);
+    return !!doc && !leaving && !equationAsk && !offer && !exporting && !video && !split && !replaying && !share.panelOpen && !isTyping(target);
   }
 
   /** Pastes strokes and text frames from the clipboard as one undoable step (the copies are then selected). */
@@ -2101,6 +2228,7 @@
     if (split) return cancelSplit();
     // A split by time cuts the timeline the recording is writing (O20).
     if (recorder.busy) return showNotice(t('editor.replay.recordingBusy'), true);
+    if (askEquation(toggleSplit)) return;
     cancelEquation();
     if (hasSelection) reselect(clearSelection(doc));
     const span = timeRange(doc.note);
@@ -2190,7 +2318,8 @@
     if (!doc || split || replaying || canvas?.dragging()) return;
     // A writing recording is writing the timeline the replay would play (O20).
     if (recorder.busy) return showNotice(t('editor.replay.recordingBusy'), true);
-    // An equation being written is dropped: the replay is read-only.
+    // An equation being written is dropped (the replay is read-only): asked about first.
+    if (askEquation(enterReplay)) return;
     cancelEquation();
     // The replay shows Son (the narration) and gives the tab back when it ends. The forced view is not remembered:
     // leaving the editor during the replay must keep the view the user had (the stored one).
@@ -2599,7 +2728,7 @@
       case 'deselect':
         return reselect(clearSelection(doc));
       case 'leave':
-        return leaveSaving();
+        return back();
       default:
         step satisfies never;
     }
@@ -2631,7 +2760,7 @@
       if (!e.repeat && !e.defaultPrevented) onescape(e);
       return;
     }
-    if (leaving) return;
+    if (leaving || equationAsk) return;
     // A dialog or the split panel is open: the editing keys wait; Ctrl + W closes the panel.
     if (exporting || printing || video || share.panelOpen || revisionDialog) return;
     if (split) {
@@ -2831,11 +2960,11 @@
       {resumeHint}
       onresume={onresume ? resumeLive : undefined}
       onsplit={toggleSplit}
-      oncopy={copyImage}
-      onexport={openExport}
-      onprint={openPrint}
+      oncopy={() => unlessWriting(copyImage)}
+      onexport={() => unlessWriting(openExport)}
+      onprint={() => unlessWriting(openPrint)}
       onreplay={toggleReplay}
-      onvideo={openVideo}
+      onvideo={() => unlessWriting(openVideo)}
       onstraighten={straighten}
       {shapes}
       snapAvailable={snap.grid !== null}
@@ -3099,6 +3228,43 @@
       onclose={closeVideo}
       onrunning={(running) => (videoRunning = running)}
     />
+  {/if}
+
+  {#if equationAsk}
+    <Modal title={t('editor.equation.ask.title')} onclose={answerEquationKeep} role="alertdialog">
+      <p data-slot="equation-ask-message">
+        {equationAsk.changed ? t('editor.equation.ask.messageEdit') : t('editor.equation.ask.message')}
+      </p>
+      {#if equationAsk.place && !equationAsk.valid}
+        <p class="muted" data-slot="equation-ask-invalid">{t('editor.equation.ask.invalid')}</p>
+      {/if}
+      <div class="actions">
+        {#if equationAsk.place}
+          <button
+            type="button"
+            class="button primary"
+            data-action="equation-ask-place"
+            data-autofocus={equationAsk.valid ? '' : undefined}
+            disabled={!equationAsk.valid}
+            onclick={answerEquationPlace}
+          >
+            {equationAsk.changed ? t('editor.equation.ask.update') : t('editor.equation.ask.place')}
+          </button>
+        {/if}
+        <button type="button" class="button danger" data-action="equation-ask-drop" onclick={answerEquationDrop}>
+          {t('editor.equation.ask.drop')}
+        </button>
+        <button
+          type="button"
+          class="button"
+          data-action="equation-ask-keep"
+          data-autofocus={equationAsk.valid ? undefined : ''}
+          onclick={answerEquationKeep}
+        >
+          {t('editor.equation.ask.keep')}
+        </button>
+      </div>
+    </Modal>
   {/if}
 
   {#if leaving}
