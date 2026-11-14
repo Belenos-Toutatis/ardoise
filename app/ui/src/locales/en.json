@@ -1073,9 +1073,9 @@
       "missingMany": "No font of Ardoise has these characters: {chars}. They are drawn as squares.",
       "greek": {
         "button": "Greek alphabet",
-        "buttonHint": "Greek alphabet and symbols: a letter touched is added to the text being typed",
-        "label": "Greek alphabet and symbols",
-        "inactive": "First touch the page to type a text",
+        "buttonHint": "Greek alphabet and symbols, in the side panel’s Characters tab: a letter touched is added to the text being typed",
+        "inactive": "First touch the page with the Text tool to type a text",
+        "textTool": "Text tool",
         "groups": {
           "lower": "Lower case",
           "upper": "Upper case",
@@ -1536,6 +1536,7 @@
       "background": "Background",
       "sound": "Sound",
       "projection": "Projection",
+      "characters": "Characters",
       "help": "Help"
     },
     "openTitle": "{tab} (click to collapse)",

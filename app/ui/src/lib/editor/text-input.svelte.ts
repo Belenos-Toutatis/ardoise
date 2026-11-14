@@ -1,8 +1,7 @@
 /**
- * What the Greek palette of the text tool (`GreekPalette.svelte`) shares with the field of the frame being typed
- * (`TextField.svelte`) and the editor (`Editor.svelte`): the field registers itself while it is there (to insert at its
- * caret, to take the focus back, to end the typing), and the palette's open state is the editor's (Escape closes it
- * before it ends the typing, a change of tool closes it: `lib/editor/escape.ts`).
+ * What the « Caractères » tab of the editor's side panel (`CharactersTab.svelte`) shares with the field of the frame being
+ * typed (`TextField.svelte`): the field registers itself while it is there, to insert at its caret, to take the focus
+ * back and to end the typing.
  */
 
 export interface TextInputTarget {
@@ -11,17 +10,15 @@ export interface TextInputTarget {
    * back to the field (a press of the pointer never took it; a key of the keyboard did, and keeps it).
    */
   insert(text: string, refocus: boolean): void;
-  /** Gives the focus back to the field (the palette closed with Escape). */
+  /** Gives the focus back to the field. */
   focus(): void;
-  /** Ends the typing, as leaving the field does (the focus went from the palette to elsewhere). */
+  /** Ends the typing, as leaving the field does (the focus went from the tab to elsewhere). */
   end(): void;
 }
 
 class TextInputState {
   /** The field of the frame being typed, while there is one. */
   target = $state.raw<TextInputTarget | null>(null);
-  /** The Greek palette is open. */
-  paletteOpen = $state(false);
 }
 
 export const textInput = new TextInputState();

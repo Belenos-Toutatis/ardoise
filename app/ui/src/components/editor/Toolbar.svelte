@@ -3,7 +3,8 @@
    * Tools and style: mode (select, pen, the shape tools, eraser, move the page), ink tool, colour (Inkspace palette +
    * custom colours), width, eraser. With a shape tool, three toggles (`shapePrefs`): regular, from the centre, snap to
    * the page's template (docs/design/shape-tools.md). With the text tool (or text frames selected), the family, the size
-   * and bold (docs/design/page-objects.md §4), and with the text tool the Greek palette (`GreekPalette`); their buttons
+   * and bold (docs/design/page-objects.md §4), and with the text tool « αβγ », which shows the side panel's « Caractères »
+   * tab (Greek letters and symbols to insert, `CharactersTab`) and goes back to the tab shown before; their buttons
    * and the colours do not take the focus from the frame being typed (`keepFocus`). With the equation tool (or equations selected), the size (docs/design/equations.md).
    */
   import { INKSPACE_COLOR_NAMES, sameColor, toHex, fromHex } from '../../lib/editor/colors';
@@ -11,13 +12,12 @@
   import { shapePrefs, type ShapeToggle } from '../../lib/editor/shape-prefs.svelte';
   import { isShapeKind } from '../../lib/editor/shape-tools';
   import { equationToolSize, textSettings, type EraserMode, type Mode, type TextSettings, type ToolSettings } from '../../lib/editor/state';
-  import { CSS_FAMILY, TEXT_SIZES, TEXT_SIZE_NAMES } from '../../lib/text';
+  import { CSS_FAMILY, TEXT_SIZES, TEXT_SIZE_NAMES, cssFamilies } from '../../lib/text';
   import { FONT_FAMILIES } from '../../lib/note';
   import { t } from '../../lib/i18n.svelte';
   import { TOOLS, type Tool } from '../../lib/ink';
   import { INKSPACE_COLORS, cssColor, type Rgba, type ShapeSettings } from '../../lib/note';
   import StraightenPanel from './StraightenPanel.svelte';
-  import GreekPalette from './GreekPalette.svelte';
 
   let {
     tools,
@@ -31,6 +31,8 @@
     oneraser,
     ontext,
     textTargets = 0,
+    charactersShown = false,
+    oncharacters,
     onequationsize,
     equationTargets = 0,
     onapplyall,
@@ -70,6 +72,10 @@
     oneraser: (change: { mode?: EraserMode; radius?: number }) => void;
     /** The text tool's family, size or bold changed (the frame typed in, or the selected frames, take it too). */
     ontext?: (change: Partial<TextSettings>) => void;
+    /** The side panel shows its « Caractères » tab (« αβγ » is pressed). */
+    charactersShown?: boolean;
+    /** « αβγ »: show the « Caractères » tab of the side panel, or go back to the tab shown before. */
+    oncharacters?: () => void;
     /** How many text frames the text options act on now (the one typed in, or the selected ones). */
     textTargets?: number;
     /** The equation tool's size changed (the selected equations take it too). */
@@ -289,7 +295,19 @@
         {t('editor.text.bold')}
       </button>
       {#if tools.mode === 'text'}
-        <GreekPalette font={text.font} bold={text.bold} disabled={locked} />
+        <button
+          type="button"
+          class="button small-button toggle greek"
+          class:active={charactersShown}
+          aria-pressed={charactersShown}
+          aria-controls="side-tabpanel-editor-characters"
+          aria-label={t('editor.text.greek.button')}
+          title={t('editor.text.greek.buttonHint')}
+          data-action="text-greek"
+          style:font-family={cssFamilies(text.font)}
+          onpointerdown={keepFocus}
+          onclick={() => oncharacters?.()}>αβγ</button
+        >
       {/if}
       {#if tools.mode === 'text'}
         <span class="label text-help" data-slot="text-help">{t('editor.text.help')}</span>

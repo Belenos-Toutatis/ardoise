@@ -185,7 +185,7 @@
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { share } from '../../lib/share-state.svelte';
   import { layerWarnings } from '../../lib/layers-zone';
-  import { SidePanelState, type SideBadges, type SideView } from '../../lib/side-panel.svelte';
+  import { SIDE_DEFAULTS, SidePanelState, type SideBadges, type SideView } from '../../lib/side-panel.svelte';
   import { editorKeyAction, type EditorKeyAction } from '../../lib/editor/keys';
   import { EDITOR_SHORTCUTS } from '../../lib/editor/shortcuts';
   import { resumeBlock } from '../../lib/live-resume.svelte';
@@ -223,6 +223,7 @@
   import BackgroundImageSection from './BackgroundImageSection.svelte';
   import Canvas from './Canvas.svelte';
   import EditorSound from './EditorSound.svelte';
+  import CharactersTab from './CharactersTab.svelte';
   import EquationPanel from './EquationPanel.svelte';
   import OriginalPanel from './OriginalPanel.svelte';
   import PagePanel from './PagePanel.svelte';
@@ -235,7 +236,6 @@
   import RevisionCompare from './RevisionCompare.svelte';
   import SplitPanel from './SplitPanel.svelte';
   import Toolbar from './Toolbar.svelte';
-  import { textInput } from '../../lib/editor/text-input.svelte';
 
   let {
     path,
@@ -418,6 +418,24 @@
   const side = new SidePanelState('editor');
   /** The tab and collapsed state the replay found: given back when it ends (it shows Son meanwhile). */
   let sideBeforeReplay: SideView | null = null;
+  /** The side panel shows its « Caractères » tab (the Greek letters and symbols of the Text tool). */
+  const charactersShown = $derived(side.tab === 'characters' && !side.collapsed);
+  /** The panel's view before the « Caractères » tab last showed, for « αβγ » to give it back (null: none in this editor). */
+  let beforeCharacters: SideView | null = null;
+  $effect(() => {
+    const view = side.snapshot();
+    if (!(view.tab === 'characters' && !view.collapsed)) beforeCharacters = view;
+  });
+
+  /**
+   * « αβγ » of the Text tool: shows the « Caractères » tab, unfolding the panel when it is folded; pressed while the tab
+   * shows, gives back the view before it (the tab that was open, and the panel folded again if it was), or the panel's
+   * default (Calques) when the tab showed from the start.
+   */
+  function toggleCharacters() {
+    if (charactersShown) side.restore(beforeCharacters ?? SIDE_DEFAULTS.editor);
+    else side.open('characters');
+  }
 
   // The projection of the page (M17): one for the editor's life, so that another note stays projected.
   const pageProjection = new EditorProjection();
@@ -1477,8 +1495,6 @@
   function setMode(mode: Mode) {
     // Another tool drops the equation being written: asked first when its code is not on the page.
     if (mode !== 'equation' && askEquation(() => setMode(mode))) return;
-    // The Greek palette belongs to the text tool's options: another tool closes it.
-    if (mode !== tools.mode) textInput.paletteOpen = false;
     if (mode !== 'text') endText();
     if (mode !== 'equation') cancelEquation();
     if (mode !== 'bookmark') endBookmark();
@@ -2695,7 +2711,6 @@
       leaving,
       owned: modalOpen() || !!exporting || !!printing || !!video || share.panelOpen || !!revisionDialog || !!offer,
       dragging: canvas?.dragging() ?? false,
-      greekPalette: textInput.paletteOpen,
       editingText: textEdit !== null || bookmarkEdit !== null,
       editingEquation: equationEdit !== null,
       split: split !== null,
@@ -2713,9 +2728,6 @@
         return stay();
       case 'cancelDrag':
         return canvas?.cancelGesture();
-      case 'closeGreekPalette':
-        textInput.paletteOpen = false;
-        return textInput.target?.focus();
       case 'endText':
         endText();
         return endBookmark();
@@ -2956,6 +2968,8 @@
       onwidth={setWidth}
       oneraser={setEraser}
       ontext={setTextStyle}
+      {charactersShown}
+      oncharacters={toggleCharacters}
       textTargets={textTargets.length}
       onequationsize={setEquationSize}
       {equationTargets}
@@ -3108,6 +3122,16 @@
           {/snippet}
           {#snippet projection()}
             <EditorProjectionTab projection={pageProjection} />
+          {/snippet}
+          {#snippet characters()}
+            {@const style = textSettings(tools)}
+            <CharactersTab
+              font={style.font}
+              bold={style.bold}
+              textTool={tools.mode === 'text'}
+              ontexttool={() => setMode('text')}
+              disabled={locked}
+            />
           {/snippet}
           {#snippet help()}
             <ShortcutsHelp where="editor" shortcuts={EDITOR_SHORTCUTS} />

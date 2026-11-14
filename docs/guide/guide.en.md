@@ -1309,6 +1309,9 @@ panel, *collapses* it: the page takes the whole width and the rail stays. The ta
 - **Projection**: the **Projector** (the projection screen, **Project**, **Stop projecting**), the **Projected area**
   (zoom, **Whole page**, **Width**) and **Share on the network** (the button is no longer in the toolbar; see the end of
   chapter 6). See **Projecting the note on a video projector** below.
+- **Characters**: the Greek alphabet and the symbols to add to the typed text, with any tool (see **Typing text** below;
+  the **αβγ** button of the **Text** tool opens this tab). With no text being typed, the letters are greyed out and the tab
+  offers **Text tool**.
 - **Help**: the editor's keyboard shortcuts (see chapter 17).
 
 Ardoise remembers the open tab and the collapsed state of the editor, on this PC, and finds them again when you open
@@ -1413,11 +1416,12 @@ Under the toolbar, with the **Text** tool or when texts are selected:
   subscripts ₀…₉) can be typed in both fonts, in bold too: they come from Latin Modern Math, the maths font of the same family.
   A character no font of Ardoise has (an emoji, an ideogram…) is drawn as a square □, and Ardoise names it under the frame
   while you type.
-- **αβγ** (Greek alphabet): opens a palette under the toolbar, with the lower case letters (and the final sigma ς), the upper
-  case letters, the variants ϵ ϑ ϕ ϖ ϱ, symbols, superscripts and subscripts. First touch the page to type a text, then touch a
-  letter: it is added at the frame's cursor (in place of the selected text), and the cursor stays in the frame; the palette
-  stays open for several letters. `Esc` closes it (a second `Esc` ends the typing), as do its button and another tool. With the
-  keyboard: `Tab` to the palette, the arrows, then `Enter`.
+- **αβγ** (Greek alphabet): opens the **Characters** tab of the side panel (unfolding the panel if it is collapsed), beside
+  the page, hiding nothing of it: the lower case letters (and the final sigma ς), the upper case letters, the variants
+  ϵ ϑ ϕ ϖ ϱ, symbols, superscripts and subscripts. First touch the page to type a text, then touch a letter: it is added at
+  the frame's cursor (in place of the selected text), and the cursor stays in the frame. Pressing **αβγ** again goes back to
+  the tab open before (and collapses the panel again if it was). `Esc` ends the typing; the tab stays open. With the keyboard:
+  `Tab` to the letters, the arrows, then `Enter` (the cursor goes back to the frame).
 - **Size**: **Small** (4 mm), **Medium** (6 mm) or **Large** (9 mm).
 - **Bold**.
 - The colour is the tool's: choose it among the toolbar's colours.
