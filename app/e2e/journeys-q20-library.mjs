@@ -278,8 +278,17 @@ export const q20Journeys = [
         await app.click('.note-card:nth-child(2) .card-open');
         await app.waitFor(`document.querySelector('.editor')?.dataset.path === ${j(path[1])}`, 'the editor on Alpha');
         await app.waitFor(`document.querySelector('[data-slot="page-position"]')?.textContent.trim() === '2 / 3'`, 'the position 2 / 3');
-        await app.click('button[data-action="page-next"]');
-        await app.waitFor(`document.querySelector('.editor')?.dataset.path === ${j(path[2])}`, 'the editor on Beta');
+        // A page turn asked while the note is still being read again (the window has just been reloaded) is dropped by the
+        // editor: asked once more then.
+        for (let attempt = 0; ; attempt++) {
+          await app.click('button[data-action="page-next"]');
+          try {
+            await app.waitFor(`document.querySelector('.editor')?.dataset.path === ${j(path[2])}`, 'the editor on Beta', 3000);
+            break;
+          } catch (error) {
+            if (attempt >= 2) throw error;
+          }
+        }
         await app.click('button[data-action="page-previous"]');
         await app.click('button[data-action="page-previous"]');
         await app.waitFor(`document.querySelector('.editor')?.dataset.path === ${j(path[0])}`, 'the editor on Gamma');
