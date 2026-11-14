@@ -57,6 +57,8 @@ function sameWords(a: string, b: string): boolean {
 export class LibraryState {
   listing = $state<LibraryListing | null>(null);
   trash = $state<TrashEntry[]>([]);
+  /** The trash entry's menu asked « Vider la corbeille… »: the trash view, once shown, asks for the confirmation (and clears this). */
+  emptyTrashAsked = $state(false);
   /** Message of the last failed operation, shown in a banner. */
   error = $state<string | null>(null);
   view = $state<LibraryView>({ kind: 'all' });

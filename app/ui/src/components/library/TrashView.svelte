@@ -1,12 +1,16 @@
 <script lang="ts">
   /** The trash: restore a note, delete it for good, or empty the trash (both ask to confirm). */
+  import { menuPoint, type MenuItem, type Point } from '../../lib/context-menu';
   import { currentLocale, t, tn } from '../../lib/i18n.svelte';
   import { formatDate, originalBinder } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
   import type { TrashEntry } from '../../lib/note';
+  import ContextMenu from '../ContextMenu.svelte';
 
   let { lib }: { lib: LibraryState } = $props();
 
+  /** The menu of a note of the trash, open at the right click: the two buttons of its row. */
+  let rowMenu = $state<{ entry: TrashEntry; at: Point } | null>(null);
   /** Id of the entry whose deletion awaits confirmation, or 'all'. */
   let confirming = $state<string | null>(null);
   /** The entries shown when "empty the trash" was asked: only those are deleted. */
@@ -28,10 +32,29 @@
     await lib.purge(id);
   }
 
+  function showRowMenu(event: MouseEvent, entry: TrashEntry) {
+    event.preventDefault();
+    rowMenu = { entry, at: menuPoint(event, event.currentTarget as HTMLElement) };
+  }
+
+  function rowItems(entry: TrashEntry): MenuItem[] {
+    return [
+      { id: 'restore', label: t('library.trashView.restore'), onselect: () => void lib.restore(entry.id) },
+      { id: 'purge', label: t('library.trashView.purge') + '…', danger: true, onselect: () => (confirming = entry.id) },
+    ];
+  }
+
   function askEmpty() {
     confirmed = entries.map((entry) => entry.id);
     confirming = 'all';
   }
+
+  // « Vider la corbeille… » of the sidebar's menu: the same question as the button's, asked as the view shows.
+  $effect(() => {
+    if (!lib.emptyTrashAsked) return;
+    lib.emptyTrashAsked = false;
+    if (entries.length > 0) askEmpty();
+  });
 
   async function emptyAll() {
     confirming = null;
@@ -78,7 +101,7 @@
       </thead>
       <tbody>
         {#each entries as entry (entry.id)}
-          <tr data-id={entry.id}>
+          <tr data-id={entry.id} oncontextmenu={(event) => showRowMenu(event, entry)}>
             <th scope="row">{titleOf(entry)}</th>
             <td>{placeOf(entry)}</td>
             <td>{formatDate(entry.deleted, locale)}</td>
@@ -106,3 +129,12 @@
     </table>
   {/if}
 </section>
+
+{#if rowMenu}
+  <ContextMenu
+    label={t('contextMenu.trashNoteLabel', { title: titleOf(rowMenu.entry) })}
+    items={rowItems(rowMenu.entry)}
+    at={rowMenu.at}
+    onclose={() => (rowMenu = null)}
+  />
+{/if}

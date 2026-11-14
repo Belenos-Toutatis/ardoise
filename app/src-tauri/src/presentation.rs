@@ -256,6 +256,7 @@ pub fn show_on(
             let window = builder
                 .build()
                 .inspect_err(|_| activity.presentation_closed(token))?;
+            crate::webview_keys::disable_browser_keys(&window);
             let closed = activity.clone();
             window.on_window_event(move |event| {
                 if matches!(event, WindowEvent::Destroyed) {

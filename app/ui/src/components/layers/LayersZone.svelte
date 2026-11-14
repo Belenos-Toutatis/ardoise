@@ -5,9 +5,13 @@
    * the row is what chooses the layer the pen, the eraser and the selection act on (the frame),
    * its name button being the keyboard's way in. In live a second mark, the tablet's icon, says
    * where the tablet writes. Nothing here changes a note: every act goes up through a callback,
-   * the owner (the editor's doc, the live session) does it and hands the new list back down.
+   * the owner (the editor's doc, the live session) does it and hands the new list back down. A right click on a row
+   * chooses its layer and opens a menu of the same acts (rename, hide or show, up, down, merge), at the pointer.
    */
   import { tick } from 'svelte';
+  import { menuPoint, type MenuItem, type Point } from '../../lib/context-menu';
+  import { isTextField } from '../../lib/browser-guard';
+  import ContextMenu from '../ContextMenu.svelte';
   import { layerWarnings, rowsTopFirst } from '../../lib/layers-zone';
   import { t } from '../../lib/i18n.svelte';
   import type { Layer } from '../../lib/note';
@@ -56,6 +60,8 @@
   /** The layer whose name is being edited (one at a time). */
   let renaming = $state<number | null>(null);
   let zone: HTMLElement | undefined = $state();
+  /** The menu of a row, open at the right click. */
+  let menu = $state<{ index: number; at: Point } | null>(null);
 
   // A closed zone, or a list that no longer has the layer, ends the edit.
   $effect(() => {
@@ -99,6 +105,41 @@
     onchoose(index);
   }
 
+  /** The right click on a row: its layer is chosen (what the up, down and merge buttons act on), then the menu opens. */
+  function showMenu(event: MouseEvent, index: number) {
+    // The name being typed keeps the system's menu (cut, copy, paste).
+    if (isTextField(event.target)) return;
+    event.preventDefault();
+    if (disabled) return;
+    chooseRow(index);
+    menu = { index, at: menuPoint(event, event.currentTarget as HTMLElement) };
+  }
+
+  function menuItems(index: number): MenuItem[] {
+    const layer = layers[index];
+    if (!layer) return [];
+    const items: MenuItem[] = [
+      { id: 'rename', label: t('contextMenu.layer.rename'), onselect: () => startRename(index) },
+      {
+        id: 'visible',
+        label: layer.visible ? t('contextMenu.layer.hide') : t('contextMenu.layer.show'),
+        onselect: () => onvisible(index, !layer.visible),
+      },
+      { id: 'up', label: t('contextMenu.layer.up'), separatorBefore: true, disabled: index === top, onselect: () => onmove(index, index + 1) },
+      { id: 'down', label: t('contextMenu.layer.down'), disabled: index === 0, onselect: () => onmove(index, index - 1) },
+      {
+        id: 'merge',
+        label: where === 'live' ? `${t('contextMenu.layer.merge')} ${t('layers.mergeNoUndo')}` : t('contextMenu.layer.merge'),
+        disabled: index === 0,
+        onselect: () => onmerge(index),
+      },
+    ];
+    if (where === 'live' && tablet !== undefined && tablet !== index) {
+      items.push({ id: 'tablet', label: t('contextMenu.layer.tablet'), separatorBefore: true, onselect: () => ontablet?.(index) });
+    }
+    return items;
+  }
+
   /** The other buttons of a row do their own thing: their click does not reach the row. */
   function act(event: MouseEvent, action: () => void) {
     event.stopPropagation();
@@ -134,6 +175,7 @@
         data-hidden={layer.visible ? undefined : 'true'}
         data-tablet={isTablet ? 'true' : undefined}
         onclick={() => chooseRow(index)}
+        oncontextmenu={(event) => showMenu(event, index)}
       >
         <button
           type="button"
@@ -264,6 +306,15 @@
 
   <p class="help" data-slot="layers-help">{where === 'live' ? t('layers.help.live') : t('layers.help.editor')}</p>
 </section>
+
+{#if menu}
+  <ContextMenu
+    label={t('contextMenu.layer.label', { name: layers[menu.index]?.name ?? '' })}
+    items={menuItems(menu.index)}
+    at={menu.at}
+    onclose={() => (menu = null)}
+  />
+{/if}
 
 <style>
   .layers-zone {

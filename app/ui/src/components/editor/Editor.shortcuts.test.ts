@@ -279,6 +279,12 @@ const PROBES: Record<string, (v: View) => Promise<void>> = {
     await v.press('save');
     await vi.waitFor(() => expect(v.dirty()).toBe('no'));
   },
+  print: async (v) => {
+    // Ardoise's own printing of the note, like the toolbar's button, and never the web view's.
+    expect(v.q('[data-dialog="print"]')).toBeNull();
+    expect(await v.press('print')).toBe(true);
+    expect(v.q('[data-dialog="print"]')).toBeTruthy();
+  },
   close: async (v) => {
     await v.press('close');
     expect(v.onclose).toHaveBeenCalled();

@@ -44,6 +44,8 @@
    */
   import { untrack, type Snippet } from 'svelte';
   import { api } from '../../lib/api';
+  import { isTextField } from '../../lib/browser-guard';
+  import { menuOrigin, type Point } from '../../lib/context-menu';
   import {
     applyAffine,
     boundsOfPoints,
@@ -173,6 +175,7 @@
     onbookmarkinput,
     onbookmarkenter,
     onbookmarkblur,
+    oncontext,
   }: {
     doc: Doc;
     tools: ToolSettings;
@@ -243,6 +246,11 @@
     onbookmarkenter?: () => void;
     /** The field of the bookmark being typed lost the focus. */
     onbookmarkblur?: () => void;
+    /**
+     * A mouse's right click on the page (after the selection tool took what was under it, if it was not selected): the
+     * window position `at` for the menu, and the page point `page`. Never a pen's barrel button or a finger's long press.
+     */
+    oncontext?: (request: { at: Point; page: Vec }) => void;
   } = $props();
 
   /** Screen pixels per device unit at real size (96 dpi, 10 µm units). */
@@ -796,6 +804,7 @@
     const id = pointerId(e);
     if (kind === 'pen' || kind === 'eraser') {
       presence.seen(id, e.timeStamp, 'down');
+      penAt = e.timeStamp;
       fingers.reset();
     } else if (kind === 'touch') {
       // Palm rejection, then the finger gestures; a finger belongs to the tools only when asked.
@@ -926,6 +935,7 @@
     const kind = pointerKind(e);
     if (kind === 'pen' || kind === 'eraser') {
       presence.seen(pointerId(e), e.timeStamp, ((e.buttons ?? 0) & 33) !== 0 ? 'down' : 'hover');
+      penAt = e.timeStamp;
       eraserEnd = kind === 'eraser' && !readonly && !split;
     } else if (kind === 'touch' && fingers.has(pointerId(e))) {
       const action = fingers.move(pointerId(e), local(e), touchOptions());
@@ -1024,9 +1034,38 @@
     finish(e, cancelled);
   }
 
-  /** The pen's barrel button is a right click for Windows: no menu over the page then. */
-  function noPenMenu(e: MouseEvent) {
-    if ((e as PointerEvent).pointerType === 'pen') e.preventDefault();
+  /** A right click this soon after a pen was last seen over the page, milliseconds, is taken for the pen's. */
+  const PEN_MENU_MS = 600;
+  /** When a pen last touched or hovered the page (event time stamp). */
+  let penAt = -Infinity;
+
+  /**
+   * The right click on the page. The pen's barrel button is a right click for Windows (and its lasso is the barrel's), a
+   * finger's long press is a gesture of the page: no menu from them, and none from the keyboard (the page is not a
+   * control that takes the focus; the selection block has the buttons). A mouse's right click first selects what is
+   * under the pointer with the selection tool, when it is not selected already (the whole selection stays when the
+   * pointer is on a part of it), then the editor opens its menu. The field of a frame being typed keeps the system's menu.
+   * Nothing in a replay, with the split panel open or in a gesture.
+   */
+  function oncontextmenu(e: MouseEvent) {
+    if (isTextField(e.target)) return;
+    e.preventDefault();
+    const origin = menuOrigin(e);
+    if (origin !== 'mouse') return;
+    // No pointer type to tell a mouse from a pen's button: the pen seen a moment ago decides.
+    if (!(e as Partial<PointerEvent>).pointerType && e.timeStamp - penAt < PEN_MENU_MS) return;
+    if (readonly || split || drag || !oncontext) return;
+    const p = pagePoint(e);
+    if (tools.mode === 'select') {
+      const tolerance = 6 / view.scale;
+      const frame = hitObject(doc.note, p, tolerance, doc.activeLayer);
+      const stroke = frame === null ? hitStroke(onLayer(doc.note, doc.activeLayer), p, tolerance) : null;
+      const selected = frame !== null ? objectSelection(doc).includes(frame) : stroke !== null && doc.selection.includes(stroke);
+      if ((frame !== null || stroke !== null) && !selected) {
+        onselect(select(doc, stroke === null ? [] : [stroke], frame === null ? [] : [frame]));
+      }
+    }
+    oncontext({ at: { x: e.clientX, y: e.clientY }, page: p });
   }
 
   function leave(e: PointerEvent) {
@@ -1159,7 +1198,7 @@
       if (e.target === e.currentTarget) release(e, true);
     }}
     onpointerleave={leave}
-    oncontextmenu={noPenMenu}
+    {oncontextmenu}
     {ondblclick}
   >
     <rect class="sheet" x="0" y="0" width={page.width} height={page.height} />

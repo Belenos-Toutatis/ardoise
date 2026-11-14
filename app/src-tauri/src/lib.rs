@@ -51,6 +51,7 @@ mod textdoc;
 mod thumbnails;
 mod video;
 mod watcher;
+mod webview_keys;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -470,7 +471,9 @@ pub fn run() {
             if let Some(class) = &window_class {
                 window = window.window_classname(class);
             }
-            window.build()?;
+            let main = window.build()?;
+            // No browser keys (reload, print, find…): Ardoise has its own.
+            webview_keys::disable_browser_keys(&main);
             // The end of the Windows session with unsaved notes (M10, `session_end.rs`).
             session_end::install(app.handle());
             // Handwriting recognition of the library, in the background.

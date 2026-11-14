@@ -969,6 +969,16 @@ Une carte montre la miniature, le titre (ou la date si la note n'a pas de titre)
 qui apparaît sur la carte, pour glisser la note hors d'Ardoise (chapitre 10). Le **clic droit** sur une carte ouvre ce
 même menu. Renommer une note renomme aussi son fichier.
 
+**Le clic droit** n'affiche jamais le menu d'une page web (« Enregistrer l'image sous… », « Outils supplémentaires »…) :
+Ardoise montre son propre menu, ou rien. Le menu s'ouvre **sous le pointeur** (la touche `Menu`, ou `Maj + F10`, sur une carte ou
+un classeur l'ouvre sous son bouton **⋯**). Il existe sur : une carte et un classeur (ci-dessus) ; **Toutes les notes** et
+**Favoris** (**Afficher**, **Tout sélectionner**) ; une étiquette (**Afficher**, **Couleur…**, qui ouvre la palette de la
+couleur) ; la **Corbeille** (**Ouvrir la corbeille**, **Vider la corbeille…**, avec la même question de confirmation que le
+bouton) ; une note de la corbeille (**Restaurer**, **Supprimer définitivement…**, qui demande confirmation) ; un calque et la
+page de l'éditeur (chapitre 8). Les flèches, `Début`, `Fin` et `Entrée` conduisent le menu ; `Échap`, un clic ailleurs, le
+défilement ou un changement de fenêtre le ferment. Dans un champ de texte, le clic droit garde le menu de Windows (couper,
+copier, coller). Ailleurs, il ne se passe rien.
+
 Les miniatures sont gardées dans un cache propre à chaque PC. Quand une note change sur un autre ordinateur
 (synchronisation Nextcloud), la bibliothèque se met à jour toute seule.
 
@@ -1442,6 +1452,14 @@ textes et des signets *d'une note à l'autre*, d'une fenêtre à l'autre, par le
 couleur, leur outil et leur épaisseur, les textes leur police, leur taille et leur couleur ; ils sont rejoués en dernier. Ce
 qui ne vient pas d'Ardoise est ignoré.
 
+Le **clic droit sur la page** (à la souris : pas avec le bouton du stylet, qui lasse, ni avec le doigt) ouvre un menu des mêmes
+commandes. Avec l'outil **Sélection**, le trait ou le texte sous le pointeur est d'abord sélectionné s'il ne l'est pas ; une
+sélection qui existe reste telle quelle quand le pointeur est sur une de ses parties. Avec une sélection : **Copier**,
+**Couper**, **Coller**, **Dupliquer**, **Modifier** (un seul texte, une seule équation ou un seul signet), **Redresser les
+formes** (quand des traits sont sélectionnés) et **Supprimer**. Sans sélection : **Coller**, **Tout sélectionner**,
+**Annuler** et **Rétablir**. **Coller** est toujours proposé : si le presse-papiers ne contient rien d'Ardoise, un message le
+dit. Rien pendant la relecture ni avec le panneau de découpe ouvert.
+
 ### La feuille : papier, modèle, format, orientation
 
 L'onglet **Page** du panneau de côté règle la feuille :
@@ -1495,6 +1513,9 @@ une feuille transparente superposée aux autres : l'écriture d'une tablette, vo
 - **Un avertissement** s'affiche quand le calque choisi est masqué : « Le calque choisi, « … », est masqué : affichez-le
   pour y écrire. » Tant qu'il l'est, le stylo n'écrit pas, et la gomme et la sélection n'y trouvent rien : affichez-le,
   ou choisissez un autre calque.
+
+Le **clic droit sur un calque** le choisit et ouvre le menu de ses actions : **Renommer…**, **Masquer** (ou **Afficher**),
+**Monter**, **Descendre**, **Fusionner avec le calque du dessous** (et, en mode direct, **Faire écrire la tablette ici**).
 
 Ajouter, masquer, renommer, déplacer et fusionner s'annulent avec `Ctrl + Z`. Pour les calques pendant le mode direct,
 voir **Corriger pendant le direct** (chapitre 6).
@@ -1749,7 +1770,7 @@ moins juste. *Relisez toujours le texte* : la reconnaissance peut se tromper.
 ### Copier, imprimer, glisser
 
 - **Copier l'image** : met la note dans le presse-papiers de Windows ; collez-la dans Word ou OneNote.
-- **Imprimer…** (éditeur, ou barre de la sélection) : la fenêtre d'impression de Windows s'ouvre pour choisir
+- **Imprimer…** (éditeur, ou barre de la sélection ; `Ctrl + P` fait la même chose, voir ci-dessous) : la fenêtre d'impression de Windows s'ouvre pour choisir
   l'imprimante. Chaque note est imprimée sur une page, dans son orientation. Vous réglez **Imprimer le fond**, la
   **Taille sur la feuille** (**Taille réelle** ou **Ajustée à la feuille**) et les **Notes par feuille** : **1**, **2 par
   feuille** ou **4 par feuille**. Avec 2 ou 4, Ardoise range les notes dans l'ordre sur la feuille, chacune dans sa case sans
@@ -1998,6 +2019,14 @@ Ces raccourcis n'agissent pas quand vous tapez dans un champ de texte, sauf ceux
 montre aussi sa liste dans l'onglet **Aide** de son panneau de côté : c'est la même liste, que les tests de l'application
 comparent aux touches que la fenêtre traite vraiment.
 
+### Les touches d'un navigateur
+
+Ardoise est une application, pas une page web : les touches d'un navigateur n'y font rien. `F5`, `Ctrl + R` (recharger la page, ce
+qui ferait perdre une note non enregistrée), `Ctrl + F` hors de la bibliothèque, `F3`, `Ctrl + G` (barre de recherche du
+navigateur), `Ctrl + U`, `Ctrl + J`, `Ctrl + H`, `Ctrl + O`, `F7` et `F12` sont sans effet ; `Ctrl + P` et `Ctrl + Maj + P` ouvrent
+l'impression d'Ardoise (jamais l'impression de la fenêtre comme une page web). Les touches d'édition (`Ctrl + A`, `C`, `V`, `X`,
+`Z`, `Y`) et toutes celles d'Ardoise restent comme décrit dans ce chapitre.
+
 ### Fermer et quitter
 
 | Touches | Action |
@@ -2012,6 +2041,7 @@ comparent aux touches que la fenêtre traite vraiment.
 |---|---|
 | `Ctrl + F` | Aller dans le champ de recherche (`Échap` l'efface) |
 | `Ctrl + N` | Nouvelle note |
+| `Ctrl + P` (ou `Ctrl + Maj + P`) | **Imprimer…** les notes sélectionnées ; sans sélection, **Imprimer le classeur…** du classeur affiché ; sinon un message vous dit de sélectionner des notes (Ardoise n'imprime pas toute une vue sur une supposition). Rien sous une boîte de dialogue |
 | Flèches, `Début`, `Fin` | Passer d'une carte à l'autre (avec `Maj` : étendre la sélection) |
 | `Entrée` | Ouvrir la note |
 | `Espace` | Sélectionner la carte (avec `Maj` : une plage) |
@@ -2027,6 +2057,7 @@ comparent aux touches que la fenêtre traite vraiment.
 | Touches | Action |
 |---|---|
 | `Ctrl + S` | Enregistrer |
+| `Ctrl + P` (ou `Ctrl + Maj + P`) | **Imprimer…** la note ouverte (comme le bouton) |
 | `Ctrl + Z` | Annuler |
 | `Ctrl + Y`, `Ctrl + Maj + Z` | Rétablir |
 | `Ctrl + A` | Tout sélectionner (les traits et les textes du calque choisi) |
