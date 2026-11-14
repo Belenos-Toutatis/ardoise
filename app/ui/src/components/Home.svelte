@@ -8,6 +8,7 @@
   import { inkspaceOffer } from '../lib/inkspace-offer.svelte';
   import { displayTitle, type SortOrder } from '../lib/library-logic';
   import { LibraryState } from '../lib/library-state.svelte';
+  import { isPrintKey } from '../lib/print-key';
   import { share } from '../lib/share-state.svelte';
   import { isBusy, tablet } from '../lib/tablet-state.svelte';
   import { workInProgress } from '../lib/work';
@@ -318,7 +319,32 @@
     return false;
   }
 
+  /**
+   * Ctrl + P in the library: « Imprimer… » of what is in front: the selected notes (as the selection bar's button), else the
+   * binder shown (as its menu's « Imprimer le classeur… »). Notes shown without a selection are not printed on a guess (a
+   * thousand notes by an inadvertent key): the notice says what to do. Nothing under a dialog, the editor or live mode.
+   */
+  function printKey() {
+    const busy =
+      away || lib.dialog || lib.summaryBinder !== null || lib.dateNote || fromFile || inkspaceOpen || quitAsked || share.panelOpen || modalOpen();
+    if (busy) return;
+    if (lib.selectedDisplayed.length > 0) return lib.openDialog('print');
+    const view = lib.view;
+    if (view.kind === 'binder') {
+      if (lib.binderNotes(view.binder, true).length > 0) return lib.openBinderDialog('print', view.binder);
+      lib.notice = t('library.binder.emptyHint');
+      return;
+    }
+    lib.notice = t('library.printNone');
+  }
+
   function shortcuts(event: KeyboardEvent) {
+    // Ardoise's printing, never the web view's (the guard of `lib/browser-guard.ts` keeps that off in every window).
+    if (isPrintKey(event)) {
+      event.preventDefault();
+      if (!event.repeat && !away) printKey();
+      return;
+    }
     if (selectionKey(event)) {
       event.preventDefault();
       return;

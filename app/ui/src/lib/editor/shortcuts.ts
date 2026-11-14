@@ -118,6 +118,11 @@ export const EDITOR_SHORTCUTS: readonly Shortcut<EditorKeyContext>[] = [
     label: label('save'),
     keys: [key({ key: 's', ctrl: true }, 'save'), variant({ key: 's', ctrl: true, shift: true }, 'save')],
   },
+  {
+    id: 'print',
+    label: label('print'),
+    keys: [key({ key: 'p', ctrl: true }, 'print'), variant({ key: 'p', ctrl: true, shift: true }, 'print')],
+  },
   { id: 'close', label: label('close'), keys: [key({ key: 'w', ctrl: true }, 'close'), key({ key: 'F4', ctrl: true }, 'close')] },
   { id: 'quit', label: label('quit'), keys: [key({ key: 'q', ctrl: true }, 'quit')] },
   {

@@ -150,8 +150,20 @@ describe('editorKeyAction: Ctrl keys', () => {
     expect(kind('z', { ctrl: true, code: 'Digit2' })).toBe('fitWidth');
   });
 
+  it('print: Ctrl + P, with or without Shift, in a replay too; not with Alt (AltGr types characters)', () => {
+    for (const shift of [false, true]) {
+      expect(kind('p', { ctrl: true, shift })).toBe('print');
+      expect(kind('P', { ctrl: true, shift })).toBe('print');
+    }
+    expect(kind('p', { meta: true })).toBe('print');
+    expect(editorKeyAction({ key: 'p', ctrlKey: true }, { replaying: true })?.kind).toBe('print');
+    expect(kind('p', { ctrl: true, alt: true })).toBeNull();
+    // The plain letter is still the pen.
+    expect(kind('p')).toBe('pen');
+  });
+
   it('other Ctrl keys do nothing, and never fall through to the plain keys', () => {
-    for (const k of ['p', 'e', 'h', 'r', 'f', 'Delete', 'Backspace', 'Escape', ' ', 'b', '1', '+', '-', 'ArrowLeft']) {
+    for (const k of ['e', 'h', 'r', 'f', 'Delete', 'Backspace', 'Escape', ' ', 'b', '1', '+', '-', 'ArrowLeft']) {
       expect(kind(k, { ctrl: true }), `Ctrl + ${k}`).toBeNull();
     }
     expect(kind('v', { ctrl: true, shift: true })).toBeNull();

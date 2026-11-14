@@ -6,9 +6,11 @@
    */
   import { onMount, tick } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
+  import { menuPoint, pointOf, type MenuItem, type Point } from '../../lib/context-menu';
   import { t } from '../../lib/i18n.svelte';
   import { ancestorsOf, isInBinder, sameView, type BinderNode, type LibraryView } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
+  import ContextMenu from '../ContextMenu.svelte';
   import BinderEditor from './BinderEditor.svelte';
   import Menu from './Menu.svelte';
   import TabletStatus from './TabletStatus.svelte';
@@ -41,7 +43,11 @@
   let dropTarget = $state<string | null>(null);
   let nameInput = $state<HTMLInputElement | null>(null);
   /** The menu of each binder row, to open it with the right click. */
-  const menus: Record<string, { show: () => void } | null | undefined> = {};
+  const menus: Record<string, { show: (at?: Point) => void } | null | undefined> = {};
+  /** The tag colour pickers, to open the palette from a tag's menu. */
+  const pickers: Record<string, { show: () => void } | null | undefined> = {};
+  /** The menu of a view, a tag or the trash, open at the right click (the binders have their own, `Menu`). */
+  let viewMenu = $state<{ label: string; items: MenuItem[]; at: Point; returnTo: HTMLElement } | null>(null);
   /** The binder being renamed or whose deletion awaits confirmation. */
   let editing = $state<{ path: string; mode: 'rename' | 'delete' } | null>(null);
 
@@ -92,6 +98,52 @@
   }
 
   let nav = $state<HTMLElement | null>(null);
+
+  /** Opens a menu over the entry the event is on: at the pointer, or under the entry for the keyboard's Menu key. */
+  function showMenu(event: MouseEvent, label: string, items: MenuItem[]) {
+    event.preventDefault();
+    const entry = event.currentTarget as HTMLElement;
+    viewMenu = { label, items, at: menuPoint(event, entry), returnTo: entry };
+  }
+
+  /** « Afficher » and « Tout sélectionner » of « Toutes les notes » and « Favoris »: both are existing commands. */
+  function viewItems(view: LibraryView): MenuItem[] {
+    return [
+      { id: 'show', label: t('contextMenu.show'), onselect: () => lib.setView(view) },
+      {
+        id: 'select-all',
+        label: t('contextMenu.selectAll'),
+        onselect: () => {
+          lib.setView(view);
+          lib.selectAll();
+        },
+      },
+    ];
+  }
+
+  function tagItems(tag: string): MenuItem[] {
+    return [
+      { id: 'show', label: t('contextMenu.show'), onselect: () => lib.setView({ kind: 'tag', tag }) },
+      { id: 'color', label: t('contextMenu.tagColor'), onselect: () => pickers[tag]?.show() },
+    ];
+  }
+
+  function trashItems(): MenuItem[] {
+    const empty = lib.trash.length === 0;
+    return [
+      { id: 'open', label: t('contextMenu.trashOpen'), onselect: () => lib.setView({ kind: 'trash' }) },
+      {
+        id: 'empty',
+        label: t('library.trashView.emptyAll') + '…',
+        disabled: empty,
+        hint: t('library.trashView.empty'),
+        onselect: () => {
+          lib.setView({ kind: 'trash' });
+          lib.emptyTrashAsked = true;
+        },
+      },
+    ];
+  }
 
   /** Gives the focus back to the sidebar's entry of `binder`, or to « Toutes les notes ». */
   async function focusEntry(binder: string | null) {
@@ -194,7 +246,7 @@
         ondrop={(event) => drop(event, binderPlace(node.path))}
         oncontextmenu={(event) => {
           event.preventDefault();
-          menus[node.path]?.show();
+          menus[node.path]?.show(pointOf(event));
         }}
       >
         <span class="nav-label">{node.name}</span>
@@ -276,6 +328,7 @@
         ondragenter={(event) => dragover(event, binderPlace(''))}
         ondragleave={() => dragleave(binderPlace(''))}
         ondrop={(event) => drop(event, binderPlace(''))}
+        oncontextmenu={(event) => showMenu(event, t('contextMenu.viewLabel', { name: t('library.all') }), viewItems({ kind: 'all' }))}
       >
         <span class="nav-label">{t('library.all')}</span>
         <span class="count">{notes.length}</span>
@@ -293,6 +346,8 @@
         ondrop={(event) => drop(event, { kind: 'favorites' })}
         aria-current={current({ kind: 'favorites' })}
         onclick={() => lib.setView({ kind: 'favorites' })}
+        oncontextmenu={(event) =>
+          showMenu(event, t('contextMenu.viewLabel', { name: t('library.favorites') }), viewItems({ kind: 'favorites' }))}
       >
         <span class="nav-label">{t('library.favorites')}</span>
         <span class="count">{favoriteCount}</span>
@@ -341,6 +396,7 @@
                 data-tag-color={color}
                 aria-current={current({ kind: 'tag', tag: entry.tag })}
                 onclick={() => lib.setView({ kind: 'tag', tag: entry.tag })}
+                oncontextmenu={(event) => showMenu(event, t('contextMenu.tagLabel', { tag: entry.tag }), tagItems(entry.tag))}
               >
                 <span class="nav-label">
                   {#if color}<span class="tag-dot" aria-hidden="true"></span>{:else}#{/if}
@@ -348,7 +404,7 @@
                 </span>
                 <span class="count">{entry.count}</span>
               </button>
-              <span class="row-tool"><TagColorPicker tag={entry.tag} colors={lib.tagColors} /></span>
+              <span class="row-tool"><TagColorPicker bind:this={pickers[entry.tag]} tag={entry.tag} colors={lib.tagColors} /></span>
             </div>
           </li>
         {/each}
@@ -366,6 +422,7 @@
         data-view="trash"
         aria-current={current({ kind: 'trash' })}
         onclick={() => lib.setView({ kind: 'trash' })}
+        oncontextmenu={(event) => showMenu(event, t('contextMenu.viewLabel', { name: t('library.trash') }), trashItems())}
       >
         <span class="nav-label">{t('library.trash')}</span>
         <span class="count">{lib.trash.length}</span>
@@ -386,3 +443,7 @@
     <button type="button" class="button" aria-expanded={testOpen} onclick={ontest}>{t('diagnostic.open')}</button>
   </div>
 </nav>
+
+{#if viewMenu}
+  <ContextMenu label={viewMenu.label} items={viewMenu.items} at={viewMenu.at} returnTo={viewMenu.returnTo} onclose={() => (viewMenu = null)} />
+{/if}

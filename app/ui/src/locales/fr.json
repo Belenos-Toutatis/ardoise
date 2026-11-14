@@ -335,6 +335,32 @@
         "other": "Classeur « {name} » rétabli avec ses {count} notes."
       },
       "restoredEmpty": "Classeur « {name} » rétabli."
+    },
+    "printNone": "Sélectionnez des notes à imprimer, ou ouvrez un classeur."
+  },
+  "contextMenu": {
+    "show": "Afficher",
+    "selectAll": "Tout sélectionner",
+    "viewLabel": "Menu de « {name} »",
+    "tagLabel": "Menu de l'étiquette {tag}",
+    "tagColor": "Couleur…",
+    "trashOpen": "Ouvrir la corbeille",
+    "trashNoteLabel": "Menu de la note « {title} » de la corbeille",
+    "page": {
+      "label": "Menu de la page",
+      "edit": "Modifier",
+      "undo": "Annuler",
+      "redo": "Rétablir"
+    },
+    "layer": {
+      "label": "Menu du calque « {name} »",
+      "rename": "Renommer…",
+      "hide": "Masquer",
+      "show": "Afficher",
+      "up": "Monter",
+      "down": "Descendre",
+      "merge": "Fusionner avec le calque du dessous",
+      "tablet": "Faire écrire la tablette ici"
     }
   },
   "settings": {
@@ -1354,6 +1380,7 @@
         "fitWidth": "Largeur : la page sur toute la largeur",
         "pages": "Page précédente, page suivante (la note d'avant, celle d'après)",
         "save": "Enregistrer",
+        "print": "Imprimer la note",
         "close": "Revenir à la bibliothèque (ferme d'abord la découpe ou la relecture)",
         "quit": "Quitter Ardoise",
         "leaveReplay": "Quitter la relecture",

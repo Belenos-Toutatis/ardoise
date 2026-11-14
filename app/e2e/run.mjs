@@ -49,12 +49,13 @@ import { binderFixJourneys } from './journeys-binder-fixes.mjs';
 import { q20Journeys } from './journeys-q20-library.mjs';
 import { textJourneys } from './journeys-text.mjs';
 import { equationJourneys } from './journeys-equation.mjs';
+import { keysMenusJourneys } from './journeys-keys-menus.mjs';
 import { mcpJourney } from './mcp.mjs';
 
 // Milestone M7 journeys live in files of their own. `ARDOISE_E2E_ONLY=text` runs only the journeys whose
 // name contains one of its `|`-separated parts (while working on them; `cargo xtask e2e` runs everything).
 const only = process.env.ARDOISE_E2E_ONLY?.split('|').filter(Boolean);
-const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys, ...resumeJourneys, ...touchUpJourneys, ...editorNavJourneys, ...closeKeyJourneys, ...revisionJourneys, ...editorLayersJourneys, ...liveComputerJourneys, ...exportLayersJourneys, ...straightenSettingJourneys, ...sidePanelEditorJourneys, ...sidePanelLiveJourneys, ...livePaperJourneys, ...editorProjectionJourneys, ...writingSoundJourneys, ...blackboardJourneys, ...q20Journeys, ...textJourneys, ...bookmarkJourneys, ...equationJourneys, ...binderFixJourneys].filter(
+const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys, ...resumeJourneys, ...touchUpJourneys, ...editorNavJourneys, ...closeKeyJourneys, ...revisionJourneys, ...editorLayersJourneys, ...liveComputerJourneys, ...exportLayersJourneys, ...straightenSettingJourneys, ...sidePanelEditorJourneys, ...sidePanelLiveJourneys, ...livePaperJourneys, ...editorProjectionJourneys, ...writingSoundJourneys, ...blackboardJourneys, ...q20Journeys, ...textJourneys, ...bookmarkJourneys, ...equationJourneys, ...binderFixJourneys, ...keysMenusJourneys].filter(
   (journey) => !only || only.some((part) => journey.name.includes(part)),
 );
 
@@ -174,6 +175,8 @@ async function startApp(language, port, args = [], { settings = '', env = {}, br
     language,
     /** The remote debugging port of this window: a journey attaches to the other windows (presentation) through it. */
     port,
+    /** The process id of the window's executable (`real-key.ps1` sends real keys to it). */
+    pid: child.pid,
     send,
     /** The next event `method` of the protocol (after `since`, an index of `events`), or null after `timeout` ms. */
     async waitForEvent(method, { timeout = 5000, since = 0 } = {}) {

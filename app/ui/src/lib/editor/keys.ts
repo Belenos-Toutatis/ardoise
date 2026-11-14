@@ -10,11 +10,13 @@
  */
 import { closeKey } from '../close-keys';
 import type { KeyInput } from '../live-keys';
+import { isPrintKey } from '../print-key';
 import type { EditorKeyContext } from '../shortcuts';
 
 export type EditorKeyKind =
   | 'close'
   | 'save'
+  | 'print'
   | 'previousPage'
   | 'nextPage'
   | 'leaveReplay'
@@ -56,7 +58,7 @@ export function isFitKey(e: KeyInput): boolean {
 
 /**
  * What a key press asks of the editor; no gate (dialogs, fields, gestures): the editor applies them. The order of the
- * branches is the handler's: close, save, Alt + arrows, the replay's keys, the clipboard, the other Ctrl keys, the
+ * branches is the handler's: close, save, print, Alt + arrows, the replay's keys, the clipboard, the other Ctrl keys, the
  * plain keys. Ctrl + S and the Ctrl keys do not test Alt (as the handler never did).
  */
 export function editorKeyAction(e: KeyInput, context: EditorKeyContext): EditorKeyAction | null {
@@ -64,6 +66,8 @@ export function editorKeyAction(e: KeyInput, context: EditorKeyContext): EditorK
   const mod = !!(e.ctrlKey || e.metaKey);
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   if (mod && key === 's') return { kind: 'save' };
+  // Ctrl + P: Ardoise's printing of the note (in a replay too: it prints the note as it is).
+  if (isPrintKey(e)) return { kind: 'print' };
   // Alt + ← / →: the previous / next page, in a replay too; not with other modifiers.
   if (e.altKey && !mod && !e.shiftKey && (key === 'ArrowLeft' || key === 'ArrowRight')) {
     return { kind: key === 'ArrowLeft' ? 'previousPage' : 'nextPage' };

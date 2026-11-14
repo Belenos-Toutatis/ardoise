@@ -88,6 +88,7 @@
   import { binderOf, diskChange, type DiskChange } from '../../lib/editor/disk';
   import { DraftKeeper, findOffer, type Offer } from '../../lib/editor/drafts';
   import { withSourceIn } from '../../lib/editor/revision';
+  import type { MenuItem, Point } from '../../lib/context-menu';
   import { decodeClipboard, encodeClipboard } from '../../lib/editor/clipboard';
   import {
     bookmarkLook,
@@ -208,6 +209,7 @@
   import type { NarrationInfo } from '../../lib/video';
   import ExportDialog from '../ExportDialog.svelte';
   import Modal, { modalOpen } from '../Modal.svelte';
+  import ContextMenu from '../ContextMenu.svelte';
   import PrintDialog from '../PrintDialog.svelte';
   import VideoExportDialog from '../VideoExportDialog.svelte';
   import LayersZone from '../layers/LayersZone.svelte';
@@ -1911,6 +1913,70 @@
     change(duplicateSelection(doc));
   }
 
+  // --- The page's context menu (a mouse's right click on the page, `Canvas.svelte`) --------------------------------
+
+  /** The page menu, open at the right click: where (window pixels) and the page point under the pointer. */
+  let pageMenu = $state<{ at: Point; page: Vec } | null>(null);
+
+  /** « Modifier » of the one text frame, equation or bookmark selected: what a double click on it does. */
+  function editSelected(at: Vec) {
+    if (!doc || doc.selection.length > 0) return;
+    const [index, ...others] = objectSelection(doc);
+    const object = index === undefined ? undefined : objectsOf(doc.note)[index];
+    if (!object || others.length > 0) return;
+    if (isTextObject(object)) startText({ kind: 'edit', index, caret: object.text.length });
+    else if (isEquationObject(object)) startEquation({ kind: 'edit', index, at });
+    else if (isBookmarkObject(object)) startBookmark({ kind: 'edit', index });
+  }
+
+  /**
+   * The entries of the page menu, of the commands the selection block and the keys already have. With a selection: copy, cut,
+   * paste, duplicate, then « Modifier » (one frame, equation or bookmark), « Redresser les formes » (strokes selected), and
+   * delete. Without: paste, select all, then undo and redo. « Coller » is always offered: the clipboard cannot be read
+   * to know whether it holds strokes without asking its permission, and pasting what is not ours says so.
+   */
+  function pageMenuItems(menu: { page: Vec }): MenuItem[] {
+    const current = doc;
+    if (!current) return [];
+    const paste: MenuItem = { id: 'paste', label: t('editor.selection.paste'), onselect: () => void pasteFromClipboard() };
+    if (!anySelected(current)) {
+      return [
+        paste,
+        { id: 'select-all', label: t('contextMenu.selectAll'), onselect: () => reselect(selectAll(current)) },
+        {
+          id: 'undo',
+          label: t('contextMenu.page.undo'),
+          separatorBefore: true,
+          disabled: !history || !canUndo(history),
+          onselect: doUndo,
+        },
+        { id: 'redo', label: t('contextMenu.page.redo'), disabled: !history || !canRedo(history), onselect: doRedo },
+      ];
+    }
+    const objects = objectSelection(current);
+    const lone = objects.length === 1 && current.selection.length === 0 ? objectsOf(current.note)[objects[0]] : undefined;
+    const items: MenuItem[] = [
+      { id: 'copy', label: t('editor.selection.copy'), onselect: () => void copyToClipboard(false) },
+      { id: 'cut', label: t('editor.selection.cut'), onselect: () => void copyToClipboard(true) },
+      paste,
+      { id: 'duplicate', label: t('editor.selection.duplicate'), onselect: duplicate },
+    ];
+    if (lone && (isTextObject(lone) || isEquationObject(lone) || isBookmarkObject(lone))) {
+      items.push({ id: 'edit', label: t('contextMenu.page.edit'), separatorBefore: true, onselect: () => editSelected(menu.page) });
+    }
+    if (current.selection.length > 0) {
+      items.push({ id: 'straighten', label: t('editor.straighten.button'), separatorBefore: !lone, onselect: straighten });
+    }
+    items.push({
+      id: 'delete',
+      label: t('editor.selection.delete'),
+      danger: true,
+      separatorBefore: true,
+      onselect: () => change(deleteSelection(current)),
+    });
+    return items;
+  }
+
   /** Puts a background image, switching the note's orientation first when the user asked to (one undoable step). */
   function setImage(image: BackgroundImage, pixels: PixelsRef, orientation?: Orientation) {
     if (!doc) return;
@@ -1982,6 +2048,19 @@
   function openPrint() {
     const source = currentSource();
     if (source) printing = [source];
+  }
+
+  /**
+   * Ctrl + P: « Imprimer… » of the note, unless something else has the window (a dialog, the share, a question, the
+   * split panel is not one: its button is open too). What is being typed goes into the note first, as leaving its field
+   * does for the button.
+   */
+  function printFromKey() {
+    if (!doc || leaving || offer || exporting || printing || video || share.panelOpen || revisionDialog || modalOpen()) return;
+    endText();
+    endBookmark();
+    endEquation();
+    openPrint();
   }
 
   function closeVideo() {
@@ -2463,6 +2542,7 @@
         break;
       case 'close':
       case 'save':
+      case 'print':
       case 'previousPage':
       case 'nextPage':
         break;
@@ -2539,6 +2619,12 @@
     if (action?.kind === 'save') {
       e.preventDefault();
       if (dirty) void save();
+      return;
+    }
+    // Ctrl + P: Ardoise's printing of the note, like the toolbar's button (never the web view's; held down it asks once).
+    if (action?.kind === 'print') {
+      e.preventDefault();
+      if (!e.repeat) printFromKey();
       return;
     }
     if (e.key === 'Escape' && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -2806,6 +2892,7 @@
         onbookmarkinput={typeBookmark}
         onbookmarkenter={endBookmark}
         onbookmarkblur={endBookmark}
+        oncontext={(request) => (pageMenu = request)}
         oninprogress={(event) => {
           if (pageProjection.presentation) pageProjection.stroke(event);
         }}
@@ -2983,6 +3070,10 @@
         </section>
       {/if}
     {/snippet}
+  {/if}
+
+  {#if pageMenu && doc}
+    <ContextMenu label={t('contextMenu.page.label')} items={pageMenuItems(pageMenu)} at={pageMenu.at} onclose={() => (pageMenu = null)} />
   {/if}
 
   {#if exporting}

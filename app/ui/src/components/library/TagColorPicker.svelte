@@ -29,6 +29,16 @@
     }
   }
 
+  /**
+   * Opens the palette (the tag's context menu, « Couleur… »); nothing when it is open already. A moment later: the click
+   * that chose the menu entry is still on its way to the window, whose handler would close the palette just opened.
+   */
+  export function show(): void {
+    setTimeout(() => {
+      if (!open) void toggle();
+    }, 0);
+  }
+
   /** Arrow keys, Home and End move the focus between the colours (it wraps around). */
   function move(event: KeyboardEvent) {
     const steps: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };

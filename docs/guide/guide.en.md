@@ -915,6 +915,15 @@ opens the note in the editor. On the card: the box to *select* it, the favourite
 favourites, **Duplicate**, **Change the date…**, **Move to trash**) and a handle, which appears on the card, to drag the
 note out of Ardoise (chapter 10). A **right click** on a card opens the same menu. Renaming a note also renames its file.
 
+**The right click** never shows a web page's menu ("Save image as…", "More tools"…): Ardoise shows its own menu, or nothing.
+The menu opens **under the pointer** (the `Menu` key, or `Shift + F10`, on a card or a binder opens it under its **⋯** button).
+There is one on: a card and a binder (above); **All notes** and **Favourites** (**Show**, **Select all**); a tag (**Show**,
+**Colour…**, which opens the colour palette); the **Trash** (**Open the trash**, **Empty the trash…**, with the same
+confirmation question as the button); a note in the trash (**Restore**, **Delete permanently…**, which asks to confirm); a
+layer and the editor's page (chapter 8). The arrows, `Home`, `End` and `Enter` drive the menu; `Esc`, a click elsewhere,
+scrolling or a change of window close it. In a text field the right click keeps Windows' menu (cut, copy, paste). Anywhere
+else, nothing happens.
+
 Thumbnails are kept in a cache of each PC. When a note changes on another computer (Nextcloud sync), the library
 updates by itself.
 
@@ -1361,6 +1370,13 @@ bottom. A small upright oval (an "O", a "0") is never straightened, whatever the
 *from one note to another*, from one window to another, through Windows' clipboard. Pasted strokes keep their colour, tool
 and width, texts their font, size and colour; they are replayed last. Anything that does not come from Ardoise is ignored.
 
+The **right click on the page** (with the mouse: not with the pen's button, which lassoes, nor with a finger) opens a menu of the
+same commands. With the **Select** tool, the stroke or text under the pointer is selected first if it is not already; an
+existing selection stays as it is when the pointer is on a part of it. With a selection: **Copy**, **Cut**, **Paste**,
+**Duplicate**, **Edit** (one text, one equation or one bookmark only), **Straighten shapes** (when strokes are selected) and
+**Delete**. Without a selection: **Paste**, **Select all**, **Undo** and **Redo**. **Paste** is always offered: if the clipboard
+holds nothing from Ardoise, a message says so. Nothing during a replay or with the split panel open.
+
 ### The sheet: paper, template, format, orientation
 
 The **Page** tab of the side panel sets up the sheet:
@@ -1411,6 +1427,9 @@ transparent sheet laid over the others: a tablet's writing, your annotations, a 
 - **A warning** appears when the chosen layer is hidden: "The chosen layer, "…", is hidden: show it to write on it."
   While it is, the pen does not write, and the eraser and the selection find nothing there: show it, or choose another
   layer.
+
+A **right click on a layer** chooses it and opens the menu of its actions: **Rename…**, **Hide** (or **Show**), **Move up**,
+**Move down**, **Merge with the layer below** (and, in live mode, **Have the tablet write here**).
 
 Adding, hiding, renaming, moving and merging are undone with `Ctrl + Z`. For layers during live mode, see **Correcting
 during live mode** (chapter 6).
@@ -1655,7 +1674,7 @@ could not analyse the layout, Ardoise says so: the structure is then guessed fro
 ### Copying, printing, dragging
 
 - **Copy image**: puts the note on Windows' clipboard; paste it into Word or OneNote.
-- **Print…** (editor, or the selection bar): Windows' print window opens so that you can choose the printer. Each note is
+- **Print…** (editor, or the selection bar; `Ctrl + P` does the same, see below): Windows' print window opens so that you can choose the printer. Each note is
   printed on a page, in its orientation. You set **Print the background**, the **Size on the sheet** (**Real size** or
   **Fitted to the sheet**) and the **Notes per sheet**: **1**, **2 per sheet** or **4 per sheet**. With 2 or 4, Ardoise lays
   the notes out in order on the sheet, each in its own cell and undistorted (two portrait notes side by side on a landscape
@@ -1904,6 +1923,14 @@ possible to understand what happened.
 
 These shortcuts do nothing while you are typing in a text field, except those of **Closing and quitting**. Each window also shows its list in the **Help** tab of its side panel: it is the same list, which the application's tests compare with the keys the window really handles.
 
+### Browser keys
+
+Ardoise is an application, not a web page: a browser's keys do nothing in it. `F5` and `Ctrl + R` (reload the page, which would
+lose an unsaved note), `Ctrl + F` outside the library, `F3`, `Ctrl + G` (the browser's find bar), `Ctrl + U`, `Ctrl + J`,
+`Ctrl + H`, `Ctrl + O`, `F7` and `F12` have no effect; `Ctrl + P` and `Ctrl + Shift + P` open Ardoise's own printing (never
+the printing of the window as a web page). The editing keys (`Ctrl + A`, `C`, `V`, `X`, `Z`, `Y`) and all of Ardoise's own
+keys stay as described in this chapter.
+
 ### Closing and quitting
 
 | Keys | Action |
@@ -1918,6 +1945,7 @@ These shortcuts do nothing while you are typing in a text field, except those of
 |---|---|
 | `Ctrl + F` | Go to the search field (`Esc` clears it) |
 | `Ctrl + N` | New note |
+| `Ctrl + P` (or `Ctrl + Shift + P`) | **Print…** the selected notes; with no selection, **Print the binder…** for the binder shown; otherwise a message tells you to select notes (Ardoise does not print a whole view on a guess). Nothing under a dialog |
 | Arrows, `Home`, `End` | Move from card to card (with `Shift`: extend the selection) |
 | `Enter` | Open the note |
 | `Space` | Select the card (with `Shift`: a range) |
@@ -1933,6 +1961,7 @@ These shortcuts do nothing while you are typing in a text field, except those of
 | Keys | Action |
 |---|---|
 | `Ctrl + S` | Save |
+| `Ctrl + P` (or `Ctrl + Shift + P`) | **Print…** the open note (like the button) |
 | `Ctrl + Z` | Undo |
 | `Ctrl + Y`, `Ctrl + Shift + Z` | Redo |
 | `Ctrl + A` | Select everything (the chosen layer's strokes and texts) |

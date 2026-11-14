@@ -2,8 +2,13 @@ import { mount } from 'svelte';
 import App from './App.svelte';
 import './app.css';
 import './tag-colors.css';
+import { installBrowserGuard } from './lib/browser-guard';
 import Presentation from './components/live/Presentation.svelte';
 import EditorPresentation from './components/projection/EditorPresentation.svelte';
+
+// No browser keys (reload, print, find…) and no web page's right-click menu in any of the app's windows; the keys only in a
+// production build, where the developer tools are not the developer's (`lib/browser-guard.ts`).
+installBrowserGuard(window, { keys: import.meta.env.PROD });
 
 const target = document.getElementById('app');
 if (!target) throw new Error('#app element missing from index.html');

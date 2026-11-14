@@ -1,13 +1,5 @@
 <script lang="ts" module>
-  export interface MenuItem {
-    id: string;
-    label: string;
-    danger?: boolean;
-    /** Not available now: shown, but nothing happens; `hint` says why. */
-    disabled?: boolean;
-    hint?: string;
-    onselect: () => void;
-  }
+  export type { MenuItem } from '../../lib/context-menu';
 
   /** Closes the menu that is open, if any: a right click on another card or binder opens its own menu, and only one is open. */
   let closeOpenMenu: (() => void) | null = null;
@@ -15,18 +7,24 @@
 
 <script lang="ts">
   /**
-   * A small "more actions" menu button: opens a list of actions, closes on Escape or outside click; `show()` opens it
-   * from the owner's right click.
+   * A small "more actions" menu button: opens a list of actions under the button, closes on Escape or outside click;
+   * `show()` opens it from the owner's right click: at the pointer (`show(point)`, a context menu), or under the button
+   * when the keyboard's Menu key asked (no point).
    */
   import { tick } from 'svelte';
+  import type { MenuItem, Point } from '../../lib/context-menu';
+  import ContextMenu from '../ContextMenu.svelte';
 
   let { label, items }: { label: string; items: MenuItem[] } = $props();
 
   let open = $state(false);
+  /** Where the menu stands when a right click opened it at the pointer (then `open`, the one under the button, is off). */
+  let pointAt = $state<Point | null>(null);
   let root = $state<HTMLElement | null>(null);
   let trigger = $state<HTMLButtonElement | null>(null);
 
   async function toggle() {
+    pointAt = null;
     open = !open;
     if (open) {
       if (closeOpenMenu !== closeMe) closeOpenMenu?.();
@@ -36,13 +34,25 @@
     }
   }
 
-  /** Opens the menu (the right click on what the menu belongs to); nothing when it is open already. */
-  export function show(): void {
-    if (!open) void toggle();
+  /**
+   * Opens the menu (the right click on what the menu belongs to): at `at`, the pointer, when given; else under the button,
+   * and nothing when it is open there already.
+   */
+  export function show(at?: Point): void {
+    if (at) {
+      open = false;
+      if (closeOpenMenu !== closeMe) closeOpenMenu?.();
+      closeOpenMenu = closeMe;
+      pointAt = at;
+    } else if (!open) {
+      pointAt = null;
+      void toggle();
+    }
   }
 
   function closeMe() {
     open = false;
+    pointAt = null;
   }
 
   function close(returnFocus: boolean) {
@@ -96,11 +106,23 @@
     class="icon-button"
     aria-label={label}
     aria-haspopup="menu"
-    aria-expanded={open}
+    aria-expanded={open || pointAt !== null}
     onclick={toggle}
   >
     <span aria-hidden="true">⋯</span>
   </button>
+  {#if pointAt}
+    <ContextMenu
+      {label}
+      {items}
+      at={pointAt}
+      returnTo={trigger}
+      onclose={() => {
+        pointAt = null;
+        if (closeOpenMenu === closeMe) closeOpenMenu = null;
+      }}
+    />
+  {/if}
   {#if open}
     <div class="menu-list" role="menu" aria-label={label}>
       {#each items as item (item.id)}

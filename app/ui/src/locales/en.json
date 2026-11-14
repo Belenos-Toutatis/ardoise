@@ -335,6 +335,32 @@
         "other": "Binder \"{name}\" restored with its {count} notes."
       },
       "restoredEmpty": "Binder \"{name}\" restored."
+    },
+    "printNone": "Select the notes to print, or open a binder."
+  },
+  "contextMenu": {
+    "show": "Show",
+    "selectAll": "Select all",
+    "viewLabel": "Menu of \"{name}\"",
+    "tagLabel": "Menu of the tag {tag}",
+    "tagColor": "Colour…",
+    "trashOpen": "Open the trash",
+    "trashNoteLabel": "Menu of the trashed note \"{title}\"",
+    "page": {
+      "label": "Page menu",
+      "edit": "Edit",
+      "undo": "Undo",
+      "redo": "Redo"
+    },
+    "layer": {
+      "label": "Menu of the layer \"{name}\"",
+      "rename": "Rename…",
+      "hide": "Hide",
+      "show": "Show",
+      "up": "Move up",
+      "down": "Move down",
+      "merge": "Merge with the layer below",
+      "tablet": "Have the tablet write here"
     }
   },
   "settings": {
@@ -1354,6 +1380,7 @@
         "fitWidth": "Width: the page across the window",
         "pages": "Previous page, next page (the note before, the note after)",
         "save": "Save",
+        "print": "Print the note",
         "close": "Back to the library (first closes the split or the replay)",
         "quit": "Quit Ardoise",
         "leaveReplay": "Leave the replay",

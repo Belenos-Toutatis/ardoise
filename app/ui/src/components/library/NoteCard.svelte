@@ -5,6 +5,7 @@
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { displayTitle, formatDate, type MoveStep } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
+  import { pointOf, type Point } from '../../lib/context-menu';
   import { whenNearViewport } from '../../lib/near-viewport';
   import type { NoteSummary } from '../../lib/note';
   import { noteDrawn } from '../../lib/perf';
@@ -48,7 +49,7 @@
   let draft = $state('');
   let input = $state<HTMLInputElement | null>(null);
   let dragOut = $state<DragOutPhase>('idle');
-  let menu = $state<{ show: () => void } | null>(null);
+  let menu = $state<{ show: (at?: Point) => void } | null>(null);
 
   const locale = $derived(currentLocale());
   const title = $derived(displayTitle(note, locale));
@@ -176,11 +177,14 @@
     void lib.dropAtSpot();
   }
 
-  /** The right click opens the card's menu (not over the title being edited, which keeps the system's menu). */
+  /**
+   * The right click opens the card's menu at the pointer (the Menu key, which has none, under the card's « ⋯ » button); not
+   * over the title being edited, which keeps the system's menu.
+   */
   function contextmenu(event: MouseEvent) {
     if (renaming) return;
     event.preventDefault();
-    menu?.show();
+    menu?.show(pointOf(event));
   }
 
   /** Pointer down on the drag handle: the note (or the whole selection) goes out as PNG files. */
