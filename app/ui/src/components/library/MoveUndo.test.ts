@@ -155,19 +155,19 @@ describe('moving notes to a binder, then undoing', () => {
   it('puts several notes of one binder back, naming it', async () => {
     const view = await render();
     await view.select('Réunion parents', 'Liste de courses');
-    await view.click(view.button('Déplacer vers…'));
-    await view.click(view.q('.selection-panel [data-binder="Classe"]')!);
+    await view.choose('Réunion parents', 'Déplacer vers…');
+    await view.click(view.q('[data-dialog="move"] [data-binder="Classe"]')!);
     expect(notices(view)).toEqual(['2 notes déplacées dans « Classe ».']);
     await ctrlZ(view);
     await vi.waitFor(() => expect(binderOf('Réunion parents')).toBe('Perso'));
     expect(binderOf('Liste de courses')).toBe('');
   });
 
-  it('undoes « Déplacer vers… » of the selection bar, root included', async () => {
+  it('undoes « Déplacer vers… » of the card menu, root included', async () => {
     const view = await render();
     await view.select('Réunion parents');
-    await view.click(view.button('Déplacer vers…'));
-    await view.click(view.button('Bibliothèque (racine)', view.q('.selection-panel')!));
+    await view.choose('Réunion parents', 'Déplacer vers…');
+    await view.click(view.button('Bibliothèque (racine)', view.q('[data-dialog="move"]')!));
     expect(notices(view)).toEqual(['« Réunion parents » déplacée dans « Bibliothèque (racine) ».']);
     expect(binderOf('Réunion parents')).toBe('');
     await ctrlZ(view);
@@ -177,8 +177,8 @@ describe('moving notes to a binder, then undoing', () => {
   it('says nothing and keeps no step for a note moved where it already is', async () => {
     const view = await render();
     await view.select('Réunion parents');
-    await view.click(view.button('Déplacer vers…'));
-    await view.click(view.q('.selection-panel [data-binder="Perso"]')!);
+    await view.choose('Réunion parents', 'Déplacer vers…');
+    await view.click(view.q('[data-dialog="move"] [data-binder="Perso"]')!);
     expect(view.all('.activity-offer')).toHaveLength(0);
     const move = vi.spyOn(api, 'moveNotesBack');
     await ctrlZ(view);
@@ -252,8 +252,7 @@ describe('the step outlives the notice and the view', () => {
   it('undoes a trashing made after a move first, then the move', async () => {
     const view = await render();
     await dropOn(view, 'Liste de courses', '[data-binder="Perso"]');
-    await view.click(view.byLabel('Actions pour Réunion parents'));
-    await view.click(view.button('Mettre à la corbeille'));
+    await view.choose('Réunion parents', 'Mettre à la corbeille');
     expect(mockLibrary().trash.size).toBe(1);
     await ctrlZ(view);
     await vi.waitFor(() => expect(mockLibrary().trash.size).toBe(0));

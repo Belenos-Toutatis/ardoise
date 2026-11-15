@@ -9,6 +9,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cardMenu } from './card-menu.mjs';
 
 const locales = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'src', 'locales');
 const catalogs = {
@@ -69,12 +70,11 @@ export const libraryJourneys = [
         await app.waitFor(`${cards} === 8`, 'the 8 demo notes');
       });
 
-      await check(`sélectionner « Liste de courses » et « Électricité – loi d'Ohm », « ${l('library.turn.button')} » à droite`, async () => {
+      await check(`sélectionner « Liste de courses » et « Électricité – loi d'Ohm », « ${l('library.turn.menuRight')} » dans le menu d'une des deux cartes`, async () => {
         await select(app, 'Liste de courses');
         await select(app, "Électricité – loi d'Ohm");
-        await app.waitFor(`document.querySelector('.selection-bar')?.textContent.includes(${JSON.stringify(fill(l('library.selection.count'), { count: 2 }))})`, 'two selected notes');
-        await app.click('.selection-bar [data-action="turn"]');
-        await app.click('.selection-bar [data-action="turn-cw"]');
+        await app.waitFor(`document.querySelector('.selection-count')?.textContent === ${JSON.stringify(plural(app.language, 'library.selection.count', 2))}`, 'two selected notes');
+        await cardMenu(app, 'Liste de courses', l('library.turn.menuRight'));
         const done = plural(app.language, 'library.turn.doneRight', 2);
         await app.waitFor(`${offerText}.includes(${JSON.stringify(done)})`, 'the notice of the turn');
       });
@@ -88,13 +88,12 @@ export const libraryJourneys = [
       });
 
       await check('tourner une note à gauche : l’éditeur la montre en portrait (page, écriture et fond ensemble)', async () => {
-        // The selection of the first turn is still there.
-        if (await app.evaluate(`document.querySelector('.selection-bar') !== null`)) {
-          await app.click('.selection-bar button', l('library.selection.clear'));
+        // The selection of the first turn is still there: « Désélectionner » is in the menu of a selected card.
+        if (await app.evaluate(`document.querySelector('.selection-count')?.textContent !== ''`)) {
+          await cardMenu(app, 'Liste de courses', l('library.selection.clear'));
         }
         await select(app, 'Liste de courses');
-        await app.click('.selection-bar [data-action="turn"]');
-        await app.click('.selection-bar [data-action="turn-ccw"]');
+        await cardMenu(app, 'Liste de courses', l('library.turn.menuLeft'));
         await app.waitFor(`${offerText}.includes(${JSON.stringify(plural(app.language, 'library.turn.doneLeft', 1))})`, 'the notice of the turn');
         const size = await pageOf(app, l, 'Liste de courses');
         if (size !== '21600x29700') throw new Error(`the note is ${size} after the turn`);

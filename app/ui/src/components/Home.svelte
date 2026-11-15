@@ -22,6 +22,8 @@
   import Editor from './editor/Editor.svelte';
   import ActivityBanner from './library/ActivityBanner.svelte';
   import AssembleDialog from './library/AssembleDialog.svelte';
+  import MoveDialog from './library/MoveDialog.svelte';
+  import TagsDialog from './library/TagsDialog.svelte';
   import DateDialog from './library/DateDialog.svelte';
   import DraftsBanner from './library/DraftsBanner.svelte';
   import InkspaceImportDialog from './library/InkspaceImportDialog.svelte';
@@ -111,7 +113,7 @@
     // The assistant's bridge opens notes as a click on a card does (`lib/app-bridge.svelte.ts`).
     const unregister = bridgeScreens.register('home', {
       busy: () =>
-        lib.dialog || fromFile || inkspaceOpen
+        lib.dialog || lib.moveDialog || lib.tagDialog || fromFile || inkspaceOpen
           ? 'a dialog is open in Ardoise'
           : panel === 'diagnostic'
             ? 'the tablet test is open in Ardoise'
@@ -323,7 +325,7 @@
   }
 
   /**
-   * Ctrl + P in the library: « Imprimer… » of what is in front: the selected notes (as the selection bar's button), else the
+   * Ctrl + P in the library: « Imprimer… » of what is in front: the selected notes (as « Imprimer… » of a card's menu), else the
    * binder shown (as its menu's « Imprimer le classeur… »). Notes shown without a selection are not printed on a guess (a
    * thousand notes by an inadvertent key): the notice says what to do. Nothing under a dialog, the editor or live mode.
    */
@@ -551,6 +553,12 @@
 {/if}
 {#if lib.dateNote}
   <DateDialog {lib} note={lib.dateNote} onclose={() => lib.closeDate()} />
+{/if}
+{#if lib.moveDialog}
+  <MoveDialog {lib} paths={lib.moveDialog} onclose={() => lib.closeMove()} />
+{/if}
+{#if lib.tagDialog}
+  <TagsDialog {lib} paths={lib.tagDialog} onclose={() => lib.closeTags()} />
 {/if}
 {#if quitAsked}
   <Modal title={t('library.quitBusy.title')} role="alertdialog" onclose={() => (quitAsked = false)}>

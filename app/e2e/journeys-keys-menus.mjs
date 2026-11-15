@@ -132,7 +132,7 @@ export const keysMenusJourneys = [
 
       await check('Ctrl + P avec une note cochée : la boîte « Imprimer » d’Ardoise s’ouvre, la page répond, aucune autre page', async () => {
         await app.click(`${CARD} .card-check input`);
-        await app.waitFor(`document.querySelector('.selection-bar') !== null`, 'the selection bar');
+        await app.waitFor(`document.querySelector('.selection-count')?.textContent !== ''`, 'the count of selected notes');
         await realKeyUntil(app, '^p', `document.querySelector(${j(PRINT)}) !== null`, 'Ardoise’s print dialog');
         await sleep(800);
         const seen = await app.evaluate(`window.__keys.find((k) => k.key === 'p' && k.ctrl)`);
@@ -156,7 +156,7 @@ export const keysMenusJourneys = [
 
       await check('sans sélection, Ctrl + P ne devine pas : un message dit quoi faire', async () => {
         await app.click(`${CARD} .card-check input`);
-        await app.waitFor(`document.querySelector('.selection-bar') === null`, 'the selection to go');
+        await app.waitFor(`document.querySelector('.selection-count')?.textContent === ''`, 'the selection to go');
         await realKeyUntil(app, '^p', `document.querySelector('.library-main .notice') !== null`, 'the notice');
         if (await app.evaluate(`document.querySelector(${j(PRINT)}) !== null`)) throw new Error('a dialog opened');
         const now = await pages(app);
@@ -216,7 +216,7 @@ export const keysMenusJourneys = [
         if (!(await lastMenuEvent(app)).prevented) throw new Error('the web view’s menu was not cancelled');
       });
 
-      await check('Échap ferme le menu et rend le focus ; une barre de menu au clavier s’ouvre sous le bouton « ⋯ »', async () => {
+      await check('Échap ferme le menu et rend le focus ; la touche Menu du clavier l’ouvre sous le bouton « ⋯ »', async () => {
         await closeMenu(app);
         const focused = await app.evaluate(`document.activeElement?.closest('.card-menu') !== null`);
         if (!focused) throw new Error('the focus did not go back to the « ⋯ » button');
@@ -226,8 +226,13 @@ export const keysMenusJourneys = [
         const event = await lastMenuEvent(app);
         console.log(`    contextmenu du clavier : ${j(event)}`);
         if (await menuOpen(app)) {
-          const inside = await app.evaluate(`document.querySelector(${j(CARD)}).contains(document.querySelector('[role="menu"]'))`);
-          if (!inside) throw new Error('the Menu key opened the menu away from the card’s « ⋯ » button');
+          // The menu is a context menu of the window (it can be long), opened just under the card's button.
+          const near = await app.evaluate(`(() => {
+            const menu = document.querySelector('[role="menu"]').getBoundingClientRect();
+            const button = document.querySelector(${j(`${CARD} .card-menu button`)}).getBoundingClientRect();
+            return menu.top >= button.bottom - 1 && menu.top <= button.bottom + 12 && menu.left <= button.right + 1;
+          })()`);
+          if (!near) throw new Error('the Menu key opened the menu away from the card’s « ⋯ » button');
           await closeMenu(app);
         } else {
           console.log('    (la touche Menu envoyée par le protocole n’a pas fait naître d’événement)');

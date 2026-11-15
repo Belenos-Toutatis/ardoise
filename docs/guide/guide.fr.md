@@ -1100,13 +1100,16 @@ boutons **Nouvelle note**, **Depuis un PDF ou une image…** et **Réglages**. �
 ![La bibliothèque : la barre latérale (classeurs, étiquettes, favoris, corbeille, tablette) et les cartes des notes avec miniature, titre, date, classeur et étiquettes](images/fr/bibliotheque.webp)
 
 Une carte montre la miniature, le titre (ou la date si la note n'a pas de titre), la date, le classeur et les
-étiquettes. Un clic ouvre la note dans l'éditeur. Sur la carte : la case pour *sélectionner*, l'étoile des favoris, le menu
-**Actions pour…** (**Renommer**, favoris, **Reprendre en mode direct** (chapitre 6), **Dupliquer**, **Changer la date…**,
-**Mettre à la corbeille**) et une poignée,
-qui apparaît sur la carte, pour glisser la note hors d'Ardoise (chapitre 10). Le **clic droit** sur une carte ouvre ce
-même menu. Renommer une note renomme aussi son fichier.
+étiquettes. Un clic ouvre la note dans l'éditeur. Sur la carte : la case pour *sélectionner*, l'étoile des favoris, le bouton
+**Actions pour…** (**⋯**) et une poignée,
+qui apparaît sur la carte, pour glisser la note hors d'Ardoise (chapitre 10). Le **clic droit** sur une carte (ou le bouton
+**⋯**, la touche Menu du clavier, un appui long du doigt ou du stylet) ouvre le menu de la note : **Renommer**, **Reprendre
+en mode direct** (chapitre 6), **Déplacer vers…**, **Étiquettes…**, favoris, **Changer la date…**, **Exporter…**,
+**Imprimer…**, **Dupliquer**, **Tourner à gauche**, **Tourner à droite** et **Mettre à la corbeille**. C'est là que se
+trouvent toutes les actions sur les notes : il n'y a pas de barre de boutons au-dessus des cartes. Renommer une note renomme
+aussi son fichier.
 
-![Le menu ⋯ d'une carte : Renommer, Ajouter aux favoris, Reprendre en mode direct, Dupliquer, Changer la date…, Mettre à la corbeille](images/fr/menu-carte.webp)
+![Le menu d'une carte : Renommer, Reprendre en mode direct, Déplacer vers…, Étiquettes…, Ajouter aux favoris, Changer la date…, Exporter…, Imprimer…, Dupliquer, Tourner à gauche, Tourner à droite, Mettre à la corbeille](images/fr/menu-carte.webp)
 
 **Le clic droit** n'affiche jamais le menu d'une page web (« Enregistrer l'image sous… », « Outils supplémentaires »…) :
 Ardoise montre son propre menu, ou rien. Le menu s'ouvre **sous le pointeur** (la touche `Menu`, ou `Maj + F10`, sur une carte ou
@@ -1128,8 +1131,8 @@ brutal d'Ardoise, la liste des modifications non enregistrées que l'on peut ré
 
 Un classeur est un simple *sous-dossier* de la bibliothèque. Cliquez sur l'icône **Nouveau classeur** (ou sur
 **Nouveau sous-classeur dans…** à côté d'un classeur), tapez le **Nom du classeur** et cliquez sur **Créer**. Pour
-ranger des notes, glissez-les sur un classeur de la barre latérale, ou sélectionnez-les puis **Déplacer vers…**
-(**Bibliothèque (racine)** ramène à la racine).
+ranger des notes, glissez-les sur un classeur de la barre latérale, ou faites un clic droit sur une note (sur l'une des notes
+sélectionnées, pour en déplacer plusieurs) puis choisissez **Déplacer vers…** (**Bibliothèque (racine)** ramène à la racine).
 
 **Un classement par erreur s'annule.** Après chaque déplacement, un message dit où sont allées les notes (« « Liste de courses »
 déplacée dans « Perso ». », « 3 notes déplacées dans « Classe/3e B ». ») et propose **Annuler** ; `Ctrl + Z` fait la même chose,
@@ -1224,7 +1227,7 @@ affiché quand on revient de la note ; rouvrez-le avec le même bouton.
 
 ### Dupliquer une note, changer sa date
 
-- **Dupliquer** (menu de la carte, clic droit, ou barre de la sélection pour une ou plusieurs notes) crée une copie dans le
+- **Dupliquer** (menu de la carte, clic droit, pour une note ou pour toute la sélection) crée une copie dans le
   *même classeur*, avec la *même date de création*, le titre suivi de **(copie)** (« Cours (copie) », puis « Cours (copie 2) »
   pour la copie d'une copie ; une note sans titre donne « (copie) »), sans le favori. Le tracé, les calques, le papier, l'image de
   fond, les étiquettes, la **narration** et l'**original de la tablette** sont copiés : **Revenir à l'original** marche sur la copie.
@@ -1241,33 +1244,39 @@ affiché quand on revient de la note ; rouvrez-le avec le même bouton.
 
 ### Étiquettes et favoris
 
-Sélectionnez une ou plusieurs notes, cliquez sur **Étiquettes…**, tapez une étiquette (plusieurs, séparées par une
-virgule) et cliquez sur **Ajouter** ; une étiquette existante se retire avec sa croix. Un clic sur une étiquette de la
+Sélectionnez une ou plusieurs notes, faites un clic droit sur l'une d'elles (ou cliquez sur son bouton **⋯**) et choisissez
+**Étiquettes…** : dans la fenêtre, tapez une étiquette (plusieurs, séparées par une virgule) et cliquez sur **Ajouter** ; une
+étiquette existante se retire avec sa croix. Un clic sur une étiquette de la
 barre latérale, ou sur celle d'une carte, n'affiche que les notes qui la portent. L'étoile d'une carte (ou
-**Mettre en favoris**) ajoute aux **Favoris**. Vous pouvez aussi faire glisser une carte (ou toute la sélection) sur
+**Ajouter aux favoris**, dans le menu de la carte) ajoute aux **Favoris**. Vous pouvez aussi faire glisser une carte (ou toute la sélection) sur
 **Favoris** ou sur une étiquette de la barre latérale : les notes deviennent des favoris, ou reçoivent cette étiquette,
 sans changer de classeur.
 
-*Couleurs des étiquettes.* Le petit rond à côté d'une étiquette, dans la barre latérale et dans le panneau
+*Couleurs des étiquettes.* Le petit rond à côté d'une étiquette, dans la barre latérale et dans la fenêtre
 **Étiquettes…** (sous **Étiquettes existantes**), ouvre une palette de huit couleurs, lisibles en thème clair comme en
 thème sombre : **Rouge**, **Orange**, **Jaune**, **Vert**, **Turquoise**, **Bleu**, **Violet**, **Rose** ; **Aucune
 couleur** l'enlève. Au clavier, les flèches passent d'une couleur à l'autre, `Entrée` choisit et `Échap` ferme. La
 couleur change sur toutes les notes qui portent l'étiquette : on la retrouve sur les cartes, dans la barre latérale et
-dans le panneau. Elle appartient à la *bibliothèque* (fichier `_ardoise\tags.json`), pas aux notes : tous vos PC la
+dans la fenêtre. Elle appartient à la *bibliothèque* (fichier `_ardoise\tags.json`), pas aux notes : tous vos PC la
 voient, par Nextcloud. Si deux PC changent les couleurs en même temps, Ardoise fusionne étiquette par étiquette, le
 changement le plus récent l'emportant.
 
 ### Sélection multiple
 
 Cochez les cartes, ou : `Ctrl + clic` ajoute ou retire une note, `Maj + clic` sélectionne une plage, `Ctrl + A` tout,
-`Échap` désélectionne. Une barre d'actions apparaît : **Déplacer vers…**, **Étiquettes…**, **Exporter…**,
-**Imprimer…**, **Assembler…**, **Dupliquer**, **Tourner**, **Mettre en favoris** (ou **Retirer des favoris**),
-**Mettre à la corbeille**, **Désélectionner**.
+`Échap` désélectionne. Le nombre de notes sélectionnées s'affiche à côté du titre de la vue (« 3 notes sélectionnées »).
+Pour agir sur la sélection, faites un **clic droit sur l'une des cartes sélectionnées** (ou cliquez sur son bouton **⋯**, ou
+appuyez sur la touche Menu du clavier, ou faites un appui long du doigt ou du stylet) : le menu s'ouvre sur « 3 notes
+sélectionnées » et propose **Déplacer vers…**, **Étiquettes…**, **Ajouter aux favoris** (ou **Retirer des favoris**),
+**Exporter…**, **Imprimer…**, **Assembler…** (à partir de deux notes), **Dupliquer**, **Tourner à gauche**, **Tourner à
+droite**, **Désélectionner** et **Mettre à la corbeille**. **Renommer**, **Changer la date…** et **Reprendre en mode
+direct** ne concernent qu'une note : ils n'y sont pas. Un clic droit sur une carte qui n'est *pas* sélectionnée ouvre le
+menu de cette note seule et ne change pas la sélection. Les touches restent les mêmes : `Suppr` met les notes à la
+corbeille, `Ctrl + P` les imprime.
 
-![Toutes les notes sélectionnées : cartes entourées de bleu, et la barre d'actions Déplacer vers…, Étiquettes…, Exporter…, Imprimer…, Assembler…, Dupliquer, Tourner, Mettre en favoris, Mettre à la corbeille, Désélectionner](images/fr/selection.webp)
+![Toutes les notes sélectionnées : cartes entourées de bleu, et leur menu ouvert avec « 3 notes sélectionnées » puis Déplacer vers…, Étiquettes…, Ajouter aux favoris, Exporter…, Imprimer…, Assembler…, Dupliquer, Tourner à gauche, Tourner à droite, Désélectionner, Mettre à la corbeille](images/fr/selection.webp)
 
-**Tourner** fait pivoter *toutes* les notes sélectionnées d'un coup : choisissez **Un quart de tour à gauche** ou
-**Un quart de tour à droite**. La feuille, l'écriture et l'image de fond tournent ensemble, exactement comme
+**Tourner à gauche** et **Tourner à droite** font pivoter *toutes* les notes sélectionnées d'un quart de tour, d'un coup. La feuille, l'écriture et l'image de fond tournent ensemble, exactement comme
 **Tourner la feuille avec l'écriture** dans l'éditeur (chapitre 8). Une barre indique l'avancement (« Rotation des notes :
 2 sur 5 »), **Arrêter** interrompt l'opération entre deux notes, et les notes qui n'ont pas pu être tournées sont
 listées avec la raison. Le message **Annuler** remet les notes dans leur sens (voir « La corbeille »).
@@ -1320,7 +1329,7 @@ difficile.
 (elle revient où elle était) ou **Supprimer définitivement**. **Vider la corbeille** supprime tout, après confirmation.
 Les notes de la corbeille sont supprimées définitivement après 30 jours.
 
-*Se reprendre tout de suite.* Après **Mettre à la corbeille** (le bouton ou la touche `Suppr`), un message s'affiche en
+*Se reprendre tout de suite.* Après **Mettre à la corbeille** (l'entrée du menu ou la touche `Suppr`), un message s'affiche en
 bas de la bibliothèque (« 3 notes mises à la corbeille. ») avec un bouton **Annuler** qui restaure les notes. Il reste
 quelques secondes (8), et tant que la souris ou le clavier est dessus. `Ctrl + Z` fait la même chose depuis la
 bibliothèque (hors d'un champ de texte, et pas dans l'éditeur, qui a son propre **Annuler**). Les messages **Annuler**
@@ -1949,7 +1958,7 @@ Opus : lisible dans les navigateurs et VLC, mais pas dans le Lecteur multimédia
 
 ### Exporter une note ou une sélection
 
-**Exporter…** (barre d'outils de l'éditeur, ou barre de la sélection dans la bibliothèque pour plusieurs notes) ouvre
+**Exporter…** (barre d'outils de l'éditeur, ou menu d'une carte dans la bibliothèque, pour une note ou pour toute la sélection) ouvre
 la fenêtre **Exporter** avec la question **Quel format choisir ?** :
 
 | | **PNG (image)** | **JPG (image)** | **WebP (image)** | **SVG (vectoriel)** | **PDF** |
@@ -2023,7 +2032,7 @@ moins juste. *Relisez toujours le texte* : la reconnaissance peut se tromper.
 ### Copier, imprimer, glisser
 
 - **Copier l'image** : met la note dans le presse-papiers de Windows ; collez-la dans Word ou OneNote.
-- **Imprimer…** (éditeur, ou barre de la sélection ; `Ctrl + P` fait la même chose, voir le chapitre 17) : la fenêtre
+- **Imprimer…** (éditeur, ou menu d'une carte ; `Ctrl + P` fait la même chose, voir le chapitre 17) : la fenêtre
   d'impression d'Ardoise s'ouvre, puis celle de Windows pour choisir l'imprimante. Chaque note est imprimée sur une page, dans son orientation. Vous réglez **Imprimer le fond**, la
   **Taille sur la feuille** (**Taille réelle** ou **Ajustée à la feuille**) et les **Notes par feuille** : **1**, **2 par
   feuille** ou **4 par feuille**. Avec 2 ou 4, Ardoise range les notes dans l'ordre sur la feuille, chacune dans sa case sans
@@ -2035,8 +2044,8 @@ moins juste. *Relisez toujours le texte* : la reconnaissance peut se tromper.
   ![La fenêtre Imprimer d'Ardoise : Imprimer le fond, Taille sur la feuille (Taille réelle ou Ajustée à la feuille) et Notes par feuille (1, 2 par feuille ou 4 par feuille)](images/fr/imprimer.webp)
 
 - *Glisser hors d'Ardoise* : la poignée d'une carte de la bibliothèque dépose une *image PNG* de la note dans
-  l'Explorateur, sur le bureau, dans Word, OneNote ou un courriel (une image par note si plusieurs sont sélectionnées).
-  Gardez le bouton enfoncé pendant la préparation de l'image.
+  l'Explorateur, sur le bureau, dans Word, OneNote ou un courriel (une image par note si plusieurs sont sélectionnées : la poignée de l'une des cartes sélectionnées emporte toute la
+  sélection). Gardez le bouton enfoncé pendant la préparation de l'image.
 
 ### Exporter ou imprimer un classeur
 

@@ -71,13 +71,14 @@
       "open": "Open note {title}",
       "binder": "Binder: {binder}",
       "unsorted": "Not in a binder",
-      "unsortedHint": "This note is in no binder. To file it, drag it onto a binder in the sidebar, or select it and use “Move to…”.",
+      "unsortedHint": "This note is in no binder. To file it, drag it onto a binder in the sidebar, or right-click it and use “Move to…”.",
       "select": "Select {title}",
       "favorite": "Add to favourites",
       "unfavorite": "Remove from favourites",
       "conflict": "Conflict copy",
       "conflictHint": "Sync created this copy of “{name}”: compare the two versions, then delete the one you do not want.",
       "menu": "Actions for {title}",
+      "menuMany": "Actions for {count} selected notes",
       "rename": "Rename",
       "renameLabel": "New note title",
       "duplicate": "Duplicate",
@@ -89,12 +90,13 @@
       "handle": "Drag to Explorer, Word, an email… (PNG image of the note)",
       "handleMany": "Drag the {count} selected notes to Explorer, Word, an email… (one PNG image per note)",
       "preparing": "Preparing the image… keep the button pressed",
-      "preparingMany": "Preparing {count} images… keep the button pressed",
-      "help": "To send the selected notes to Explorer, Word or an email (one PNG image per note), drag them by the handle that appears on a card."
+      "preparingMany": "Preparing {count} images… keep the button pressed"
     },
     "selection": {
-      "bar": "Actions on the selection",
-      "count": "Selected: {count}",
+      "count": {
+        "one": "{count} note selected",
+        "other": "{count} notes selected"
+      },
       "move": "Move to…",
       "moveTo": "Move to a binder",
       "tags": "Tags…",
@@ -102,18 +104,15 @@
       "tagHint": "Separate several tags with a comma.",
       "addTag": "Add",
       "removeTag": "Remove tag {tag}",
-      "tagsOfSelection": "Tags of the selection",
       "existingTags": "Existing tags",
-      "favorite": "Add to favourites",
-      "unfavorite": "Remove from favourites",
-      "trash": "Move to trash",
       "clear": "Deselect",
-      "help": "Ctrl+click: add or remove a note · Shift+click: select a range · Esc: deselect all",
       "export": "Export…",
       "print": "Print…",
-      "assemble": "Assemble…",
-      "duplicate": "Duplicate",
-      "assembleNeeds": "Select at least two notes to assemble them."
+      "assemble": "Assemble…"
+    },
+    "tagsDialog": {
+      "title": "Tags",
+      "ofNotes": "Tags of these notes"
     },
     "summary": {
       "button": "Summary",
@@ -296,11 +295,8 @@
       "undoError": "The tag could not be removed: {message}"
     },
     "turn": {
-      "button": "Turn",
-      "panel": "Turn the selected notes",
-      "left": "A quarter turn to the left",
-      "right": "A quarter turn to the right",
-      "hint": "The sheet, the writing and the background image turn together, as with \"Turn the sheet with the writing\" in the editor.",
+      "menuLeft": "Turn left",
+      "menuRight": "Turn right",
       "progress": "Turning the notes: {done} of {total}",
       "undoProgress": "Turning the notes back: {done} of {total}",
       "doneLeft": {
@@ -2121,7 +2117,6 @@
       "hint": "Resumes live mode on this sheet: what you write on the tablet is added to the note.",
       "noTablet": "Resuming in live mode needs a registered tablet: register it from the tablet panel.",
       "tabletBusy": "The tablet is busy (sync or registration under way).",
-      "severalSelected": "Select a single note to resume in live mode.",
       "failed": "Live mode could not resume this sheet.",
       "back": "Back to the library",
       "cannotTurn": "This page does not turn with the tablet: it is a resumed sheet, or a page written over an image. A new page follows the tablet's position again.",

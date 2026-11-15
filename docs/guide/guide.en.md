@@ -1036,12 +1036,14 @@ tablet** button.
 ![The library: the sidebar (binders, tags, favourites, trash, tablet) and the cards of the notes with thumbnail, title, date, binder and tags](images/en/bibliotheque.webp)
 
 A card shows the thumbnail, the title (or the date if the note has no title), the date, the binder and the tags. A click
-opens the note in the editor. On the card: the box to *select* it, the favourites star, the **Actions for…** menu (**Rename**,
-favourites, **Resume in live mode** (chapter 6), **Duplicate**, **Change the date…**, **Move to trash**) and a handle,
-which appears on the card, to drag the
-note out of Ardoise (chapter 10). A **right click** on a card opens the same menu. Renaming a note also renames its file.
+opens the note in the editor. On the card: the box to *select* it, the favourites star, the **Actions for…** button (**⋯**)
+and a handle, which appears on the card, to drag the
+note out of Ardoise (chapter 10). A **right click** on a card (or its **⋯** button, the keyboard's Menu key, a long press of
+the finger or the pen) opens the note's menu: **Rename**, **Resume in live mode** (chapter 6), **Move to…**, **Tags…**,
+favourites, **Change the date…**, **Export…**, **Print…**, **Duplicate**, **Turn left**, **Turn right** and **Move to trash**.
+Every action on notes is there: there is no bar of buttons above the cards. Renaming a note also renames its file.
 
-![The ⋯ menu of a card: Rename, Add to favourites, Resume in live mode, Duplicate, Change the date…, Move to trash](images/en/menu-carte.webp)
+![The menu of a card: Rename, Resume in live mode, Move to…, Tags…, Add to favourites, Change the date…, Export…, Print…, Duplicate, Turn left, Turn right, Move to trash](images/en/menu-carte.webp)
 
 **The right click** never shows a web page's menu ("Save image as…", "More tools"…): Ardoise shows its own menu, or nothing.
 The menu opens **under the pointer** (the `Menu` key, or `Shift + F10`, on a card or a binder opens it under its **⋯** button).
@@ -1062,7 +1064,8 @@ of unsaved changes that can be recovered (chapter 8).
 
 A binder is simply a *subfolder* of the library. Click the **New binder** icon (or **New sub-binder in…** next to a
 binder), type the **Binder name** and click **Create**. To file notes, drag them onto a binder in the sidebar, or
-select them and use **Move to…** (**Library (root)** takes them back to the root).
+right-click a note (one of the selected notes, to move several) and choose **Move to…** (**Library (root)** takes them back to
+the root).
 
 **A filing mistake can be undone.** After each move, a message says where the notes went ("Shopping list" moved to "Perso".",
 "3 notes moved to "Classe/3e B".") and offers **Undo**; `Ctrl + Z` does the same, **even when the card has left the binder on
@@ -1150,7 +1153,7 @@ them and what they hold. The summary is not shown again when you come back from 
 
 ### Duplicating a note, changing its date
 
-- **Duplicate** (the card's menu, right click, or the selection bar for one or several notes) makes a copy in the *same
+- **Duplicate** (the card's menu, right click, for one note or for the whole selection) makes a copy in the *same
   binder* with the *same creation date*, its title followed by **(copy)** ("Course (copy)", then "Course (copy 2)" for the copy of a
   copy; an untitled note gives "(copy)"), without the favourite mark. The ink, layers, paper, background image, tags, the
   **narration** and the **tablet's original** are copied: **Back to the original** works on the copy. A copy of an *assistant's
@@ -1165,30 +1168,35 @@ them and what they hold. The summary is not shown again when you come back from 
 
 ### Tags and favourites
 
-Select one or several notes, click **Tags…**, type a tag (several, separated by a comma) and click **Add**; an existing
+Select one or several notes, right-click one of them (or click its **⋯** button) and choose **Tags…**: in the window, type a
+tag (several, separated by a comma) and click **Add**; an existing
 tag is removed with its cross. A click on a tag in the sidebar, or on a card's tag, shows only the notes that carry it.
-The star of a card (or **Add to favourites**) adds it to the **Favourites**. You can also drag a card (or the whole
+The star of a card (or **Add to favourites**, in the card's menu) adds it to the **Favourites**. You can also drag a card (or the whole
 selection) onto **Favourites** or onto a tag of the sidebar: the notes become favourites, or get that tag, and stay in
 their binder.
 
-*Tag colours.* The small dot next to a tag, in the sidebar and in the **Tags…** panel (under **Existing tags**), opens a
+*Tag colours.* The small dot next to a tag, in the sidebar and in the **Tags…** window (under **Existing tags**), opens a
 palette of eight colours, readable in the light theme as in the dark one: **Red**, **Orange**, **Yellow**, **Green**,
 **Teal**, **Blue**, **Purple**, **Pink**; **No colour** removes it. On the keyboard, the arrows move between the
 colours, `Enter` chooses and `Esc` closes. The colour changes on every note that carries the tag: you see it on the
-cards, in the sidebar and in the panel. It belongs to the *library* (the file `_ardoise\tags.json`), not to the notes:
+cards, in the sidebar and in the window. It belongs to the *library* (the file `_ardoise\tags.json`), not to the notes:
 all your PCs see it, through Nextcloud. If two PCs change the colours at the same time, Ardoise merges tag by tag, the
 most recent change winning.
 
 ### Selecting several notes
 
 Tick the cards, or: `Ctrl + click` adds or removes a note, `Shift + click` selects a range, `Ctrl + A` selects all,
-`Esc` deselects. An action bar appears: **Move to…**, **Tags…**, **Export…**, **Print…**, **Assemble…**, **Duplicate**, **Turn**,
-**Add to favourites** (or **Remove from favourites**), **Move to trash**, **Deselect**.
+`Esc` deselects. The number of selected notes shows next to the title of the view ("3 notes selected"). To act on the
+selection, **right-click one of the selected cards** (or click its **⋯** button, press the keyboard's Menu key, or long-press
+with a finger or the pen): the menu opens on "3 notes selected" and offers **Move to…**, **Tags…**, **Add to favourites** (or
+**Remove from favourites**), **Export…**, **Print…**, **Assemble…** (from two notes), **Duplicate**, **Turn left**, **Turn
+right**, **Deselect** and **Move to trash**. **Rename**, **Change the date…** and **Resume in live mode** concern a single
+note: they are not there. A right click on a card that is *not* selected opens the menu of that note alone and leaves the
+selection as it is. The keys stay the same: `Delete` moves the notes to the trash, `Ctrl + P` prints them.
 
-![All notes selected: cards outlined in blue, and the action bar Move to…, Tags…, Export…, Print…, Assemble…, Duplicate, Turn, Add to favourites, Move to trash, Deselect](images/en/selection.webp)
+![All notes selected: cards outlined in blue, and their menu open with "3 notes selected" then Move to…, Tags…, Add to favourites, Export…, Print…, Assemble…, Duplicate, Turn left, Turn right, Deselect, Move to trash](images/en/selection.webp)
 
-**Turn** rotates *all* the selected notes at once: choose **A quarter turn to the left** or **A quarter turn to the
-right**. The sheet, the writing and the background image turn together, exactly like **Turn the sheet with the writing**
+**Turn left** and **Turn right** rotate *all* the selected notes a quarter turn at once. The sheet, the writing and the background image turn together, exactly like **Turn the sheet with the writing**
 in the editor (chapter 8). A bar shows progress ("Turning the notes: 2 of 5"), **Stop** interrupts the operation between
 two notes, and the notes that could not be turned are listed with the reason. The **Undo** message puts the notes back
 the way they were (see "The trash").
@@ -1237,7 +1245,7 @@ mistakes on difficult handwriting.
 back where it was) or **Delete for good**. **Empty the trash** deletes everything, after confirmation. Notes in the
 trash are deleted for good after 30 days.
 
-*Taking it back straight away.* After **Move to trash** (the button or the `Delete` key), a message appears at the bottom
+*Taking it back straight away.* After **Move to trash** (the menu entry or the `Delete` key), a message appears at the bottom
 of the library ("3 notes moved to the trash.") with an **Undo** button that restores the notes. It stays for a few
 seconds (8), and as long as the mouse or the keyboard is on it. `Ctrl + Z` does the same from the library (outside a text
 field, and not in the editor, which has its own **Undo**). The **Undo** messages of **Turn**, **Duplicate**, **Change the date…**
@@ -1827,7 +1835,7 @@ player.
 
 ### Exporting a note or a selection
 
-**Export…** (editor toolbar, or the selection bar in the library for several notes) opens the **Export** window with the
+**Export…** (editor toolbar, or a card's menu in the library, for one note or for the whole selection) opens the **Export** window with the
 question **Which format should I choose?**:
 
 | | **PNG (image)** | **JPG (image)** | **WebP (image)** | **SVG (vector)** | **PDF** |
@@ -1899,7 +1907,7 @@ could not analyse the layout, Ardoise says so: the structure is then guessed fro
 ### Copying, printing, dragging
 
 - **Copy image**: puts the note on Windows' clipboard; paste it into Word or OneNote.
-- **Print…** (editor, or the selection bar; `Ctrl + P` does the same, see chapter 17): Ardoise's print window opens,
+- **Print…** (editor, or a card's menu; `Ctrl + P` does the same, see chapter 17): Ardoise's print window opens,
   then Windows' to choose the printer. Each note is printed on a page, in its orientation. You set **Print the background**, the **Size on the sheet** (**Real size** or
   **Fitted to the sheet**) and the **Notes per sheet**: **1**, **2 per sheet** or **4 per sheet**. With 2 or 4, Ardoise lays
   the notes out in order on the sheet, each in its own cell and undistorted (two portrait notes side by side on a landscape
@@ -1910,8 +1918,8 @@ could not analyse the layout, Ardoise says so: the structure is then guessed fro
   ![Ardoise's Print window: Print the background, Size on the sheet (Real size or Fitted to the sheet) and Notes per sheet (1, 2 per sheet or 4 per sheet)](images/en/imprimer.webp)
 
 - *Dragging out of Ardoise*: the handle of a library card drops a *PNG image* of the note into Explorer, onto the
-  desktop, into Word, OneNote or an email (one image per note if several are selected). Keep the button pressed while
-  the image is prepared.
+  desktop, into Word, OneNote or an email (one image per note if several are selected: the handle of one of the selected cards takes the whole selection). Keep the
+  button pressed while the image is prepared.
 
 ### Exporting or printing a binder
 

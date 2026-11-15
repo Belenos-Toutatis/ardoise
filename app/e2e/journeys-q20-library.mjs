@@ -21,6 +21,7 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cardMenu, markCard, openCardMenu, rightClick } from './card-menu.mjs';
 
 const locales = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'src', 'locales');
 const catalogs = {
@@ -54,34 +55,6 @@ async function waitForTitles(app, expected, what) {
     // Say what was there: a failure of this kind is read from the message alone.
     throw new Error(`${error.message}; the cards are ${j(await titles(app))}, the order file ${j(orderFile(app))}`);
   }
-}
-
-/** A real right click at the centre of an element. */
-async function rightClick(app, selector, label) {
-  const { x, y } = await app.centre(selector, label);
-  await app.mouse('mouseMoved', x, y);
-  await app.mouse('mousePressed', x, y, { button: 'right', buttons: 2 });
-  await app.mouse('mouseReleased', x, y, { button: 'right', buttons: 0 });
-}
-
-/** Marks the card titled `title` so that a selector can reach it. */
-async function markCard(app, title, mark) {
-  const found = await app.evaluate(`(() => {
-    const card = [...document.querySelectorAll('.note-card')].find((c) => c.querySelector('.card-title')?.textContent.trim() === ${j(title)});
-    if (!card) return false;
-    card.dataset.e2e = ${j(mark)};
-    return true;
-  })()`);
-  if (!found) throw new Error(`no card "${title}"`);
-  return `[data-e2e="${mark}"]`;
-}
-
-/** Right click on the card titled `title`, then the menu entry labelled `label`. */
-async function cardMenu(app, title, label) {
-  const card = await markCard(app, title, `menu-${Date.now()}`);
-  await rightClick(app, card);
-  await app.waitFor(`document.querySelector('.menu-list[role="menu"]') !== null`, `the menu of "${title}"`);
-  await app.click('.menu-list [role="menuitem"]', label);
 }
 
 /** Creates a note through the app's own command, as the interface does. */
@@ -123,7 +96,7 @@ function orderFile(app, binder = BINDER) {
 
 export const q20Journeys = [
   {
-    name: 'Q20 : dupliquer une note (clic droit, barre de la sélection, annuler) et changer sa date',
+    name: 'Q20 : dupliquer une note (menu de la carte, une note ou la sélection, annuler) et changer sa date',
     async run(app, check) {
       const l = (key) => text(app.language, key);
       const word = l('library.duplicate.word');
@@ -137,9 +110,7 @@ export const q20Journeys = [
       let date;
       await check(`clic droit sur « ${original} » : le menu de la carte propose « ${l('library.card.duplicate')} » et « ${l('library.card.changeDate')} »`, async () => {
         date = await app.evaluate(`[...document.querySelectorAll('.note-card')].find((c) => c.querySelector('.card-title').textContent.trim() === ${j(original)}).querySelector('.card-date').textContent`);
-        const card = await markCard(app, original, 'dup');
-        await rightClick(app, card);
-        await app.waitFor(`document.querySelector('.menu-list[role="menu"]') !== null`, 'the right-click menu');
+        await openCardMenu(app, original);
         const items = await app.evaluate(`[...document.querySelectorAll('.menu-list [role="menuitem"]')].map((e) => e.textContent.trim())`);
         for (const wanted of [l('library.card.duplicate'), l('library.card.changeDate')]) {
           if (!items.includes(wanted)) throw new Error(`no "${wanted}" in ${items}`);
@@ -168,12 +139,12 @@ export const q20Journeys = [
         if (noteFiles(app.library).some((f) => f.includes(`(${word})`))) throw new Error('the copy is still in the library');
       });
 
-      await check('barre de la sélection : deux notes cochées, « Dupliquer » en fait deux copies', async () => {
+      await check('menu d’une carte de la sélection : deux notes cochées, « Dupliquer » en fait deux copies', async () => {
         for (const title of [original, second]) {
           const card = await markCard(app, title, `pick-${title.length}`);
           await app.click(`${card} .card-check input`);
         }
-        await app.click('.selection-bar [data-action="duplicate"]');
+        await cardMenu(app, original, l('library.card.duplicate'));
         await app.waitFor(`document.querySelectorAll('.note-card').length === 10`, 'two copies');
         for (const title of [original, second]) {
           await app.waitFor(`[...document.querySelectorAll('.note-card .card-title')].some((e) => e.textContent.trim() === ${j(`${title} (${word})`)})`, `the copy of "${title}"`);
@@ -615,13 +586,13 @@ export const q20Journeys = [
         await waitForOrder(before, 'Alpha back after Gamma');
       });
 
-      await check('« Déplacer vers… » de la barre de sélection : deux notes vers « Classe », le message le dit ; Ctrl + Z les remet dans leur classeur', async () => {
+      await check('« Déplacer vers… » du menu d’une carte de la sélection : deux notes vers « Classe », le message le dit ; Ctrl + Z les remet dans leur classeur', async () => {
         for (const title of ['Alpha', 'Beta']) {
           const card = await markCard(app, title, `mv-${title}`);
           await app.click(`${card} .card-check input`);
         }
-        await app.click('.selection-bar button', l('library.selection.move'));
-        await app.click('.selection-panel [data-binder="Classe"]');
+        await cardMenu(app, 'Alpha', l('library.selection.move'));
+        await app.click('[data-dialog="move"] [data-binder="Classe"]');
         await waitForTitles(app, ['Gamma'], 'the two notes gone from the binder');
         for (const title of ['Alpha', 'Beta']) {
           if (!files().some((f) => f.startsWith('Classe') && f.endsWith(` ${title}.ardoise`))) throw new Error(`${title} is not in Classe`);
@@ -637,8 +608,8 @@ export const q20Journeys = [
       await check('« Alpha » modifiée entre-temps : l’annulation la laisse où elle est, dit pourquoi, et ne perd rien', async () => {
         const card = await markCard(app, 'Alpha', 'mv-last');
         await app.click(`${card} .card-check input`);
-        await app.click('.selection-bar button', l('library.selection.move'));
-        await app.click('.selection-panel [data-binder="Perso"]');
+        await cardMenu(app, 'Alpha', l('library.selection.move'));
+        await app.click('[data-dialog="move"] [data-binder="Perso"]');
         await waitForTitles(app, ['Gamma', 'Beta'], 'Alpha gone');
         // Changed since (a tag, as another computer could): its file has another stamp.
         await app.evaluate(`(async () => {

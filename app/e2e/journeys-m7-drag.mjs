@@ -92,8 +92,8 @@ export const dragJourneys = [
         await app.waitFor(`document.querySelectorAll('.note-card.selected').length === 2`, 'two selected cards');
         const tooltip = await app.evaluate(`document.querySelectorAll('.note-card .drag-handle')[0].title`);
         if (!tooltip.includes('2')) throw new Error(`the handle does not say how many notes: ${tooltip}`);
-        const help = await app.evaluate(`document.querySelector('.selection-bar')?.textContent ?? ''`);
-        if (!help.includes(l('library.drag.help'))) throw new Error('the selection bar does not explain the drag');
+        // No bar of buttons and no help line any more: the handle's tooltip says it, and the guides explain it.
+        if (await app.evaluate(`document.querySelector('.selection-bar') !== null`)) throw new Error('a selection bar is on screen');
         const before = dragFolders();
         await dragHandle(app, 0);
         const files = await newDragFiles(before, 2);

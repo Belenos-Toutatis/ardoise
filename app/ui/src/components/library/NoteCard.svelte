@@ -11,6 +11,7 @@
   import { noteDrawn } from '../../lib/perf';
   import { resumeBlock } from '../../lib/live-resume.svelte';
   import { tablet } from '../../lib/tablet-state.svelte';
+  import { cardMenu, type CardMenu } from './card-menu';
   import Menu from './Menu.svelte';
 
   let {
@@ -50,6 +51,8 @@
   let input = $state<HTMLInputElement | null>(null);
   let dragOut = $state<DragOutPhase>('idle');
   let menu = $state<{ show: (at?: Point) => void } | null>(null);
+  /** What the menu offers, built when it opens: with a thousand cards, not one menu is kept up to date for nothing. */
+  let menuContent = $state<CardMenu | null>(null);
 
   const locale = $derived(currentLocale());
   const title = $derived(displayTitle(note, locale));
@@ -58,15 +61,16 @@
   const dragLabel = $derived(
     dragCount > 1 ? t('library.drag.handleMany', { count: dragCount }) : t('library.drag.handle'),
   );
-  /** Why the note cannot be resumed in live mode now (a tablet is needed; one note at a time). */
-  const resumeHint = $derived(
-    lib.selected.length > 1
-      ? t('live.resume.severalSelected')
-      : (() => {
-          const block = resumeBlock(tablet.status);
-          return block === 'noTablet' ? t('live.resume.noTablet') : block === 'busy' ? t('live.resume.tabletBusy') : null;
-        })(),
-  );
+  /** Why the note cannot be resumed in live mode now (a tablet is needed). */
+  function resumeHint(): string | null {
+    const block = resumeBlock(tablet.status);
+    return block === 'noTablet' ? t('live.resume.noTablet') : block === 'busy' ? t('live.resume.tabletBusy') : null;
+  }
+
+  /** Builds the menu for what the library holds now: the whole selection if this card is part of it, else this note. */
+  function buildMenu() {
+    menuContent = cardMenu(lib, note, { title, rename: startRename, resume: onresume, resumeHint: onresume ? resumeHint() : null });
+  }
   /** The mark of the place a dragged card would land at, on the side of this card it is on. */
   const insertion = $derived(lib.insertion?.path === note.path ? lib.insertion.side : null);
   const stampKey = $derived(
@@ -340,34 +344,12 @@
   <div class="card-menu">
     <Menu
       bind:this={menu}
+      floating
       label={t('library.card.menu', { title })}
-      items={[
-        { id: 'rename', label: t('library.card.rename'), onselect: startRename },
-        {
-          id: 'favorite',
-          label: note.favorite ? t('library.card.unfavorite') : t('library.card.favorite'),
-          onselect: () => void lib.toggleFavorite(note),
-        },
-        ...(onresume
-          ? [
-              {
-                id: 'resume',
-                label: t('live.resume.action'),
-                disabled: resumeHint !== null,
-                hint: resumeHint ?? undefined,
-                onselect: () => onresume(note),
-              },
-            ]
-          : []),
-        {
-          id: 'duplicate',
-          label: t('library.card.duplicate'),
-          disabled: lib.activity.busy,
-          onselect: () => void lib.duplicateNotes([note]),
-        },
-        { id: 'date', label: t('library.card.changeDate'), onselect: () => lib.openDate(note) },
-        { id: 'trash', label: t('library.card.trash'), danger: true, onselect: () => void lib.trashNotes([note.path]) },
-      ]}
+      menuLabel={menuContent?.label}
+      heading={menuContent?.heading}
+      items={menuContent?.items ?? []}
+      onbeforeshow={buildMenu}
     />
   </div>
 

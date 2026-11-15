@@ -809,35 +809,11 @@ select {
   margin: 0 0 1rem;
 }
 
-.selection-bar {
-  position: sticky;
-  top: -1rem;
-  z-index: 3;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow);
-}
-
-/* How to change the selection, on its own line under the buttons. */
-.selection-help {
-  flex-basis: 100%;
-  margin: 0;
-}
-
+/* The count of selected notes next to the view's title: the actions are in the menu of a card. */
 .selection-count {
-  margin-right: 0.5rem;
-}
-
-.selection-panel {
-  flex-basis: 100%;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--border);
+  color: var(--accent);
+  font-size: 0.875rem;
+  font-weight: 600;
 }
 
 .mini-heading {
