@@ -395,3 +395,16 @@ Décisions du développeur, à confirmer (conception : `docs/design/interface.md
 - *Touches inchangées* : `Suppr`, `Ctrl + A`, `Échap`, `Ctrl + P`, `Alt + flèches`, `F2`.
 
 **SPEC mise à jour avec l'accord de l'utilisateur (2026-11-15, « Oui, écris-la »)** : §4.3, la ligne « Sélection multiple » dit maintenant que toutes les actions sur les notes sont dans le menu contextuel d'une carte, sur quoi il agit, et qu'aucune barre de boutons ne reste au-dessus des cartes. Les décisions de détail ci-dessus (deux entrées pour tourner, les fenêtres de **Déplacer vers…** et d'**Étiquettes…**, **Désélectionner** sur une carte hors sélection, le bouton **⋯**) restent à confirmer par l'essai à la main de l'utilisateur.
+
+## Q24 — Une vue « Non classées » dans la barre latérale (2026-11-15) — **à confirmer**
+
+Demande de l'utilisateur, mot pour mot : « Il n'y a pas d'endroit où cliquer pour afficher que les notes non classées? Je suggère, dans la barre latérale gauche, juste en dessous de favori, de faire un emplacement Non classés. »
+
+Décisions du développeur, à confirmer :
+
+- *Nom* : « Non classées » (accordé avec « notes », comme l'étiquette « Non classée » des cartes) ; en anglais « Not in a binder », le texte des cartes.
+- *Ce qu'elle montre* : les notes à la racine de la bibliothèque, dans aucun classeur, avec leur nombre ; tri par date ou par titre comme **Favoris** (pas d'ordre de classeur).
+- *Dépôt* : des cartes déposées sur **Non classées** sortent de leur classeur, comme sur **Toutes les notes** ; c'est un déplacement ordinaire, annulable par `Ctrl + Z` ou **Annuler**. Exemple : la carte « Cours d'optique » de « Classe » glissée sur **Non classées** n'est plus dans « Classe », et `Ctrl + Z` l'y remet.
+- *Clic droit* : **Afficher**, **Tout sélectionner**, comme **Favoris**.
+
+**SPEC** : §4.3 ne parle pas de cette vue ; une phrase est à proposer à l'utilisateur.

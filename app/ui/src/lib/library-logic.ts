@@ -6,6 +6,8 @@ import type { BookmarkRef, NoteSummary, TagCount } from './note';
 export type LibraryView =
   | { kind: 'all' }
   | { kind: 'favorites' }
+  /** The notes in no binder, at the root of the library (user request 2026-11-15). */
+  | { kind: 'unsorted' }
   | { kind: 'binder'; binder: string }
   | { kind: 'tag'; tag: string }
   | { kind: 'trash' };
@@ -84,6 +86,8 @@ export function notesOfView(notes: NoteSummary[], view: LibraryView): NoteSummar
       return notes;
     case 'favorites':
       return notes.filter((n) => n.favorite);
+    case 'unsorted':
+      return notes.filter((n) => !n.binder);
     case 'binder':
       return notes.filter((n) => isInBinder(n.binder, view.binder));
     case 'tag':

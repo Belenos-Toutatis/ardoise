@@ -62,6 +62,7 @@
 
   const notes = $derived(lib.notes);
   const favoriteCount = $derived(notes.filter((n) => n.favorite).length);
+  const unsortedCount = $derived(notes.filter((n) => !n.binder).length);
   const loaded = $derived(lib.listing !== null);
 
   function current(view: LibraryView): 'true' | undefined {
@@ -171,10 +172,12 @@
 
   /**
    * Where dragged notes can be dropped in this column: a binder (they move there), « Favoris » (they become
-   * favourites) or a tag (they get it). The last two were asked by the user on 2026-11-13.
+   * favourites), a tag (they get it) or « Non classées » (they leave their binder for the library's root, as on « Toutes
+   * les notes »). Favourites and tags were asked by the user on 2026-11-13, « Non classées » on 2026-11-15.
    */
-  type DropPlace = { kind: 'binder'; path: string } | { kind: 'favorites' } | { kind: 'tag'; tag: string };
-  const placeKey = (place: DropPlace) => (place.kind === 'binder' ? `b:${place.path}` : place.kind === 'tag' ? `t:${place.tag}` : 'f');
+  type DropPlace = { kind: 'binder'; path: string } | { kind: 'favorites' } | { kind: 'unsorted' } | { kind: 'tag'; tag: string };
+  const placeKey = (place: DropPlace) =>
+    place.kind === 'binder' ? `b:${place.path}` : place.kind === 'tag' ? `t:${place.tag}` : place.kind === 'unsorted' ? 'u' : 'f';
   const binderPlace = (path: string): DropPlace => ({ kind: 'binder', path });
 
   function dragover(event: DragEvent, place: DropPlace) {
@@ -189,6 +192,7 @@
     event.preventDefault();
     dropTarget = null;
     if (place.kind === 'binder') void lib.dropOn(place.path);
+    else if (place.kind === 'unsorted') void lib.dropOn('');
     else if (place.kind === 'favorites') void lib.dropOnFavorites();
     else void lib.dropOnTag(place.tag);
   }
@@ -351,6 +355,26 @@
       >
         <span class="nav-label">{t('library.favorites')}</span>
         <span class="count">{favoriteCount}</span>
+      </button>
+    </li>
+    <li>
+      <button
+        type="button"
+        class="nav-item"
+        class:drop={dropTarget === 'u'}
+        data-view="unsorted"
+        title={t('library.unsortedHint')}
+        ondragover={(event) => dragover(event, { kind: 'unsorted' })}
+        ondragenter={(event) => dragover(event, { kind: 'unsorted' })}
+        ondragleave={() => dragleave({ kind: 'unsorted' })}
+        ondrop={(event) => drop(event, { kind: 'unsorted' })}
+        aria-current={current({ kind: 'unsorted' })}
+        onclick={() => lib.setView({ kind: 'unsorted' })}
+        oncontextmenu={(event) =>
+          showMenu(event, t('contextMenu.viewLabel', { name: t('library.unsorted') }), viewItems({ kind: 'unsorted' }))}
+      >
+        <span class="nav-label">{t('library.unsorted')}</span>
+        <span class="count">{unsortedCount}</span>
       </button>
     </li>
   </ul>

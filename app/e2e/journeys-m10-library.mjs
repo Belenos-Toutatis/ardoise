@@ -183,6 +183,16 @@ export const libraryJourneys = [
         await app.waitFor(`document.querySelectorAll('.note-card .card-binder.unsorted').length === 2`, 'and only those two marked');
       });
 
+      await check(`« ${l('library.unsorted')} », sous les favoris, n'affiche que ces deux notes`, async () => {
+        await app.waitFor(`document.querySelector('[data-view="favorites"]')?.closest('li')?.nextElementSibling?.querySelector('[data-view="unsorted"]') !== null`, 'the entry just under the favourites');
+        await app.waitFor(`document.querySelector('[data-view="unsorted"] .count')?.textContent.trim() === '2'`, 'its count');
+        await app.click('[data-view="unsorted"]');
+        await app.waitFor(`${cards} === 2 && document.querySelectorAll('.note-card .card-binder.unsorted').length === 2`, 'only the two cards in no binder');
+        await app.waitFor(`document.querySelector('#library-heading')?.textContent.trim() === ${JSON.stringify(l('library.unsorted'))}`, 'its heading');
+        await app.click('[data-view="all"]');
+        await app.waitFor(`${cards} === 8`, 'all the notes again');
+      });
+
       await check(`« ${l('library.binder.rename')} » : « Perso » devient « ${newName} », le dossier aussi`, async () => {
         await app.click('.sidebar .nav-row:has([data-binder="Perso"]) .menu .icon-button');
         await app.click('.sidebar .menu-list button', l('library.binder.rename'));

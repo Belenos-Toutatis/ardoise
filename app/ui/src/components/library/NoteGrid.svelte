@@ -36,6 +36,8 @@
     switch (view.kind) {
       case 'favorites':
         return t('library.favorites');
+      case 'unsorted':
+        return t('library.unsorted');
       case 'binder':
         return view.binder.split('/').pop() ?? view.binder;
       case 'tag':
@@ -46,7 +48,13 @@
   });
   const emptyKey = $derived.by(() => {
     const kind = lib.view.kind;
-    return kind === 'favorites' ? 'library.empty.favorites' : kind === 'binder' ? 'library.empty.binder' : 'library.empty.tag';
+    return kind === 'favorites'
+      ? 'library.empty.favorites'
+      : kind === 'unsorted'
+        ? 'library.empty.unsorted'
+        : kind === 'binder'
+          ? 'library.empty.binder'
+          : 'library.empty.tag';
   });
   const problems = $derived(lib.listing?.problems ?? []);
   // Keeps the Tab stop inside the grid when notes disappear.

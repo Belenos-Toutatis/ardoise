@@ -57,7 +57,7 @@ The screenshots show the program with demonstration notes and a simulated tablet
 
    ![Welcome to Ardoise window: the Choose a folder… button and the language choice](images/en/premier-lancement.webp)
 
-3. **Discover the library.** It is the home page: on the left, **All notes**, **Favourites**, the **Binders**, the
+3. **Discover the library.** It is the home page: on the left, **All notes**, **Favourites**, **Not in a binder**, the **Binders**, the
    **Tags**, the **Trash** and the **Tablet** block; in the middle, one card per note. A click on a card opens the note
    (chapter [7](#7-the-library)).
 
@@ -1029,7 +1029,7 @@ The writing and the image of the shared notes can be seen by anyone who has the 
 
 The library is the home page. At the top: the **Search notes** field, the sort (**Sort notes**: **Date: newest first**,
 **Date: oldest first**, **Title: A → Z**, **Title: Z → A**, and, when a binder is shown, **Binder order**, see below), and the **New note**, **From a PDF or an image…** and
-**Settings** buttons. On the left: the sidebar with **All notes**, **Favourites**, the **Binders**, the **Tags**, the
+**Settings** buttons. On the left: the sidebar with **All notes**, **Favourites**, **Not in a binder** (the notes in no binder), the **Binders**, the **Tags**, the
 **Trash**, the **Import from Inkspace…** entry (chapter 11), and at the bottom the **Tablet** block and the **Test the
 tablet** button.
 
@@ -1047,7 +1047,7 @@ Every action on notes is there: there is no bar of buttons above the cards. Rena
 
 **The right click** never shows a web page's menu ("Save image as…", "More tools"…): Ardoise shows its own menu, or nothing.
 The menu opens **under the pointer** (the `Menu` key, or `Shift + F10`, on a card or a binder opens it under its **⋯** button).
-There is one on: a card and a binder (above); **All notes** and **Favourites** (**Show**, **Select all**); a tag (**Show**,
+There is one on: a card and a binder (above); **All notes**, **Favourites** and **Not in a binder** (**Show**, **Select all**); a tag (**Show**,
 **Colour…**, which opens the colour palette); the **Trash** (**Open the trash**, **Empty the trash…**, with the same
 confirmation question as the button); a note in the trash (**Restore**, **Delete permanently…**, which asks to confirm); a
 layer and the editor's page (chapter 8). The arrows, `Home`, `End` and `Enter` drive the menu; `Esc`, a click elsewhere,
@@ -1173,7 +1173,8 @@ tag (several, separated by a comma) and click **Add**; an existing
 tag is removed with its cross. A click on a tag in the sidebar, or on a card's tag, shows only the notes that carry it.
 The star of a card (or **Add to favourites**, in the card's menu) adds it to the **Favourites**. You can also drag a card (or the whole
 selection) onto **Favourites** or onto a tag of the sidebar: the notes become favourites, or get that tag, and stay in
-their binder.
+their binder. Dropped onto **Not in a binder** (or onto **All notes**), they leave their binder and join the notes in no
+binder; `Ctrl + Z` puts them back.
 
 *Tag colours.* The small dot next to a tag, in the sidebar and in the **Tags…** window (under **Existing tags**), opens a
 palette of eight colours, readable in the light theme as in the dark one: **Red**, **Orange**, **Yellow**, **Green**,
