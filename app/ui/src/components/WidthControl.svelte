@@ -112,6 +112,11 @@
   }
 
   .step {
+    /* The sign in the middle of its square, whatever the toolbar around it does to its buttons. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
     width: 1.7rem;
     height: 1.7rem;
     padding: 0;

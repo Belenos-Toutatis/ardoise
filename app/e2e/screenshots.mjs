@@ -501,8 +501,11 @@ async function equationPicture(app) {
   await app.waitFor(`document.activeElement?.matches('[data-slot="equation-source"]') === true`, 'the field to keep the focus').catch(() => {});
   await sleep(500);
   await shoot(app, 'equation');
+  // Opening a tab of the side panel may have taken the focus: Enter puts the equation down only from its field (elsewhere
+  // the code would stay unplaced and the next tool would ask what to do with it).
+  await app.evaluate(`document.querySelector('[data-slot="equation-source"]')?.focus()`);
   await app.key('Enter');
-  await sleep(300);
+  await app.waitFor(`document.querySelector('[data-slot="equation-panel"]') === null`, 'the equation to be put down');
   await tool(app, 'select');
   await clickPage(app, 14000, 19500);
   await tool(app, 'pen');
