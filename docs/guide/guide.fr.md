@@ -1133,6 +1133,9 @@ Un classeur est un simple *sous-dossier* de la bibliothèque. Cliquez sur l'icô
 **Nouveau sous-classeur dans…** à côté d'un classeur), tapez le **Nom du classeur** et cliquez sur **Créer**. Pour
 ranger des notes, glissez-les sur un classeur de la barre latérale, ou faites un clic droit sur une note (sur l'une des notes
 sélectionnées, pour en déplacer plusieurs) puis choisissez **Déplacer vers…** (**Bibliothèque (racine)** ramène à la racine).
+Pour les déposer dans un sous-classeur caché, gardez-les un instant au-dessus de son classeur : il se déplie, et ses
+sous-classeurs apparaissent (exemple : tenue sur **Classe**, la note fait apparaître **3e B**, où vous la lâchez). Le
+classeur reste déplié ensuite.
 
 **Un classement par erreur s'annule.** Après chaque déplacement, un message dit où sont allées les notes (« « Liste de courses »
 déplacée dans « Perso ». », « 3 notes déplacées dans « Classe/3e B ». ») et propose **Annuler** ; `Ctrl + Z` fait la même chose,

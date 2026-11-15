@@ -486,6 +486,40 @@ export const q20Journeys = [
         await waitForTitles(app, ['Gamma', 'Alpha'], 'Beta gone from the binder');
         const moved = noteFiles(app.library).some((f) => f.startsWith('Perso') && f.endsWith(' Beta.ardoise'));
         if (!moved) throw new Error('Beta is not in the folder of the binder Perso');
+      });
+
+      await check('tenue sur « Classe », fermé, la note le déplie (demande du 2026-11-15) et se dépose dans « 3e B »', async () => {
+        const sub = `document.querySelector('.sidebar [data-binder="Classe/3e B"]')`;
+        if (await app.evaluate(`${sub} !== null`)) throw new Error('Classe is already open');
+        const from = await spot('Alpha');
+        const target = await sidebarSpot('Classe');
+        const since = app.eventCount();
+        await app.mouse('mouseMoved', from.x, from.y);
+        await app.mouse('mousePressed', from.x, from.y);
+        for (let step = 1; step <= 12; step++) {
+          await app.mouse('mouseMoved', from.x + ((target.x - from.x) * step) / 12, from.y + ((target.y - from.y) * step) / 12, { buttons: 1, button: 'left' });
+          await sleep(30);
+        }
+        const event = await app.waitForEvent('Input.dragIntercepted', { since, timeout: 4000 });
+        if (!event) throw new Error('no Input.dragIntercepted event');
+        dragged = event.params.data;
+        await dragEvent('dragEnter', target);
+        // A held drag sends dragOver again and again, as the browser does while the pointer rests.
+        let opened = false;
+        for (let i = 0; i < 40 && !opened; i++) {
+          await dragEvent('dragOver', target);
+          await sleep(50);
+          opened = await app.evaluate(`${sub} !== null`);
+        }
+        if (!opened) throw new Error('Classe did not open under the drag');
+        const into = await sidebarSpot('Classe/3e B');
+        await dragEvent('dragOver', into);
+        await app.waitFor(`${sub}.classList.contains('drop')`, 'the sub-binder lit up');
+        await dragEvent('drop', into);
+        await app.mouse('mouseReleased', into.x, into.y);
+        await waitForTitles(app, ['Gamma'], 'Alpha gone from the binder');
+        const inSub = noteFiles(app.library).some((f) => f.replace(/\\/g, '/').startsWith('Classe/3e B/') && f.endsWith(' Alpha.ardoise'));
+        if (!inSub) throw new Error('Alpha is not in the folder Classe/3e B');
         await app.send('Input.setInterceptDrags', { enabled: false });
       });
     },

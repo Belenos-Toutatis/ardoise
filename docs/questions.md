@@ -425,3 +425,11 @@ Choix de l'utilisateur (2026-11-15) :
 Décisions du développeur, à confirmer : le clic sur l'étiquette d'une carte, et **Afficher** du clic droit d'une étiquette, l'ajoutent au filtre (ils ne la retirent jamais ; le clic droit offre **Retirer du filtre** quand elle y est) ; depuis la corbeille, une étiquette ramène à **Toutes les notes** ; le nombre affiché à côté de chaque étiquette de la barre latérale reste celui de toute la bibliothèque ; avec un filtre d'étiquettes, l'ordre d'un classeur ne se change pas par glisser-déposer (comme pendant une recherche) ; le filtre n'est pas gardé d'une ouverture d'Ardoise à l'autre.
 
 **SPEC** : §4.3 dit « recherche par titre et étiquettes » ; une phrase sur le filtre combiné est à proposer à l'utilisateur.
+
+## Q26 — Déposer une note dans un sous-classeur caché (2026-11-15) — **faite le 2026-11-15**
+
+Demande de l'utilisateur, mot pour mot : « Lorsque je clique et que je glisse une note vers un classeur, si je reste dessus, il faudrait que les sous-classeurs se déplient. pour que je puisse déposer dans un sous-classeur. »
+
+Décisions du développeur, à confirmer : le classeur se déplie après 0,7 s d'arrêt au-dessus de lui (un passage plus court ne déplie rien) ; il reste déplié après le dépôt, ou si le glisser s'arrête ailleurs ; seul le nom du classeur réagit, pas sa petite flèche.
+
+**SPEC** : rien ne le dit ; une phrase est à proposer à l'utilisateur s'il veut l'y voir.

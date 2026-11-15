@@ -537,6 +537,50 @@ describe('library: drag and drop', () => {
     expect(ui.q('[data-binder="Classe/3e B"] .count')?.textContent).toBe('2');
   });
 
+  it('opens a closed binder held under a drag for a moment, to drop in its sub-binder', async () => {
+    const ui = await render();
+    const sub = () => ui.q('[data-binder="Classe/3e B"]');
+    expect(sub()).toBeNull();
+    ui.open('Liste de courses').dispatchEvent(ui.drag('dragstart'));
+    await ui.settle();
+
+    // Passing over « Classe » on the way to « Perso » opens nothing.
+    ui.q('[data-binder="Classe"]')!.dispatchEvent(ui.drag('dragenter'));
+    await ui.settle();
+    ui.q('[data-binder="Perso"]')!.dispatchEvent(ui.drag('dragover'));
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    await ui.settle();
+    expect(sub()).toBeNull();
+
+    // Held over « Classe »: not at once, then its sub-binders appear.
+    ui.q('[data-binder="Classe"]')!.dispatchEvent(ui.drag('dragover'));
+    await ui.settle();
+    expect(sub()).toBeNull();
+    await vi.waitFor(() => expect(sub()).not.toBeNull(), { timeout: 2000 });
+    expect(ui.byLabel('Replier Classe').getAttribute('aria-expanded')).toBe('true');
+
+    const over = ui.drag('dragover');
+    sub()!.dispatchEvent(over);
+    expect(over.defaultPrevented).toBe(true);
+    sub()!.dispatchEvent(ui.drag('drop'));
+    await ui.settle();
+    expect(notesIn('Classe/3e B').sort()).toEqual(['Cours de physique', 'Liste de courses']);
+    // The binder opened by the drag stays open.
+    expect(sub()).not.toBeNull();
+  });
+
+  it('opens nothing when the drag ends before the moment is up', async () => {
+    const ui = await render();
+    ui.open('Liste de courses').dispatchEvent(ui.drag('dragstart'));
+    await ui.settle();
+    ui.q('[data-binder="Classe"]')!.dispatchEvent(ui.drag('dragover'));
+    await ui.settle();
+    ui.open('Liste de courses').dispatchEvent(ui.drag('dragend'));
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    await ui.settle();
+    expect(ui.q('[data-binder="Classe/3e B"]')).toBeNull();
+  });
+
   it('shows the notes in no binder under « Non classées », and takes dropped notes out of their binder', async () => {
     const ui = await render();
     const unsorted = () => ui.q('[data-view="unsorted"]')!;

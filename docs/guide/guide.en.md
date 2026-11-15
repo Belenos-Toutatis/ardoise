@@ -1065,7 +1065,8 @@ of unsaved changes that can be recovered (chapter 8).
 A binder is simply a *subfolder* of the library. Click the **New binder** icon (or **New sub-binder in…** next to a
 binder), type the **Binder name** and click **Create**. To file notes, drag them onto a binder in the sidebar, or
 right-click a note (one of the selected notes, to move several) and choose **Move to…** (**Library (root)** takes them back to
-the root).
+the root). To drop them in a hidden sub-binder, hold them a moment over its binder: it opens and shows its sub-binders (for
+example, held over **Classe**, the note brings up **3e B**, where you let it go). The binder stays open afterwards.
 
 **A filing mistake can be undone.** After each move, a message says where the notes went ("Shopping list" moved to "Perso".",
 "3 notes moved to "Classe/3e B".") and offers **Undo**; `Ctrl + Z` does the same, **even when the card has left the binder on
