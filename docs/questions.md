@@ -378,7 +378,9 @@ Décisions du développeur, à confirmer :
 - *Ce qui ne change pas* : le clic droit qui sélectionne, `Ctrl + A`, la zone de découpe (volet « Découper ») et le recadrage à la main ; rien de ce choix n'est projeté, rejoué ni exporté, et l'annulation n'y touche pas.
 - *Mode direct* (**réponse de l'utilisateur du 2026-11-15** : « En mode direct, je veux la même manière de sélectionner que pour le mode normal. Donc passage de la sélection rectangle au lasso. Si je reviens à partir d'un autre outil, que ce soit le mode de sélection précédent. ») : l'outil **Sélection** de la fenêtre de commande fait le même cycle (clic sur le bouton pendant qu'il est actif, ou `V`), avec la même règle pour ce qui est pris (`pickStrokes`, donc `selectInLasso`), `Maj` et `Ctrl` comme avant, et la façon retenue. **Conséquence, voulue par la demande** : un second appui sur Sélection ne quitte plus l'outil. On le quitte en **choisissant Stylo** (bouton ou `P`, qui bascule toujours) ; `Échap` enlève la sélection sans quitter l'outil et, sans sélection, demande de terminer le direct (inchangé). Le rectangle suit le chemin du lasso (le contour fermé de ses quatre coins passe par le même dessin de `LiveRenderer`) : il n'est jamais dans la présentation, le partage ni le flux, et le rendu du direct n'a pas changé. Le bouton du stylet n'a pas de rôle particulier dans le direct (rien à conserver). *Bouton plus court* (même réponse, point 3) : le libellé visible reste « Sélection » (« Select »), l'icône dit la façon, le nom complet (« Sélection : rectangle » / « Sélection : lasso ») reste l'infobulle et le nom accessible.
 
-## Q23 — Les actions sur les notes dans le menu de la carte, plus de barre au-dessus (2026-11-15) — **SPEC mise à jour le 2026-11-15, détails à confirmer**
+## Q23 — Les actions sur les notes dans le menu de la carte, plus de barre au-dessus (2026-11-15) — **SPEC mise à jour le 2026-11-15, essayée par l'utilisateur le 2026-11-15**
+
+**Essai à la main (2026-11-15)** : l'utilisateur a essayé la version de Program et répond « C'est bon, tout fonctionne » ; les décisions ci-dessous sont gardées telles quelles.
 
 Demande de l'utilisateur, mot pour mot : « Tout ce qui est dans les boutons en haut devrait être en fait dans le menu contextuel et ne devrait même pas apparaître en haut du coup. » (la barre « Sélection : 1 » avec **Déplacer vers…**, **Étiquettes…**, **Exporter…**, **Imprimer…**, **Assembler…**, **Dupliquer**, **Tourner**, **Mettre en favoris**, **Mettre à la corbeille**, **Désélectionner** et ses deux lignes d'aide.)
 
@@ -396,7 +398,9 @@ Décisions du développeur, à confirmer (conception : `docs/design/interface.md
 
 **SPEC mise à jour avec l'accord de l'utilisateur (2026-11-15, « Oui, écris-la »)** : §4.3, la ligne « Sélection multiple » dit maintenant que toutes les actions sur les notes sont dans le menu contextuel d'une carte, sur quoi il agit, et qu'aucune barre de boutons ne reste au-dessus des cartes. Les décisions de détail ci-dessus (deux entrées pour tourner, les fenêtres de **Déplacer vers…** et d'**Étiquettes…**, **Désélectionner** sur une carte hors sélection, le bouton **⋯**) restent à confirmer par l'essai à la main de l'utilisateur.
 
-## Q24 — Une vue « Non classées » dans la barre latérale (2026-11-15) — **à confirmer**
+## Q24 — Une vue « Non classées » dans la barre latérale (2026-11-15) — **essayée par l'utilisateur le 2026-11-15**
+
+**Essai à la main (2026-11-15)** : « C'est bon, tout fonctionne » ; les décisions ci-dessous sont gardées telles quelles.
 
 Demande de l'utilisateur, mot pour mot : « Il n'y a pas d'endroit où cliquer pour afficher que les notes non classées? Je suggère, dans la barre latérale gauche, juste en dessous de favori, de faire un emplacement Non classés. »
 
