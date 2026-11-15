@@ -232,8 +232,7 @@ reopened).
 
 ## 7. Journeys, and what a real drag can be driven with
 
-`app/e2e/journeys-q20-library.mjs` (run by `run.mjs`) covers, on the production executable in both languages: duplicating (right click,
-selection bar, undo), changing a date, the free order by keyboard (kept after a reload, followed by the editor's page buttons), exporting a
+`app/e2e/journeys-q20-library.mjs` (run by `run.mjs`) covers, on the production executable in both languages: duplicating (the card's menu, for one note or the selection, undo), changing a date, the free order by keyboard (kept after a reload, followed by the editor's page buttons), exporting a
 binder as a PDF with and without sub-binders (pages and bookmarks read from the file), and a drag.
 
 **The drag.** The protocol's mouse events never hold the real button, so the Windows drag-and-drop session (OLE) cannot be started

@@ -130,7 +130,7 @@ Pure functions on `Note` (no I/O); ids, titles and dates of new notes come from 
 
 - Editor toolbar: Split (panel with a timeline slider over the note's time range and a "zone" mode that traces a
   lasso; strokes that will move are highlighted live), Export (dialog), Copy image (clipboard).
-- Library selection bar: Export (dialog; PDF puts every selected note in one file), Assemble (≥ 2 notes: overlay
+- Library card menu (one note, or the whole selection when the card is part of it): Export (dialog; PDF puts every selected note in one file), Assemble (≥ 2 notes: overlay
   or end to end, title).
 - Settings: automatic export after sync (off / PDF / PNG, folder).
 - Browser stand-in: the new commands are routed in `lib/mock.ts` (export returns fake paths, split and merge
@@ -212,7 +212,7 @@ Pure functions on `Note` (no I/O); ids, titles and dates of new notes come from 
 - Command `print_notes(sources: ExportSource[], options: PrintOptions { background, fit: 'actual'|'fit' }) ->
   PrintResult { printed, pages }`. `printed` false = the user closed the dialog (not an error). The dialog runs on a
   blocking thread, owned by the app's window. Errors: `printFailed`, `printUnavailable`.
-- Interface: "Imprimer…" in the editor's toolbar (the note as it is in memory) and in the library selection bar, both
+- Interface: "Imprimer…" in the editor's toolbar (the note as it is in memory) and in the library card's menu, both
   opening `PrintDialog` (paper printed or not, real size or fitted to the sheet; the choices are remembered like the
   export's). It does not offer the A4 / actual choice of the PDF as such: the sheet is the printer's, chosen in
   Windows' dialog; "real size" and "fitted" are the two ways a note meets a sheet.

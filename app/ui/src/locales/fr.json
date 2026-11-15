@@ -71,13 +71,14 @@
       "open": "Ouvrir la note {title}",
       "binder": "Classeur : {binder}",
       "unsorted": "Non classée",
-      "unsortedHint": "Cette note n'est dans aucun classeur. Pour la ranger, glissez-la sur un classeur de la barre latérale, ou sélectionnez-la puis « Déplacer vers… ».",
+      "unsortedHint": "Cette note n'est dans aucun classeur. Pour la ranger, glissez-la sur un classeur de la barre latérale, ou faites un clic droit dessus puis « Déplacer vers… ».",
       "select": "Sélectionner {title}",
       "favorite": "Ajouter aux favoris",
       "unfavorite": "Retirer des favoris",
       "conflict": "Copie en conflit",
       "conflictHint": "La synchronisation a créé cette copie de « {name} » : comparez les deux versions, puis supprimez celle dont vous ne voulez pas.",
       "menu": "Actions pour {title}",
+      "menuMany": "Actions pour {count} notes sélectionnées",
       "rename": "Renommer",
       "renameLabel": "Nouveau titre de la note",
       "duplicate": "Dupliquer",
@@ -89,12 +90,13 @@
       "handle": "Glisser vers l'Explorateur, Word, un e-mail… (image PNG de la note)",
       "handleMany": "Glisser les {count} notes sélectionnées vers l'Explorateur, Word, un e-mail… (une image PNG par note)",
       "preparing": "Préparation de l'image… gardez le bouton enfoncé",
-      "preparingMany": "Préparation de {count} images… gardez le bouton enfoncé",
-      "help": "Pour envoyer les notes sélectionnées dans l'Explorateur, Word ou un e-mail (une image PNG par note), faites-les glisser par la poignée qui apparaît sur une carte."
+      "preparingMany": "Préparation de {count} images… gardez le bouton enfoncé"
     },
     "selection": {
-      "bar": "Actions sur la sélection",
-      "count": "Sélection : {count}",
+      "count": {
+        "one": "{count} note sélectionnée",
+        "other": "{count} notes sélectionnées"
+      },
       "move": "Déplacer vers…",
       "moveTo": "Déplacer vers un classeur",
       "tags": "Étiquettes…",
@@ -102,18 +104,15 @@
       "tagHint": "Séparez plusieurs étiquettes par une virgule.",
       "addTag": "Ajouter",
       "removeTag": "Retirer l'étiquette {tag}",
-      "tagsOfSelection": "Étiquettes de la sélection",
       "existingTags": "Étiquettes existantes",
-      "favorite": "Mettre en favoris",
-      "unfavorite": "Retirer des favoris",
-      "trash": "Mettre à la corbeille",
       "clear": "Désélectionner",
-      "help": "Ctrl+clic : ajouter ou retirer une note · Maj+clic : sélectionner une plage · Échap : tout désélectionner",
       "export": "Exporter…",
       "print": "Imprimer…",
-      "assemble": "Assembler…",
-      "duplicate": "Dupliquer",
-      "assembleNeeds": "Sélectionnez au moins deux notes pour les assembler."
+      "assemble": "Assembler…"
+    },
+    "tagsDialog": {
+      "title": "Étiquettes",
+      "ofNotes": "Étiquettes de ces notes"
     },
     "summary": {
       "button": "Sommaire",
@@ -296,11 +295,8 @@
       "undoError": "L'étiquette n'a pas pu être retirée : {message}"
     },
     "turn": {
-      "button": "Tourner",
-      "panel": "Tourner les notes sélectionnées",
-      "left": "Un quart de tour à gauche",
-      "right": "Un quart de tour à droite",
-      "hint": "La feuille, l'écriture et l'image de fond tournent ensemble, comme avec « Tourner la feuille avec l'écriture » dans l'éditeur.",
+      "menuLeft": "Tourner à gauche",
+      "menuRight": "Tourner à droite",
       "progress": "Rotation des notes : {done} sur {total}",
       "undoProgress": "Retour des notes dans leur sens d'origine : {done} sur {total}",
       "doneLeft": {
@@ -2121,7 +2117,6 @@
       "hint": "Reprend le mode direct sur cette feuille : ce que vous écrivez sur la tablette s'ajoute à la note.",
       "noTablet": "Reprendre en mode direct demande une tablette enregistrée : enregistrez-la depuis le panneau de la tablette.",
       "tabletBusy": "La tablette est occupée (synchronisation ou enregistrement en cours).",
-      "severalSelected": "Sélectionnez une seule note pour reprendre le mode direct.",
       "failed": "Le mode direct n'a pas pu reprendre cette feuille.",
       "back": "Retour à la bibliothèque",
       "cannotTurn": "Cette page ne se tourne pas avec la tablette : c'est une feuille reprise, ou une page écrite sur une image. Une nouvelle page suivra de nouveau la position de la tablette.",

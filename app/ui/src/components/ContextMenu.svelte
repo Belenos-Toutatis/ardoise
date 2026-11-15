@@ -10,7 +10,8 @@
    * the focus on its first entry. The arrow keys, Home and End move between the entries, Enter or Space chooses, Escape
    * closes and gives the focus back (to `returnTo`, else to where it was); a click or a right click elsewhere, a scroll,
    * a resize or the window losing the focus close it without. A disabled entry stays focusable (its `hint` is its
-   * title) and does nothing. The screens give it the entries and own what they do; nothing here knows a command.
+   * title) and does nothing. A `heading` is a line of text above the entries (what the menu acts on), not an entry. The
+   * screens give it the entries and own what they do; nothing here knows a command.
    */
   import { onMount } from 'svelte';
   import { clampToWindow, type MenuItem, type Point } from '../lib/context-menu';
@@ -18,6 +19,7 @@
   let {
     label,
     items,
+    heading,
     at,
     onclose,
     returnTo = null,
@@ -25,9 +27,14 @@
     /** What the menu is for, for a screen reader (« Menu de la note … »). */
     label: string;
     items: MenuItem[];
+    /** A line above the entries, which one cannot choose (« 3 notes sélectionnées »). */
+    heading?: string;
     at: Point;
-    /** The menu closed itself (Escape, an entry chosen, a click elsewhere…): the owner forgets it. */
-    onclose: () => void;
+    /**
+     * The menu closed itself (Escape, an entry chosen, a click elsewhere…): the owner forgets it. `onTrigger` is true when
+     * the press that closed it was on `returnTo` (the button that opens it): the click that follows must not open it again.
+     */
+    onclose: (onTrigger?: boolean) => void;
     /** Where Escape and a chosen entry give the focus back; default: the element that had it when the menu opened. */
     returnTo?: HTMLElement | null;
   } = $props();
@@ -41,7 +48,7 @@
   const entries = () => [...(list?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
 
   /** Closes the menu: `refocus` gives the focus back (Escape, an entry chosen); a click elsewhere leaves it where it went. */
-  function finish(refocus: boolean) {
+  function finish(refocus: boolean, onTrigger = false) {
     if (closed) return;
     closed = true;
     detach();
@@ -50,12 +57,13 @@
       const back = returnTo?.isConnected ? returnTo : previous?.isConnected ? previous : null;
       back?.focus({ preventScroll: true });
     }
-    onclose();
+    onclose(onTrigger);
   }
   const finishOpen = () => finish(false);
 
   const outside = (event: Event) => {
-    if (!(event.target instanceof Node) || !list?.contains(event.target)) finish(false);
+    if (event.target instanceof Node && list?.contains(event.target)) return;
+    finish(false, event.type === 'pointerdown' && event.target instanceof Node && !!returnTo?.contains(event.target));
   };
   const shut = () => finish(false);
 
@@ -133,6 +141,7 @@
   style:top="{(spot ?? at).y}px"
   {onkeydown}
 >
+  {#if heading}<div class="menu-heading" role="presentation">{heading}</div>{/if}
   {#each items as item (item.id)}
     {#if item.separatorBefore}<div class="separator" role="separator"></div>{/if}
     <button
@@ -163,6 +172,13 @@
 
   .context-menu:focus {
     outline: none;
+  }
+
+  .menu-heading {
+    padding: 0.35rem 0.7rem 0.3rem;
+    color: var(--muted);
+    font-size: 0.8125rem;
+    font-weight: 600;
   }
 
   .separator {

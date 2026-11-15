@@ -4,6 +4,7 @@ import { expect, vi } from 'vitest';
 import type { AppState } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
 import Home from '../Home.svelte';
+import { cardMenuLabels, chooseFromCardMenu, openCardMenu } from './card-menu-test-helpers';
 
 export const ROOT = 'C:\\demo\\Ardoise';
 
@@ -35,6 +36,8 @@ export async function renderHome(locale: 'fr' | 'en' = 'fr', expected = 3, props
   const destroy = () => {
     unmount(component);
     target.remove();
+    // A card's menu is moved to the end of the document: it does not go with the screen.
+    document.body.querySelectorAll('.context-menu').forEach((menu) => menu.remove());
   };
   const q = <T extends Element = HTMLElement>(selector: string) => target.querySelector<T>(selector);
   const all = <T extends Element = HTMLElement>(selector: string) => [...target.querySelectorAll<T>(selector)];
@@ -81,8 +84,14 @@ export async function renderHome(locale: 'fr' | 'en' = 'fr', expected = 3, props
   const select = async (...names: string[]) => {
     for (const name of names) await click(card(name).querySelector('.card-open'), { ctrlKey: true });
   };
+  /** Opens the menu of the card `title` with a right click. */
+  const openMenu = (title: string) => openCardMenu(card(title), settle);
+  /** The labels of the entries of the open menu. */
+  const menuEntries = cardMenuLabels;
+  /** Opens the menu of the card `title` and chooses `label`: the way every action on the selection is made. */
+  const choose = (title: string, label: string) => chooseFromCardMenu(card(title), label, settle);
   const text = () => target.textContent ?? '';
   await vi.waitFor(() => expect(q('.library-section .loading')).toBeNull());
   await vi.waitFor(() => expect(all('.note-card').length).toBe(expected));
-  return { target, onchange, destroy, q, all, titles, card, settle, click, button, byLabel, type, key, select, text };
+  return { target, onchange, destroy, q, all, titles, card, settle, click, button, byLabel, type, key, select, text, openMenu, menuEntries, choose };
 }

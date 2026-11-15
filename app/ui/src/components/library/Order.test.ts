@@ -5,6 +5,7 @@ import { api } from '../../lib/api';
 import { freshStamp, mockLibrary, notePath, notifyLibraryChanged, resetMockLibrary, fileName, type StoredNote } from '../../lib/mock-data';
 import { mockExportRequest, mockPrint } from '../../lib/mock-export';
 import type { Note } from '../../lib/note';
+import { cardMenuEntry, cardMenuLabels, openCardMenu } from './card-menu-test-helpers';
 import { ROOT, renderHome, type Ui } from './library-test-helpers';
 
 let ui: Ui | null = null;
@@ -390,8 +391,7 @@ describe('the free order of a binder: dragging between the cards', () => {
 describe('duplicating a note', () => {
   /** Opens the menu of a card with the right click. */
   async function rightClick(view: Ui, title: string) {
-    view.card(title).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    await view.settle();
+    await openCardMenu(view.card(title), view.settle);
   }
 
   it('is in the right-click menu of a card: same binder, same date, « (copie) », not a favourite, with an undo', async () => {
@@ -399,14 +399,21 @@ describe('duplicating a note', () => {
     // The demo note "Liste de courses" is a favourite and has no binder.
     const before = view.card('Liste de courses').querySelector('.card-date')?.textContent;
     await rightClick(view, 'Liste de courses');
-    const menu = view.q('[role="menu"]');
+    const menu = document.querySelector<HTMLElement>('[role="menu"]');
     expect(menu).not.toBeNull();
+    // Every action on a note is here: one note, so Renommer and Changer la date… are in, « Assembler… » is not.
     expect([...menu!.querySelectorAll('[role="menuitem"]')].map((i) => i.textContent?.trim())).toEqual([
       'Renommer',
-      'Retirer des favoris',
       'Reprendre en mode direct',
-      'Dupliquer',
+      'Déplacer vers…',
+      'Étiquettes…',
+      'Retirer des favoris',
       'Changer la date…',
+      'Exporter…',
+      'Imprimer…',
+      'Dupliquer',
+      'Tourner à gauche',
+      'Tourner à droite',
       'Mettre à la corbeille',
     ]);
     await view.click(view.button('Dupliquer', menu!));
@@ -435,21 +442,22 @@ describe('duplicating a note', () => {
     await view.key(view.card('Beta').querySelector('.card-open'), 'ArrowLeft', { altKey: true });
     expect(orderOf('Classe')).toEqual([idOf('Beta'), idOf('Alpha'), idOf('Gamma')]);
     await rightClick(view, 'Alpha');
-    await view.click(view.button('Dupliquer', view.q('[role="menu"]')!));
+    await view.click(view.button('Dupliquer', document.querySelector<HTMLElement>('[role="menu"]')!));
     await vi.waitFor(() => expect(view.titles()).toContain('Alpha (copie)'));
     expect(view.titles()).toEqual(['Beta', 'Alpha', 'Alpha (copie)', 'Gamma', 'Cours de physique']);
     await rightClick(view, 'Alpha (copie)');
-    await view.click(view.button('Dupliquer', view.q('[role="menu"]')!));
+    await view.click(view.button('Dupliquer', document.querySelector<HTMLElement>('[role="menu"]')!));
     await vi.waitFor(() => expect(view.titles()).toContain('Alpha (copie 2)'));
   });
 
-  it('is in the selection bar, between « Assembler… » and « Tourner », for several notes', async () => {
+  it('is in the menu of a selected card, between « Assembler… » and « Tourner », and copies every selected note', async () => {
     const view = await render('fr', 3);
     await view.select('Liste de courses', 'Réunion parents');
-    const labels = [...view.all('.selection-bar > button')].map((b) => b.textContent?.trim());
+    await view.openMenu('Réunion parents');
+    const labels = cardMenuLabels();
     expect(labels.indexOf('Dupliquer')).toBe(labels.indexOf('Assembler…') + 1);
-    expect(labels.indexOf('Tourner')).toBe(labels.indexOf('Dupliquer') + 1);
-    await view.click(view.button('Dupliquer', view.q('.selection-bar')!));
+    expect(labels.indexOf('Tourner à gauche')).toBe(labels.indexOf('Dupliquer') + 1);
+    await view.click(cardMenuEntry('Dupliquer'));
     await vi.waitFor(() => expect(view.titles().length).toBe(5));
     expect(view.titles()).toContain('Liste de courses (copie)');
     expect(view.titles()).toContain('Réunion parents (copie)');
@@ -462,33 +470,29 @@ describe('duplicating a note', () => {
   it('is in English, with the English copy word', async () => {
     const view = await render('en', 3);
     await rightClick(view, 'Réunion parents');
-    await view.click(view.button('Duplicate', view.q('[role="menu"]')!));
+    await view.click(view.button('Duplicate', document.querySelector<HTMLElement>('[role="menu"]')!));
     await vi.waitFor(() => expect(view.titles()).toContain('Réunion parents (copy)'));
   });
 
   it('keeps one menu open: the right click on another card closes the first one', async () => {
     const view = await render('fr', 3);
     await rightClick(view, 'Liste de courses');
-    expect(view.all('[role="menu"]').length).toBe(1);
+    expect(document.querySelectorAll('[role="menu"]').length).toBe(1);
     await rightClick(view, 'Réunion parents');
-    expect(view.all('[role="menu"]').length).toBe(1);
-    expect(view.card('Réunion parents').querySelector('[role="menu"]')).not.toBeNull();
-    expect(view.card('Liste de courses').querySelector('[role="menu"]')).toBeNull();
+    expect(document.querySelectorAll('[role="menu"]').length).toBe(1);
+    expect(document.querySelector<HTMLElement>('[role="menu"]')!.getAttribute('aria-label')).toBe('Actions pour Réunion parents');
   });
 
   it('opens the menu from the keyboard too: the button of the card', async () => {
     const view = await render('fr', 3);
     await view.click(view.byLabel('Actions pour Liste de courses'));
-    expect(view.q('[role="menu"]')).not.toBeNull();
-    expect(view.button('Dupliquer', view.q('[role="menu"]')!)).toBeTruthy();
+    expect(document.querySelector<HTMLElement>('[role="menu"]')).not.toBeNull();
   });
 });
 
 describe('changing the date of a note', () => {
   async function openDateDialog(view: Ui, title: string) {
-    view.card(title).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    await view.settle();
-    await view.click(view.button('Changer la date…', view.q('[role="menu"]')!));
+    await view.choose(title, 'Changer la date…');
   }
 
   const field = (view: Ui) => view.q<HTMLInputElement>('[data-dialog="change-date"] input[type="datetime-local"]')!;
@@ -542,9 +546,7 @@ describe('changing the date of a note', () => {
   it('shows the library error and stays open', async () => {
     const view = await render('en', 3);
     vi.spyOn(api, 'setNoteCreated').mockRejectedValueOnce({ code: 'invalidDate', message: 'x' });
-    view.card('Réunion parents').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    await view.settle();
-    await view.click(view.button('Change the date…', view.q('[role="menu"]')!));
+    await view.choose('Réunion parents', 'Change the date…');
     await view.type(field(view), '2025-03-04T12:30');
     await view.click(view.q('[data-action="date-apply"]'));
     expect(view.q('[data-dialog="change-date"] [role="alert"]')?.textContent).toContain('cannot be a note');

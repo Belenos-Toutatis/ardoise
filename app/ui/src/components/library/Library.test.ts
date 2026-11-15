@@ -5,6 +5,7 @@ import { api, type AppState } from '../../lib/api';
 import { setLocale, t } from '../../lib/i18n.svelte';
 import { fileName, freshStamp, mockLibrary, notePath, notifyLibraryChanged, resetMockLibrary } from '../../lib/mock-data';
 import { mockProblems } from '../../lib/mock-library';
+import { cardMenuLabels, chooseFromCardMenu, openCardMenu } from './card-menu-test-helpers';
 import Home from '../Home.svelte';
 
 const app: AppState = {
@@ -46,6 +47,7 @@ async function render(locale: 'fr' | 'en' = 'fr', expected = 3) {
   cleanup = () => {
     unmount(component);
     target.remove();
+    document.body.querySelectorAll('.context-menu').forEach((menu) => menu.remove());
   };
   const q = <T extends Element = HTMLElement>(selector: string) => target.querySelector<T>(selector);
   const all = <T extends Element = HTMLElement>(selector: string) => [...target.querySelectorAll<T>(selector)];
@@ -94,7 +96,10 @@ async function render(locale: 'fr' | 'en' = 'fr', expected = 3) {
   };
   await vi.waitFor(() => expect(q('.library-section .loading')).toBeNull());
   await vi.waitFor(() => expect(all('.note-card').length).toBe(expected));
-  return { target, q, all, titles, card, open, byLabel, button, click, settle, type, key, view, drag };
+  /** Opens the menu of the card `title` and chooses `label`: every action on the selection is made there. */
+  const choose = (title: string, label: string) => chooseFromCardMenu(card(title), label, settle);
+  const openMenu = (title: string) => openCardMenu(card(title), settle);
+  return { target, q, all, titles, card, open, byLabel, button, click, settle, type, key, view, drag, choose, openMenu };
 }
 
 class DataTransferStub {
@@ -289,22 +294,33 @@ describe('library: search and sort', () => {
 });
 
 describe('library: selection, moving, trash', () => {
-  it('selects with Ctrl- and Shift-click and shows the selection bar', async () => {
+  it('selects with Ctrl- and Shift-click and says how many notes are selected, with no bar of buttons', async () => {
     const ui = await render();
+    const count = () => ui.q('.selection-count');
     expect(ui.q('.selection-bar')).toBeNull();
+    expect(count()?.textContent).toBe('');
     await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
-    expect(ui.q('.selection-count')?.textContent).toBe('Sélection : 1');
-    // The bar says how to change the selection.
-    expect(ui.q('.selection-help')?.textContent).toBe(
-      'Ctrl+clic : ajouter ou retirer une note · Maj+clic : sélectionner une plage · Échap : tout désélectionner',
-    );
+    // The count is a polite live region next to the title; the actions are in the menu of a card.
+    expect(count()?.textContent).toBe('1 note sélectionnée');
+    expect(count()?.getAttribute('role')).toBe('status');
+    expect(count()?.getAttribute('aria-live')).toBe('polite');
+    expect(ui.q('.selection-bar')).toBeNull();
     await ui.click(ui.open('Cours de physique'), { shiftKey: true });
-    expect(ui.q('.selection-count')?.textContent).toBe('Sélection : 3');
+    expect(count()?.textContent).toBe('3 notes sélectionnées');
     expect(ui.all('.note-card.selected').length).toBe(3);
     await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
-    expect(ui.q('.selection-count')?.textContent).toBe('Sélection : 2');
-    await ui.click(ui.button('Désélectionner'));
-    expect(ui.q('.selection-bar')).toBeNull();
+    expect(count()?.textContent).toBe('2 notes sélectionnées');
+    await ui.choose('Réunion parents', 'Désélectionner');
+    expect(count()?.textContent).toBe('');
+    expect(ui.all('.note-card.selected').length).toBe(0);
+  });
+
+  it('says the count in English', async () => {
+    const ui = await render('en');
+    await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
+    expect(ui.q('.selection-count')?.textContent).toBe('1 note selected');
+    await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
+    expect(ui.q('.selection-count')?.textContent).toBe('2 notes selected');
   });
 
   it('selects a range with Shift on the boxes, and from the first note when nothing was chosen', async () => {
@@ -313,10 +329,10 @@ describe('library: selection, moving, trash', () => {
     // Nothing chosen yet: the range starts at the first note shown.
     await ui.click(ui.open('Liste de courses'), { shiftKey: true });
     expect(ui.all('.note-card.selected').length).toBe(2);
-    await ui.click(ui.button('Désélectionner'));
+    await ui.choose('Réunion parents', 'Désélectionner');
     // A box ticked, then Shift on another box: the notes between them too.
     await ui.click(box('Réunion parents'));
-    expect(ui.q('.selection-count')?.textContent).toBe('Sélection : 1');
+    expect(ui.q('.selection-count')?.textContent).toBe('1 note sélectionnée');
     expect(box('Réunion parents').checked).toBe(true);
     await ui.click(box('Cours de physique'), { shiftKey: true });
     expect(ui.all('.note-card.selected').length).toBe(3);
@@ -334,7 +350,7 @@ describe('library: selection, moving, trash', () => {
     search.dispatchEvent(typed);
     await ui.settle();
     expect(typed.defaultPrevented).toBe(false);
-    expect(ui.q('.selection-bar')).toBeNull();
+    expect(ui.q('.selection-count')?.textContent).toBe('');
     // Anywhere else: every note shown, and the window's text is left alone.
     const all = new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true });
     document.body.dispatchEvent(all);
@@ -344,7 +360,7 @@ describe('library: selection, moving, trash', () => {
     await ui.key(search, 'Escape');
     expect(ui.all('.note-card.selected').length).toBe(3);
     await ui.key(document.body, 'Escape');
-    expect(ui.q('.selection-bar')).toBeNull();
+    expect(ui.q('.selection-count')?.textContent).toBe('');
   });
 
   it('selects and navigates with the keyboard', async () => {
@@ -352,7 +368,7 @@ describe('library: selection, moving, trash', () => {
     const first = ui.open('Réunion parents');
     first.focus();
     await ui.key(first, ' ');
-    expect(ui.q('.selection-count')?.textContent).toBe('Sélection : 1');
+    expect(ui.q('.selection-count')?.textContent).toBe('1 note sélectionnée');
     await ui.key(first, 'ArrowRight');
     expect(document.activeElement).toBe(ui.open('Liste de courses'));
     await ui.key(document.activeElement!, 'ArrowRight', { shiftKey: true });
@@ -364,24 +380,25 @@ describe('library: selection, moving, trash', () => {
     await ui.key(first, 'a', { ctrlKey: true });
     expect(ui.all('.note-card.selected').length).toBe(3);
     await ui.key(first, 'Escape');
-    expect(ui.q('.selection-bar')).toBeNull();
+    expect(ui.q('.selection-count')?.textContent).toBe('');
   });
 
   it('moves the selection to a binder with the picker', async () => {
     const ui = await render();
     await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
     await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
-    await ui.click(ui.button('Déplacer vers…'));
-    await ui.click(ui.q('.selection-panel [data-binder="Classe"]')!);
+    await ui.choose('Réunion parents', 'Déplacer vers…');
+    await ui.click(ui.q('[data-dialog="move"] [data-binder="Classe"]')!);
     expect(notesIn('Classe').sort()).toEqual(['Liste de courses', 'Réunion parents']);
-    expect(ui.q('.selection-bar')).toBeNull();
+    expect(ui.q('[data-dialog="move"]')).toBeNull();
+    expect(ui.q('.selection-count')?.textContent).toBe('');
   });
 
   it('moves several notes to the trash, then restores one from the trash view', async () => {
     const ui = await render();
     await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
     await ui.click(ui.open('Cours de physique'), { ctrlKey: true });
-    await ui.click(ui.button('Mettre à la corbeille'));
+    await ui.choose('Réunion parents', 'Mettre à la corbeille');
     expect(ui.titles()).toEqual(['Liste de courses']);
     expect(ui.q('[data-view="trash"] .count')?.textContent).toBe('2');
 
@@ -419,7 +436,7 @@ describe('library: selection, moving, trash', () => {
     const ui = await render();
     await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
     await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
-    await ui.click(ui.button('Mettre à la corbeille'));
+    await ui.choose('Réunion parents', 'Mettre à la corbeille');
     await ui.view('[data-view="trash"]');
 
     await ui.click(ui.button('Vider la corbeille'));
@@ -438,7 +455,7 @@ describe('library: selection, moving, trash', () => {
   it('empties only the notes the confirmation showed', async () => {
     const ui = await render();
     await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
-    await ui.click(ui.button('Mettre à la corbeille'));
+    await ui.choose('Réunion parents', 'Mettre à la corbeille');
     await ui.view('[data-view="trash"]');
     await ui.click(ui.button('Vider la corbeille'));
     expect(ui.q('[role="alertdialog"]')?.textContent).toContain('Supprimer définitivement');
@@ -567,7 +584,7 @@ describe('library: favourites, tags, rename, conflicts', () => {
     const ui = await render();
     await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
     await ui.click(ui.open('Cours de physique'), { ctrlKey: true });
-    await ui.click(ui.button('Étiquettes…'));
+    await ui.choose('Liste de courses', 'Étiquettes…');
     await ui.type(ui.byLabel('Ajouter une étiquette') as HTMLInputElement, 'urgent, maison');
     await ui.click(ui.button('Ajouter'));
     const tagsOf = (title: string) => [...mockLibrary().notes.values()].find((s) => s.note.title === title)!.note.tags;
@@ -584,17 +601,16 @@ describe('library: favourites, tags, rename, conflicts', () => {
     const ui = await render();
     await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
     await ui.click(ui.open('Cours de physique'), { ctrlKey: true });
-    await ui.click(ui.button('Mettre en favoris'));
+    await ui.choose('Réunion parents', 'Ajouter aux favoris');
     expect([...mockLibrary().notes.values()].every((s) => s.note.favorite)).toBe(true);
-    await ui.click(ui.button('Retirer des favoris', ui.q('.selection-bar')!));
+    await ui.choose('Réunion parents', 'Retirer des favoris');
     // Only the two selected notes were taken out; the one that was already a favourite stays.
     expect([...mockLibrary().notes.values()].filter((s) => s.note.favorite).map((s) => s.note.title)).toEqual(['Liste de courses']);
   });
 
   it('renames a note from its menu', async () => {
     const ui = await render();
-    await ui.click(ui.byLabel('Actions pour Liste de courses'));
-    await ui.click(ui.button('Renommer'));
+    await ui.choose('Liste de courses', 'Renommer');
     const input = ui.q<HTMLInputElement>('.rename-input')!;
     expect(input.value).toBe('Liste de courses');
     await ui.type(input, 'Courses de la semaine');
@@ -606,8 +622,7 @@ describe('library: favourites, tags, rename, conflicts', () => {
 
   it('cancels a rename with Escape', async () => {
     const ui = await render();
-    await ui.click(ui.byLabel('Actions pour Liste de courses'));
-    await ui.click(ui.button('Renommer'));
+    await ui.choose('Liste de courses', 'Renommer');
     const input = ui.q<HTMLInputElement>('.rename-input')!;
     await ui.type(input, 'Autre');
     await ui.key(input, 'Escape');
@@ -747,7 +762,7 @@ describe('library: export and assemble the selection', () => {
     await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
     await ui.click(ui.open('Cours de physique'), { ctrlKey: true });
     await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
-    await ui.click(ui.button('Exporter…'));
+    await ui.choose('Réunion parents', 'Exporter…');
     const dialog = ui.q('[role="dialog"]')!;
     expect(dialog.textContent).toContain('Notes sélectionnées : 3');
 
@@ -768,14 +783,14 @@ describe('library: export and assemble the selection', () => {
     await ui.click(ui.button('Fermer', dialog));
     expect(ui.q('[role="dialog"]')).toBeNull();
     // The selection is still there.
-    expect(ui.q('.selection-count')?.textContent).toBe('Sélection : 3');
+    expect(ui.q('.selection-count')?.textContent).toBe('3 notes sélectionnées');
   });
 
   it('exports one selected note to a file named after it', async () => {
     const spy = vi.spyOn(api, 'exportNotes');
     const ui = await render();
     await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
-    await ui.click(ui.button('Exporter…'));
+    await ui.choose('Liste de courses', 'Exporter…');
     const dialog = ui.q('[role="dialog"]')!;
     expect(dialog.textContent).toContain('Note : Liste de courses');
     await ui.click(ui.button('Exporter…', dialog));
@@ -786,7 +801,7 @@ describe('library: export and assemble the selection', () => {
   it('closes the export dialog with Escape', async () => {
     const ui = await render();
     await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
-    await ui.click(ui.button('Exporter…'));
+    await ui.choose('Liste de courses', 'Exporter…');
     await ui.key(ui.q('[role="dialog"]')!, 'Escape');
     expect(ui.q('[role="dialog"]')).toBeNull();
   });
@@ -794,7 +809,7 @@ describe('library: export and assemble the selection', () => {
   it('closes the export dialog with Escape when the focus is on the page', async () => {
     const ui = await render();
     await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
-    await ui.click(ui.button('Exporter…'));
+    await ui.choose('Liste de courses', 'Exporter…');
     (document.activeElement as HTMLElement | null)?.blur();
     await ui.key(document.body, 'Escape');
     expect(ui.q('[role="dialog"]')).toBeNull();
@@ -803,10 +818,12 @@ describe('library: export and assemble the selection', () => {
   it('offers to assemble only from two notes', async () => {
     const ui = await render();
     await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
-    expect(ui.button('Assembler…').disabled).toBe(true);
-    expect(ui.button('Assembler…').title).toBe('Sélectionnez au moins deux notes pour les assembler.');
+    await ui.openMenu('Liste de courses');
+    expect(cardMenuLabels()).not.toContain('Assembler…');
+    await ui.key(document.activeElement!, 'Escape');
     await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
-    expect(ui.button('Assembler…').disabled).toBe(false);
+    await ui.openMenu('Liste de courses');
+    expect(cardMenuLabels()).toContain('Assembler…');
   });
 
   it('assembles the oldest note first, end to end, and selects the new note', async () => {
@@ -815,7 +832,7 @@ describe('library: export and assemble the selection', () => {
     // Clicked newest first; the assembly goes oldest first.
     await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
     await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
-    await ui.click(ui.button('Assembler…'));
+    await ui.choose('Réunion parents', 'Assembler…');
     const dialog = ui.q('[role="dialog"]')!;
     expect(dialog.textContent).toContain('Notes à assembler : 2');
     const title = dialog.querySelector<HTMLInputElement>('input[type="text"]')!;
@@ -830,7 +847,7 @@ describe('library: export and assemble the selection', () => {
     expect(ui.q('[role="dialog"]')).toBeNull();
     await vi.waitFor(() => expect(ui.titles()).toContain('Deux pages'));
     // The new note is the selection, and a confirmation says so.
-    expect(ui.q('.selection-count')?.textContent).toBe('Sélection : 1');
+    expect(ui.q('.selection-count')?.textContent).toBe('1 note sélectionnée');
     expect(ui.card('Deux pages').classList.contains('selected')).toBe(true);
     expect(ui.q('.notice')?.textContent).toContain('Nouvelle note créée : Deux pages');
     // It lives in the first note's binder, and holds both notes' strokes on a long page.
@@ -850,7 +867,7 @@ describe('library: export and assemble the selection', () => {
     const ui = await render();
     await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
     await ui.click(ui.open('Cours de physique'), { ctrlKey: true });
-    await ui.click(ui.button('Assembler…'));
+    await ui.choose('Liste de courses', 'Assembler…');
     const dialog = ui.q('[role="dialog"]')!;
     expect(dialog.querySelector<HTMLInputElement>('input[type="text"]')!.value).toBe('Cours de physique (assemblage)');
     await ui.click(ui.button('Assembler', dialog));
@@ -869,7 +886,7 @@ describe('library: export and assemble the selection', () => {
     await vi.waitFor(() => expect(ui.all('.note-card').length).toBe(4));
     await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
     await ui.click(ui.all<HTMLElement>('.note-card .card-open').at(-1)!, { ctrlKey: true });
-    await ui.click(ui.button('Assembler…'));
+    await ui.choose('Liste de courses', 'Assembler…');
     const value = ui.q('[role="dialog"]')!.querySelector<HTMLInputElement>('input[type="text"]')!.value;
     expect(value).toMatch(/2020 \(assemblage\)$/);
     expect(value).not.toContain(':');
@@ -880,7 +897,7 @@ describe('library: export and assemble the selection', () => {
     const ui = await render();
     await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
     await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
-    await ui.click(ui.button('Assembler…'));
+    await ui.choose('Réunion parents', 'Assembler…');
     const dialog = ui.q('[role="dialog"]')!;
     await ui.click(ui.button('Assembler', dialog));
     expect(dialog.querySelector('[role="alert"]')?.textContent).toContain("Impossible d'assembler les notes : la page obtenue serait trop grande");
@@ -895,8 +912,10 @@ describe('library: export and assemble the selection', () => {
     const ui = await render('en');
     await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
     await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
-    expect(ui.button('Export…')).toBeTruthy();
-    await ui.click(ui.button('Assemble…'));
+    await ui.openMenu('Réunion parents');
+    expect(cardMenuLabels()).toEqual(expect.arrayContaining(['Export…', 'Assemble…']));
+    await ui.key(document.activeElement!, 'Escape');
+    await ui.choose('Réunion parents', 'Assemble…');
     const dialog = ui.q('[role="dialog"]')!;
     expect(dialog.querySelector('h2')?.textContent).toBe('Assemble notes');
     expect(dialog.textContent).toContain('Overlay on one page');

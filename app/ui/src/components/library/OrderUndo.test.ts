@@ -359,9 +359,9 @@ describe('the order of the undos', () => {
     seedClasse();
     const view = await render();
     await move(view, 'Gamma', 'ArrowLeft');
-    // Duplicate Delta from the selection bar.
+    // Duplicate Delta from its card menu.
     await view.select('Delta');
-    await view.click(view.button('Dupliquer', view.q('.selection-bar')!));
+    await view.choose(view.q('.note-card.selected .card-title')!.textContent!.trim(), 'Dupliquer');
     await vi.waitFor(() => expect(view.titles()).toContain('Delta (copie)'));
     await ctrlZ(view);
     await vi.waitFor(() => expect(view.titles()).not.toContain('Delta (copie)'));
@@ -398,7 +398,7 @@ describe('every undo of the library says what it undid', () => {
     const view = ui;
     // The trash.
     await view.select('Liste de courses');
-    await view.click(view.button('Mettre à la corbeille', view.q('.selection-bar')!));
+    await view.choose(view.q('.note-card.selected .card-title')!.textContent!.trim(), 'Mettre à la corbeille');
     await ctrlZ(view);
     await vi.waitFor(() => expect(view.titles()).toContain('Liste de courses'));
     const last = () => view.all('.activity-offer').at(-1)!;
@@ -407,7 +407,7 @@ describe('every undo of the library says what it undid', () => {
     expect(last().getAttribute('aria-live')).toBe('polite');
     // A copy.
     await view.select('Liste de courses');
-    await view.click(view.button('Dupliquer', view.q('.selection-bar')!));
+    await view.choose(view.q('.note-card.selected .card-title')!.textContent!.trim(), 'Dupliquer');
     await vi.waitFor(() => expect(view.titles()).toContain('Liste de courses (copie)'));
     await ctrlZ(view);
     await vi.waitFor(() => expect(view.titles()).not.toContain('Liste de courses (copie)'));
