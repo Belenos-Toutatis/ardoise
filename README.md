@@ -86,7 +86,8 @@ en conflit, ce qui lui permet de fonctionner avec Nextcloud sur plusieurs ordina
 - **Recherche** dans les titres, les étiquettes, les signets, les textes tapés, le code des équations et l'**écriture
   manuscrite** (reconnaissance d'écriture de Windows, hors connexion).
 - Dupliquer une note, **changer sa date**, tourner ou assembler plusieurs notes, créer une note depuis un PDF ou une
-  image, menus contextuels au clic droit.
+  image, menus contextuels au clic droit. Toutes les actions sur les notes sont dans le menu de leur carte (clic droit,
+  bouton ⋯, touche Menu, appui long) : sur une carte sélectionnée, il agit sur toute la sélection.
 - **Sommaire d'un classeur** : ses sous-classeurs, ses notes et leurs signets, au choix, d'un clic jusqu'à l'endroit voulu
   de la note.
 
@@ -192,10 +193,12 @@ pour Windows. Le code est public. Les essais ci-dessous disent honnêtement ce q
   poignées (souris et stylet), la palette grecque (alors une fenêtre en surimpression), la question posée avant d'abandonner
   une équation, `Échap` qui demande avant de quitter l'éditeur, `Ctrl + Z` après un rangement des cartes et l'export d'une
   note avec du texte tapé.
-- **Ajoutés le 15 novembre 2026, pas encore essayés à la main** : l'onglet **Caractères** du panneau de côté (qui a
-  remplacé cette palette), la sélection au rectangle ou au lasso avec sa mémoire et dans le mode direct, l'annulation d'un
-  déplacement vers un autre classeur ou d'un dépôt sur **Favoris** ou une étiquette ; vérifiés par des tests automatiques
-  et des parcours seulement.
+- **Ajoutés et essayés à la main le 15 novembre 2026**, sans compte rendu détaillé : l'onglet **Caractères** du
+  panneau de côté (qui a remplacé cette palette), la sélection au rectangle ou au lasso avec sa mémoire et dans le mode
+  direct, l'annulation d'un déplacement vers un autre classeur ou d'un dépôt sur **Favoris** ou une étiquette.
+- **Ajouté le 15 novembre 2026, pas encore essayé à la main** : le menu de la carte qui porte toutes les actions sur les
+  notes (il a remplacé la barre de boutons au-dessus des cartes) ; vérifié par des tests automatiques et des parcours
+  seulement.
 - **Le reste** (bibliothèque, édition, relecture, exports, import d'Inkspace) est vérifié sous Windows par des tests
   automatiques sur le vrai exécutable, en français et en anglais. Jamais essayés à la main : l'export Word ouvert dans
   Word, l'import avec Inkspace ouvert, la fermeture de session de Windows avec une note non enregistrée. Windows 10 n'a
@@ -352,7 +355,9 @@ is in French and English. The pictures below show the demo library and simulated
 
 - **Library and editor**: binders, free order, coloured tags, favourites, search (titles, tags, bookmarks, typed text,
   handwriting through Windows' offline recognition), `Ctrl + Z` also undoing a rearrangement of a binder's cards, a move
-  of notes to another binder (even after you changed binder) and a drop onto "Favourites" or a tag; seven
+  of notes to another binder (even after you changed binder) and a drop onto "Favourites" or a tag; every action on
+  notes is in the menu of their card (right click, the ⋯ button, the Menu key, a long press), which acts on the whole
+  selection when the card is part of it; seven
   pressure-sensitive inks, rectangle or lasso selection (in the editor and in live mode; the way used last is remembered),
   layers, shapes, typed text (Latin Modern or Andika; it wraps by itself, with the Greek alphabet in the side panel's
   Characters tab, beside the page), LaTeX equations with chemistry (MathJax), bookmarks, PDF or image backgrounds, replay
@@ -372,10 +377,11 @@ is in French and English. The pictures below show the demo library and simulated
   specified), a PDF's outline and links in a PDF reader, Windows' touch keyboard in a text frame, an equation and a
   bookmark, the right-click menus and the **Guide** button, and also wrapping typed text with its side handles (mouse
   and pen), the Greek palette (then a pop-up), the question asked before dropping an equation, `Esc` asking before leaving
-  the editor, `Ctrl + Z` after rearranging cards and the export of a note with typed text. Added on 15 November 2026 and
-  not yet tried by hand: the side panel's Characters tab (which replaced that palette), rectangle or lasso selection with
-  its memory and in live mode, and undoing a move to another binder or a drop onto Favourites or a tag; they are checked
-  by automated tests and journeys only. Everything else is checked on Windows by automated tests on
+  the editor, `Ctrl + Z` after rearranging cards and the export of a note with typed text. Added and tried by hand on
+  15 November 2026, without a detailed report: the side panel's Characters tab (which replaced that palette), rectangle
+  or lasso selection with its memory and in live mode, and undoing a move to another binder or a drop onto Favourites or
+  a tag. Added on 15 November 2026 and not yet tried by hand: the card's menu holding every action on notes (it replaced
+  the bar of buttons above the cards); it is checked by automated tests and journeys only. Everything else is checked on Windows by automated tests on
   the production executable, in French and English; never tried by hand: a Word export opened in Word, an Inkspace
   import with Inkspace open, a real Windows logoff with unsaved work; Windows 10 not tried.
 - **Requirements**: Windows 11 (Windows 10 not tried), WebView2, and Bluetooth LE for a tablet. No administrator rights.
