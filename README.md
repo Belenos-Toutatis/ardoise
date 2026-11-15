@@ -78,7 +78,8 @@ Un dossier ordinaire, une note = un fichier `.ardoise`. Ardoise y écrit toujour
 en conflit, ce qui lui permet de fonctionner avec Nextcloud sur plusieurs ordinateurs.
 
 - **Classeurs** et sous-classeurs (des sous-dossiers), **ordre libre** des notes d'un classeur (glisser-déposer ou
-  `Alt` + flèches), **étiquettes** en huit couleurs, **favoris**, corbeille avec « Annuler » ; `Ctrl + Z` annule aussi un
+  `Alt` + flèches), **étiquettes** en huit couleurs, **favoris**, une vue **Non classées** (les notes rangées dans aucun
+  classeur), corbeille avec « Annuler » ; `Ctrl + Z` annule aussi un
   rangement des cartes d'un classeur. Un déplacement de notes vers un autre classeur (glisser sur la barre latérale ou
   « Déplacer vers… ») s'annule avec `Ctrl + Z` ou « Annuler », même après un changement de classeur : chaque note
   retourne dans son classeur d'origine et reprend sa place dans l'ordre ; une note modifiée ou supprimée depuis reste où
@@ -195,10 +196,9 @@ pour Windows. Le code est public. Les essais ci-dessous disent honnêtement ce q
   note avec du texte tapé.
 - **Ajoutés et essayés à la main le 15 novembre 2026**, sans compte rendu détaillé : l'onglet **Caractères** du
   panneau de côté (qui a remplacé cette palette), la sélection au rectangle ou au lasso avec sa mémoire et dans le mode
-  direct, l'annulation d'un déplacement vers un autre classeur ou d'un dépôt sur **Favoris** ou une étiquette.
-- **Ajouté le 15 novembre 2026, pas encore essayé à la main** : le menu de la carte qui porte toutes les actions sur les
-  notes (il a remplacé la barre de boutons au-dessus des cartes) ; vérifié par des tests automatiques et des parcours
-  seulement.
+  direct, l'annulation d'un déplacement vers un autre classeur ou d'un dépôt sur **Favoris** ou une étiquette, le menu
+  de la carte qui porte toutes les actions sur les notes (il a remplacé la barre de boutons au-dessus des cartes) et la
+  vue **Non classées**.
 - **Le reste** (bibliothèque, édition, relecture, exports, import d'Inkspace) est vérifié sous Windows par des tests
   automatiques sur le vrai exécutable, en français et en anglais. Jamais essayés à la main : l'export Word ouvert dans
   Word, l'import avec Inkspace ouvert, la fermeture de session de Windows avec une note non enregistrée. Windows 10 n'a
@@ -353,7 +353,7 @@ is in French and English. The pictures below show the demo library and simulated
 
 ![Live mode with the teacher's correction on a layer of its own](docs/guide/images/fr/direct.webp)
 
-- **Library and editor**: binders, free order, coloured tags, favourites, search (titles, tags, bookmarks, typed text,
+- **Library and editor**: binders, free order, coloured tags, favourites, a "Not in a binder" view, search (titles, tags, bookmarks, typed text,
   handwriting through Windows' offline recognition), `Ctrl + Z` also undoing a rearrangement of a binder's cards, a move
   of notes to another binder (even after you changed binder) and a drop onto "Favourites" or a tag; every action on
   notes is in the menu of their card (right click, the ⋯ button, the Menu key, a long press), which acts on the whole
@@ -380,8 +380,8 @@ is in French and English. The pictures below show the demo library and simulated
   the editor, `Ctrl + Z` after rearranging cards and the export of a note with typed text. Added and tried by hand on
   15 November 2026, without a detailed report: the side panel's Characters tab (which replaced that palette), rectangle
   or lasso selection with its memory and in live mode, and undoing a move to another binder or a drop onto Favourites or
-  a tag. Added on 15 November 2026 and not yet tried by hand: the card's menu holding every action on notes (it replaced
-  the bar of buttons above the cards); it is checked by automated tests and journeys only. Everything else is checked on Windows by automated tests on
+  a tag, the card's menu holding every action on notes (it replaced the bar of buttons above the cards) and the "Not in a
+  binder" view. Everything else is checked on Windows by automated tests on
   the production executable, in French and English; never tried by hand: a Word export opened in Word, an Inkspace
   import with Inkspace open, a real Windows logoff with unsaved work; Windows 10 not tried.
 - **Requirements**: Windows 11 (Windows 10 not tried), WebView2, and Bluetooth LE for a tablet. No administrator rights.
