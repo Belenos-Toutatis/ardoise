@@ -6,6 +6,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_TOOLS, docFromNote, setActiveLayer, setLayerVisible, type Doc, type ToolSettings } from '../../lib/editor/state';
 import { hline, note } from '../../lib/editor/test-fixtures';
 import { instantiateInk, type Ink } from '../../lib/ink';
+import { selectPrefs } from '../../lib/select-prefs.svelte';
 import Canvas from './Canvas.svelte';
 
 let ink: Ink;
@@ -19,6 +20,7 @@ let cleanup: (() => void) | null = null;
 afterEach(() => {
   cleanup?.();
   cleanup = null;
+  selectPrefs.reset();
 });
 
 /**
@@ -84,20 +86,23 @@ describe.each([
   ['rectangle', 'rectangle', aroundBox],
 ] as const)('the %s takes the chosen layer only', (_name, select, drag) => {
   it('the top layer', async () => {
-    const c = await render(crossing(), { mode: 'select', select });
+    selectPrefs.set(select);
+    const c = await render(crossing(), { mode: 'select' });
     await c.stroke([...drag]);
     expect(c.onselect).toHaveBeenCalledTimes(1);
     expect(c.onselect.mock.calls[0][0].selection).toEqual([1]);
   });
 
   it('the bottom layer, although another one is drawn over its stroke', async () => {
-    const c = await render(setActiveLayer(crossing(), 0), { mode: 'select', select });
+    selectPrefs.set(select);
+    const c = await render(setActiveLayer(crossing(), 0), { mode: 'select' });
     await c.stroke([...drag]);
     expect(c.onselect.mock.calls[0][0].selection).toEqual([0, 2]);
   });
 
   it('nothing while the chosen layer is hidden', async () => {
-    const c = await render(setLayerVisible(crossing(), 1, false), { mode: 'select', select });
+    selectPrefs.set(select);
+    const c = await render(setLayerVisible(crossing(), 1, false), { mode: 'select' });
     await c.stroke([...drag]);
     expect(c.onselect.mock.calls[0][0].selection).toEqual([]);
   });

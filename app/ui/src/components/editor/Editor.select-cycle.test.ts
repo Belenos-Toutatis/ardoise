@@ -13,6 +13,7 @@ import { mockLibrary, resetMockLibrary } from '../../lib/mock-data';
 import { resetMockNarration } from '../../lib/mock-narration';
 import { resetMockShare } from '../../lib/mock-share';
 import { share } from '../../lib/share-state.svelte';
+import { selectPrefs } from '../../lib/select-prefs.svelte';
 import { openSideTab } from '../side/side-test-helpers';
 import Editor from './Editor.svelte';
 
@@ -55,12 +56,14 @@ beforeEach(() => {
   resetMockShare();
   share.reset();
   setLocale('fr');
+  selectPrefs.reset();
 });
 
 afterEach(() => {
   cleanup?.();
   cleanup = null;
   vi.restoreAllMocks();
+  selectPrefs.reset();
   share.reset();
   resetMockShare();
 });
@@ -125,7 +128,9 @@ describe('the button of the selection tool', () => {
     await v.click(v.button());
     expect(v.pressed()).toBe(RECTANGLE);
     expect(v.button().title).toBe(RECTANGLE);
-    expect(v.button().textContent?.trim()).toBe(RECTANGLE);
+    // The name is the accessible name; the visible label stays short so that the button keeps its height.
+    expect(v.button().getAttribute('aria-label')).toBe(RECTANGLE);
+    expect(v.button().querySelector('.tool-label')?.textContent?.trim()).toBe('Sélection');
     expect(v.button().dataset.way).toBe('rectangle');
     expect(v.help()).toMatch(/^Rectangle : /);
 
@@ -134,7 +139,8 @@ describe('the button of the selection tool', () => {
     expect(v.pressed()).toBe(LASSO);
     expect(v.button().getAttribute('aria-pressed')).toBe('true');
     expect(v.button().title).toBe(LASSO);
-    expect(v.button().textContent?.trim()).toBe(LASSO);
+    expect(v.button().getAttribute('aria-label')).toBe(LASSO);
+    expect(v.button().querySelector('.tool-label')?.textContent?.trim()).toBe('Sélection');
     expect(v.button().dataset.way).toBe('lasso');
     expect(v.help()).toMatch(/^Lasso : /);
 
@@ -159,21 +165,28 @@ describe('the button of the selection tool', () => {
     expect(v.help()).toContain('Un nouveau clic sur le bouton (ou V) : rectangle');
   });
 
-  it('gives the rectangle again when the tool is chosen after another one, whatever it was left on', async () => {
+  it('gives the way used last when the tool is chosen after another one, and the button offers it meanwhile', async () => {
     const v = await render();
     await v.click(v.button());
     await v.click(v.button());
     expect(v.pressed()).toBe(LASSO);
     await v.click(v.tool('Gomme'));
-    // The lasso is not kept while another tool is in use: the button offers the rectangle.
-    expect(v.button().title).toBe(RECTANGLE);
+    // The lasso is remembered while another tool is in use: the button shows what a click will give.
+    expect(v.button().title).toBe(LASSO);
+    expect(v.button().dataset.way).toBe('lasso');
     expect(v.button().getAttribute('aria-pressed')).toBe('false');
     await v.click(v.button());
+    expect(v.pressed()).toBe(LASSO);
+    expect(v.help()).toMatch(/^Lasso : /);
+    // A click while it is the tool still turns it, and the rectangle is then the one remembered.
+    await v.click(v.button());
+    await v.click(v.tool('Stylo'));
+    expect(v.button().title).toBe(RECTANGLE);
+    await v.click(v.button());
     expect(v.pressed()).toBe(RECTANGLE);
-    expect(v.help()).toMatch(/^Rectangle : /);
   });
 
-  it('gives the rectangle again after the manual crop too', async () => {
+  it('gives the way used last after the manual crop too', async () => {
     const v = await render();
     await v.click(v.button());
     await v.click(v.button());
@@ -182,7 +195,23 @@ describe('the button of the selection tool', () => {
     await tick();
     expect(v.pressed()).toBeUndefined();
     await v.key('Escape');
-    expect(v.pressed()).toBe(RECTANGLE);
+    expect(v.pressed()).toBe(LASSO);
+  });
+
+  it('keeps the way across notes, and from one opening of the editor to the next (a preference of the computer)', async () => {
+    const first = await render();
+    await first.click(first.button());
+    await first.click(first.button());
+    expect(first.pressed()).toBe(LASSO);
+    cleanup?.();
+    // The same note again, a new editor: the pen is the tool, and the lasso is what the button offers.
+    const second = await render();
+    expect(second.pressed()).toBe('Stylo');
+    expect(second.button().title).toBe(LASSO);
+    await second.key('v');
+    expect(second.pressed()).toBe(LASSO);
+    expect(second.help()).toMatch(/^Lasso : /);
+    expect(localStorage.getItem('ardoise.select.way')).toBe('lasso');
   });
 
   it('is named in English too', async () => {
@@ -193,7 +222,8 @@ describe('the button of the selection tool', () => {
     expect(v.help()).toMatch(/^Rectangle: /);
     await v.click(v.button());
     expect(v.button().title).toBe('Select: lasso');
-    expect(v.button().textContent?.trim()).toBe('Select: lasso');
+    expect(v.button().getAttribute('aria-label')).toBe('Select: lasso');
+    expect(v.button().querySelector('.tool-label')?.textContent?.trim()).toBe('Select');
     expect(v.help()).toMatch(/^Lasso: /);
     expect(v.help()).toContain('Click the button again (or V): rectangle');
   });
@@ -244,9 +274,11 @@ describe('the V key', () => {
     // The variant with Shift (a capital V) is the same key.
     await v.key('V', { shiftKey: true });
     expect(v.pressed()).toBe(LASSO);
-    // Another tool by its key, and back: the rectangle.
+    // Another tool by its key, and back: the way used last, the lasso; the next press turns it.
     await v.key('p');
     expect(v.pressed()).toBe('Stylo');
+    await v.key('v');
+    expect(v.pressed()).toBe(LASSO);
     await v.key('v');
     expect(v.pressed()).toBe(RECTANGLE);
   });

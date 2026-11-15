@@ -9,8 +9,9 @@
   import { INKSPACE_COLOR_NAMES, sameColor, toHex, fromHex } from '../../lib/editor/colors';
   import WidthControl from '../WidthControl.svelte';
   import { shapePrefs, type ShapeToggle } from '../../lib/editor/shape-prefs.svelte';
+  import { selectPrefs } from '../../lib/select-prefs.svelte';
   import { isShapeKind } from '../../lib/editor/shape-tools';
-  import { equationToolSize, selectWay, textSettings, type EraserMode, type Mode, type TextSettings, type ToolSettings } from '../../lib/editor/state';
+  import { equationToolSize, textSettings, type EraserMode, type Mode, type TextSettings, type ToolSettings } from '../../lib/editor/state';
   import { CSS_FAMILY, TEXT_SIZES, TEXT_SIZE_NAMES } from '../../lib/text';
   import { FONT_FAMILIES } from '../../lib/note';
   import { t } from '../../lib/i18n.svelte';
@@ -148,10 +149,16 @@
     { mode: 'pan', icon: '✋' },
   ];
 
-  /** The selection tool's way (rectangle or lasso): its button says which, and the next click on it turns to the other; from another tool, a click gives the rectangle. */
-  const way = $derived(tools.mode === 'select' ? selectWay(tools) : 'rectangle');
+  /**
+   * The selection tool's way (rectangle or lasso), shared with live mode: its icon says which, and the next click on it
+   * turns to the other; from another tool, a click gives the way used last, which is the one shown.
+   */
+  const way = $derived(selectPrefs.way);
 
-  /** The label and the tooltip of a tool's button: the selection tool's name says how it selects now (the help line says that another click changes it). */
+  /**
+   * The name and the tooltip of a tool's button: the selection tool's says how it selects (its visible label stays short so that
+   * the button keeps its height when the way turns; the help line says that another click changes it).
+   */
   const modeLabel = (mode: Mode) => (mode === 'select' ? t(way === 'lasso' ? 'editor.modes.selectLasso' : 'editor.modes.selectRectangle') : t(`editor.modes.${mode}`));
 
   const text = $derived(textSettings(tools));
@@ -182,7 +189,7 @@
 </script>
 
 <div class="toolbar" role="toolbar" aria-label={t('editor.toolbar')}>
-  <div class="group" role="group" aria-label={t('editor.modes.label')}>
+  <div class="group modes" role="group" aria-label={t('editor.modes.label')}>
     {#each MODES as { mode, icon }}
       <button
         type="button"
@@ -191,6 +198,7 @@
         aria-pressed={tools.mode === mode}
         disabled={locked}
         title={modeLabel(mode)}
+        aria-label={mode === 'select' ? modeLabel(mode) : undefined}
         data-way={mode === 'select' ? way : undefined}
         onclick={() => onmode(mode)}
       >
@@ -212,7 +220,7 @@
             {/if}
           </svg>
         {/if}
-        <span class="tool-label">{modeLabel(mode)}</span>
+        <span class="tool-label">{t(`editor.modes.${mode}`)}</span>
       </button>
     {/each}
   </div>
@@ -572,6 +580,11 @@
 
   .tool {
     padding: 0.35rem 0.6rem;
+  }
+
+  /* The tool buttons are as tall as the tallest of them (a drawn icon is shorter than a glyph), whatever way the selection tool is in. */
+  .modes {
+    align-items: stretch;
   }
 
   .toolbar .tool.active,

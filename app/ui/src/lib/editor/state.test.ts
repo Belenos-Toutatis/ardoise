@@ -31,7 +31,6 @@ import {
   rotate,
   select,
   selectAll,
-  selectWay,
   selectedStrokes,
   selectionBounds,
   setActiveLayer,
@@ -336,16 +335,15 @@ describe('pasteStrokes at a time (M17)', () => {
 });
 
 describe('the selection tool way', () => {
-  it('is the rectangle unless the tool says the lasso, and turns from one to the other', () => {
-    expect(selectWay(DEFAULT_TOOLS)).toBe('rectangle');
-    expect(selectWay({ ...DEFAULT_TOOLS, select: 'lasso' })).toBe('lasso');
+  it('turns from one to the other', () => {
     expect(nextSelectWay('rectangle')).toBe('lasso');
     expect(nextSelectWay('lasso')).toBe('rectangle');
   });
 
-  it('is not part of the document: a selection change or an edit never touches it', () => {
+  it('is not part of the document or of the tool settings: a selection change or an edit never touches it', () => {
     const doc = docFromNote(note([hline(0, 1000, 0)]));
     expect(Object.keys(doc)).not.toContain('select');
     expect(Object.keys(selectAll(doc))).not.toContain('select');
+    expect(Object.keys(DEFAULT_TOOLS)).not.toContain('select');
   });
 });

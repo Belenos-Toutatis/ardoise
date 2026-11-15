@@ -692,12 +692,18 @@ touch up in the control window, and **the tablet keeps writing meanwhile**.
 
 **Choosing strokes**
 
-- Click **Select** (the **Computer** group) in the toolbar, or press `V`. Pressing it again leaves the tool. **Select**
-  and **Pen** (see **Correcting during live mode**) exclude each other: choosing one leaves the other.
-- **Lasso**: in the preview, press with the mouse and draw around the strokes, then release. A stroke is chosen when at
-  least half of its points are inside the lasso.
+- Click **Select** (the **Computer** group) in the toolbar, or press `V`. **Select** and **Pen** (see **Correcting
+  during live mode**) exclude each other: choosing one leaves the other. **You leave the Select tool by choosing Pen** (the
+  button, or `P`): clicking **Select** again, or pressing `V` again, no longer leaves it, it changes the way of choosing.
+  `Esc` clears the selection without leaving the tool; with no selection it asks to end live mode, as before.
+- **Way of choosing**, the same as in the editor: a **rectangle** (press the mouse on one corner of the preview, drag to the
+  opposite corner, then release; a dashed frame shows the area) or a **lasso** (draw around the strokes freehand). Clicking
+  **Select** again (or pressing `V` again) switches from one to the other; the button ("Select: rectangle" or "Select:
+  lasso"), its icon and the help line say which. Coming back to **Select** from **Pen** gives the way used last, in live mode
+  as in the editor. The first time, it is the rectangle. A stroke is chosen when at least half of its points are inside the
+  area, rectangle or lasso.
 - **Click**: click a stroke to choose it alone. Click on the ink itself, not next to it.
-- `Shift` + lasso or click adds strokes to the ones already chosen. `Ctrl` + lasso or click removes some.
+- `Shift` + rectangle, lasso or click adds strokes to the ones already chosen. `Ctrl` + rectangle, lasso or click removes some.
 - A gesture on empty paper, or `Esc`, clears the selection. While strokes are chosen, `Esc` does nothing else.
 - A finger outside the selection's frame and the wheel still move and zoom the preview.
 - The chosen strokes are outlined in blue in the preview. The selection bar, above the open tab of the side panel, says
@@ -716,8 +722,8 @@ corners.
   finger. Drag along the diagonal. The opposite corner stays where it is; the thickness of the line follows
   the size. You cannot go below a twentieth of the size, nor above twenty times.
 - A plain press in the frame, without dragging, changes nothing: it does not make a new selection. With `Shift` or
-  `Ctrl`, a gesture is always a lasso, even on the frame. Outside the frame, the mouse and the pen draw a lasso as
-  before and a finger moves the preview.
+  `Ctrl`, a gesture always chooses (a rectangle or a lasso, by the way), even on the frame. Outside the frame, the mouse and
+  the pen choose as before and a finger moves the preview.
 - During the gesture the strokes are shown lifted, where you are taking them, and the place they leave is empty. `Esc`
   (or a second finger, which turns the gesture into a zoom) drops the gesture: the strokes stay where they were and
   nothing is sent.
@@ -744,7 +750,7 @@ chosen, a swatch sets the pen's colour, as before.
   still undoes its touch-ups. The lists are gone when you finish live mode.
 - The **Undo** and **Redo** buttons are greyed out when there is nothing to do.
 
-**The projector and the other screen on the network only see the result.** Never the blue outline or the lasso: a
+**The projector and the other screen on the network only see the result.** Never the blue outline, the selection rectangle or the lasso: a
 deleted stroke disappears, a recoloured stroke changes colour, a moved or resized stroke appears at its new place. The annotations drawn over the presentation are not
 strokes of the page: they cannot be chosen.
 
@@ -793,7 +799,7 @@ anything into their writing.
 6. To touch up what the pupil wrote, click their layer in the zone, then use the pen's eraser or **Select**.
 
 **What the projector and the share show.** Both layers, mixed, as on screen, except hidden layers, which they never
-show. Neither the frame, nor the lasso, nor the eraser's circle is projected.
+show. Neither the frame, nor the selection rectangle, nor the lasso, nor the eraser's circle is projected.
 
 **Undoing with `Ctrl + Z`.** It undoes the *computer's* actions: a stroke, an erasing, a touch-up, **Clear the page**
 (see **Touching up during live mode**). Never what the tablet wrote. Layer operations (adding, hiding, renaming,
@@ -1343,14 +1349,15 @@ The toolbar offers these tools (**Tool**):
 - **Equation**: a formula or a chemical equation written in LaTeX (see **Writing an equation**, below).
 - **Bookmark**: a word or a short phrase put at a spot of the page, to find a passage again (see **Putting bookmarks**, below).
 - **Eraser**: **Whole strokes** or **Partial**, with its **Size**. It erases only on the chosen layer (see **Layers**).
-- **Select**: a **rectangle** or a **lasso**, as you like, on the strokes and texts of the chosen layer. A click on **Select**
-  (from another tool) gives the **rectangle**: drag from one corner to the opposite one to select what it holds. Clicking the
+- **Select**: a **rectangle** or a **lasso**, as you like, on the strokes and texts of the chosen layer. The first time, a
+  click on **Select** gives the **rectangle**: drag from one corner to the opposite one to select what it holds. Clicking the
   button again, or pressing `V` again, switches to the **lasso**: draw around the items freehand; another click goes back to
-  the rectangle, and so on. The button ("Select: rectangle" or "Select: lasso"), its tooltip and the help line below say which of
-  the two is on. Both take the same things for the same area: a stroke when at least half of its points are inside, a text, an
+  the rectangle, and so on. The button keeps its short name ("Select"): its icon, its tooltip ("Select: rectangle" or "Select:
+  lasso") and the help line below say which of the two is on. Both take the same things for the same area: a stroke when at least half of its points are inside, a text, an
   equation or a bookmark when its middle is inside. A click on a stroke or a text takes it alone, a click on the empty page
   deselects; `Shift` + rectangle (or lasso) adds, `Ctrl` + rectangle (or lasso) removes. Coming back to **Select** from another
-  tool always gives the rectangle again. The **Selection** block, above the open tab of the side panel, offers **Copy**, **Cut**, **Paste**, **Duplicate**,
+  tool gives **the way used last**, and that way is the same in the editor and in live mode: it is remembered on this computer,
+  even after Ardoise is closed. The **Selection** block, above the open tab of the side panel, offers **Copy**, **Cut**, **Paste**, **Duplicate**,
   **Straighten shapes**, **Delete**. Changes of
   colour, ink and width then apply to the selection; you move it (by grabbing it inside its frame) and resize it (by the
   frame's handles) with the mouse, or with the pen (see below and chapter 12).
@@ -2188,7 +2195,7 @@ keys stay as described in this chapter.
 | `Esc` | In steps, one press per step: drop the gesture under way, end the typing of a text or an equation (what is written stays; an equation with incorrect code stays in its panel); close the split, the replay, the crop or the **Straighten shapes** setting; deselect; go back to the library, asking whether to save if there are changes (never while a narration is being recorded) |
 | `Shift`, `Alt` (held while drawing a shape) | Invert **Regular shape** (`Shift`) or **From the centre** (`Alt`) for that stroke |
 | `Alt + ←`, `Alt + →` | **Previous page**, **Next page** (the note before, the note after in the library) |
-| `V`, `P`, `E`, `T`, `M`, `B`, `H` | Tools **Select**, **Pen**, **Eraser**, **Text**, **Equation**, **Bookmark**, **Move the page** (`V` when **Select** is already the tool: switches from the rectangle to the lasso, and back) |
+| `V`, `P`, `E`, `T`, `M`, `B`, `H` | Tools **Select**, **Pen**, **Eraser**, **Text**, **Equation**, **Bookmark**, **Move the page** (`V` when **Select** is already the tool: switches from the rectangle to the lasso, and back; the tool comes back in the way used last) |
 | `Space` (held) | Move the page (unless a button has the focus: `Space` then works that button, a rail icon included) |
 | `F` | **Straighten shapes** |
 | `R` | **Replay** |
@@ -2224,7 +2231,7 @@ window has no other key.
 | `W` | **Width** |
 | `Shift + arrows` | Move the projected area |
 | `Delete` or `Backspace` | Control window, **with strokes chosen**: delete them (with nothing chosen, nothing happens). Projected window: clear the marks written over the presentation |
-| `V` | **Select** tool (control window): lasso or click a stroke of the chosen layer |
+| `V` | **Select** tool (control window): rectangle, lasso or click a stroke of the chosen layer; pressing it again switches between the rectangle and the lasso (you leave the tool by choosing **Pen**, `P`) |
 | `P` | **Pen** tool (control window): write with the computer's pen or mouse on the chosen layer |
 | `Ctrl + Z` | Undo a stroke or an erasing of the computer, a deletion, a change of colour or **Clear the page** (control window) |
 | `Ctrl + Y` or `Ctrl + Shift + Z` | Redo (control window) |

@@ -4,6 +4,7 @@ import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, type AppState } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
+import { selectPrefs } from '../../lib/select-prefs.svelte';
 import { freshStamp, mockLibrary, notifyLibraryChanged, resetMockLibrary } from '../../lib/mock-data';
 import { mockClipboard } from '../../lib/mock-export';
 import { mockNarration, resetMockNarration, setMockNarration } from '../../lib/mock-narration';
@@ -49,6 +50,8 @@ const app: AppState = {
 let cleanup: (() => void) | null = null;
 
 beforeEach(() => {
+  // The selection tool's way is the computer's preference: each test starts with the first-time rectangle.
+  selectPrefs.reset();
   resetMockLibrary();
   setLocale('fr');
   try {

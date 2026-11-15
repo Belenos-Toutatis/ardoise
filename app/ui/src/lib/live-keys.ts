@@ -176,7 +176,9 @@ export type LiveEditKeyAction =
  *
  * | Keys                               | Action                                          |
  * |------------------------------------|-------------------------------------------------|
- * | V                                  | the Select tool on or off (the editor's key)    |
+ * | V                                  | the Select tool on, then its way: rectangle or  |
+ * |                                    | lasso (the editor's key and rule; the tool is   |
+ * |                                    | left by choosing the Pen tool)                  |
  * | P                                  | the Pen tool on or off (M14, the editor's key)  |
  * | Ctrl + Z                           | undo a delete, a change of colour, a clearing   |
  * | Ctrl + Y, Ctrl + Shift + Z         | redo                                            |

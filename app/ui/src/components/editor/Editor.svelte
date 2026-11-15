@@ -129,6 +129,7 @@
     sameShapeSettings,
     toShapeTuning,
   } from '../../lib/shape-settings';
+  import { selectPrefs } from '../../lib/select-prefs.svelte';
   import { canRedo, canUndo, commit, createHistory, redo, replacePresent, undo, type History } from '../../lib/editor/history';
   import {
     DEFAULT_TOOLS,
@@ -147,7 +148,6 @@
     hasSelection as anySelected,
     mergeDown,
     moveLayer,
-    nextSelectWay,
     objectSelection,
     pasteStrokes,
     removeObjectAt,
@@ -157,7 +157,6 @@
     rotate,
     rotateBackgroundImage,
     selectAll,
-    selectWay,
     select as selectItems,
     selectedObjects,
     selectedStrokes,
@@ -1484,17 +1483,16 @@
     if (mode !== 'text') endText();
     if (mode !== 'equation') cancelEquation();
     if (mode !== 'bookmark') endBookmark();
-    // Another tool, and coming back to the selection tool, start at the rectangle again (`SelectWay`).
-    const { select: _way, ...kept } = tools;
-    tools = { ...(mode === tools.mode ? tools : kept), mode };
+    tools = { ...tools, mode };
   }
 
   /**
    * The tool the user chose with its button or its key: the same tool again turns the selection tool from the rectangle
-   * to the lasso and back (the other tools have only one way); anything else is `setMode`.
+   * to the lasso and back (the other tools have only one way, and coming back to the selection tool from another one
+   * gives the way used last: `selectPrefs`); anything else is `setMode`.
    */
   function chooseMode(mode: Mode) {
-    if (mode === 'select' && tools.mode === 'select') tools = { ...tools, select: nextSelectWay(selectWay(tools)) };
+    if (mode === 'select' && tools.mode === 'select') selectPrefs.turn();
     else setMode(mode);
   }
 

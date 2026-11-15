@@ -2127,8 +2127,11 @@
     },
     "select": {
       "toggle": "Sélection",
-      "hint": "Sélectionner des traits au lasso ou d'un clic pour les supprimer, changer leur couleur, les déplacer ou les redimensionner (V)",
-      "help": "Lasso : sélectionner · clic : un trait · Maj : ajouter · Ctrl : retirer · Échap : désélectionner. Glissez dans le cadre pour déplacer la sélection, par un coin pour la redimensionner (stylet, doigt ou souris). Les pastilles de couleur changent la couleur de la sélection. Seuls les traits du calque choisi sont pris.",
+      "rectangle": "Sélection : rectangle",
+      "lasso": "Sélection : lasso",
+      "hint": "Sélectionner des traits au rectangle, au lasso ou d'un clic pour les supprimer, changer leur couleur, les déplacer ou les redimensionner (V ; un nouvel appui passe du rectangle au lasso)",
+      "helpRectangle": "Rectangle : tracez un rectangle pour sélectionner · clic : un trait · Maj : ajouter · Ctrl : retirer · Échap : désélectionner · un nouveau clic sur le bouton (ou V) : lasso. Glissez dans le cadre pour déplacer la sélection, par un coin pour la redimensionner (stylet, doigt ou souris). Les pastilles de couleur changent la couleur de la sélection. Seuls les traits du calque choisi sont pris.",
+      "helpLasso": "Lasso : tracez un contour pour sélectionner · clic : un trait · Maj : ajouter · Ctrl : retirer · Échap : désélectionner · un nouveau clic sur le bouton (ou V) : rectangle. Glissez dans le cadre pour déplacer la sélection, par un coin pour la redimensionner (stylet, doigt ou souris). Les pastilles de couleur changent la couleur de la sélection. Seuls les traits du calque choisi sont pris.",
       "bar": "Retoucher la sélection",
       "count": "Traits sélectionnés : {count}",
       "delete": "Supprimer",
@@ -2222,7 +2225,7 @@
           "action": "Outil Stylo : écrire avec le stylet ou la souris de l'ordinateur"
         },
         "select": {
-          "action": "Outil Sélection (lasso ou clic sur un trait ; glisser dans le cadre pour déplacer, par un coin pour redimensionner)"
+          "action": "Outil Sélection (rectangle ou lasso, ou clic sur un trait ; un nouvel appui sur V passe de l'un à l'autre ; glisser dans le cadre pour déplacer, par un coin pour redimensionner)"
         },
         "delete": {
           "action": "Supprimer la sélection"

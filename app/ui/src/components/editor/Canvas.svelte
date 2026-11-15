@@ -8,7 +8,7 @@
    * The page: an SVG whose `viewBox` is the visible part of the page in device units, the
    * rendered background as an `<image>`, then one non-zero filled path per visible stroke in
    * drawing order (outlines cached per stroke object). Handles drawing, erasing, selecting (a rectangle or a lasso, by
-   * the selection tool's way, `SelectWay`; the pen's barrel button always draws a lasso), moving
+   * the selection tool's way, `selectPrefs.way`; the pen's barrel button always draws a lasso), moving
    * and resizing the selection, manual crop, zoom (wheel at the cursor) and pan (middle button,
    * Space + drag, or the pan tool). A drag shows transient state and reports one change at the end.
    *
@@ -93,6 +93,7 @@
   } from '../../lib/gestures';
   import { GRAB_TOLERANCE, corners, grabAt as grabOnFrame } from '../../lib/selection-grab';
   import { touchPrefs } from '../../lib/touch-prefs.svelte';
+  import { selectPrefs } from '../../lib/select-prefs.svelte';
   import { placedImage } from '../../lib/editor/image';
   import { MIN_CROP } from '../../lib/editor/ops';
   import type { SplitPreview } from '../../lib/editor/split';
@@ -105,7 +106,6 @@
     inksNewStrokes,
     objectSelection,
     select,
-    selectWay,
     selectionBounds,
     transformSelection,
     type Doc,
@@ -953,7 +953,7 @@
         const combine: Combine = e.ctrlKey || e.metaKey ? 'remove' : e.shiftKey ? 'add' : 'replace';
         const grab = combine === 'replace' ? frameGrab(e) : null;
         if (grab) begin(grab);
-        else if (selectWay(tools) === 'rectangle') {
+        else if (selectPrefs.way === 'rectangle') {
           begin({ kind: 'lasso', id, points: [p], combine, box: true });
           marquee = rectFromCorners(p, p);
           lassoRemoves = combine === 'remove';

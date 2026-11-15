@@ -12,6 +12,7 @@ import { DEFAULT_TOOLS, docFromNote, objectSelection, select, type Doc, type Sel
 import { hline, line, note } from '../../lib/editor/test-fixtures';
 import { instantiateInk, type Ink } from '../../lib/ink';
 import type { BookmarkObject, Note, PageObject, TextObject } from '../../lib/note';
+import { selectPrefs } from '../../lib/select-prefs.svelte';
 import Canvas from './Canvas.svelte';
 
 let ink: Ink;
@@ -25,6 +26,7 @@ let cleanup: (() => void) | null = null;
 afterEach(() => {
   cleanup?.();
   cleanup = null;
+  selectPrefs.reset();
 });
 
 const BLACK = { r: 0, g: 0, b: 0, a: 255 };
@@ -72,7 +74,10 @@ async function render(doc: Doc, way: SelectWay | undefined, extra: Partial<ToolS
   const onselect = vi.fn<(doc: Doc) => void>();
   const target = document.createElement('div');
   document.body.append(target);
-  const tools: ToolSettings = { ...DEFAULT_TOOLS, mode: 'select', ...(way ? { select: way } : {}), ...extra };
+  // The way is the computer's preference, shared with live mode (nothing chosen: the first-time rectangle).
+  if (way) selectPrefs.set(way);
+  else selectPrefs.reset();
+  const tools: ToolSettings = { ...DEFAULT_TOOLS, mode: 'select', ...extra };
   const component = mount(Canvas, { target, props: { doc, tools, ink, readonly, onchange, onselect } });
   cleanup = () => {
     unmount(component);
@@ -169,7 +174,7 @@ describe('the rectangle', () => {
     expect(objectSelection(c.last())).toEqual([0]);
   });
 
-  it('is the tool\'s way when none is chosen', async () => {
+  it('is the way before any choice', async () => {
     const c = await render(page(), undefined);
     await c.drag(box(500, 1500, 4600, 10_800));
     expect(c.last().selection).toEqual([0, 2, 3]);
