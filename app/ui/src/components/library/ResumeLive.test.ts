@@ -36,10 +36,10 @@ function pathOf(title: string): string {
   return found[0];
 }
 
-/** Opens the menu of a card; the menu items. */
+/** Opens the menu of a card with its « ⋯ » button; the menu items (the menu is a context menu of the window). */
 async function menuOf(home: Ui, title: string) {
   await home.click(home.card(title).querySelector('.card-menu button[aria-haspopup="menu"]'));
-  return [...home.card(title).querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+  return [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
 }
 
 const item = (items: HTMLElement[], label: string) => {
@@ -57,14 +57,46 @@ async function ready(locale: 'fr' | 'en' = 'fr') {
 
 describe('« Reprendre en mode direct » in the note card menu', () => {
   it.each([
-    ['fr', ['Renommer', 'Ajouter aux favoris', 'Reprendre en mode direct', 'Dupliquer', 'Changer la date…', 'Mettre à la corbeille']],
-    ['en', ['Rename', 'Add to favourites', 'Resume in live mode', 'Duplicate', 'Change the date…', 'Move to trash']],
-  ] as const)('is offered between the card actions in %s, and enabled with a registered tablet', async (locale, labels) => {
+    [
+      'fr',
+      [
+        'Renommer',
+        'Reprendre en mode direct',
+        'Déplacer vers…',
+        'Étiquettes…',
+        'Ajouter aux favoris',
+        'Changer la date…',
+        'Exporter…',
+        'Imprimer…',
+        'Dupliquer',
+        'Tourner à gauche',
+        'Tourner à droite',
+        'Mettre à la corbeille',
+      ],
+    ],
+    [
+      'en',
+      [
+        'Rename',
+        'Resume in live mode',
+        'Move to…',
+        'Tags…',
+        'Add to favourites',
+        'Change the date…',
+        'Export…',
+        'Print…',
+        'Duplicate',
+        'Turn left',
+        'Turn right',
+        'Move to trash',
+      ],
+    ],
+  ] as const)('is offered with the first actions of the card in %s, and enabled with a registered tablet', async (locale, labels) => {
     const home = await ready(locale);
     const items = await menuOf(home, 'Réunion parents');
     expect(items.map((el) => el.textContent?.trim())).toEqual(labels);
-    expect(items[2].getAttribute('aria-disabled')).toBeNull();
-    expect(items[2].title).toBe('');
+    expect(items[1].getAttribute('aria-disabled')).toBeNull();
+    expect(items[1].title).toBe('');
   });
 
   it('hands the note to live mode: the library is hidden, then comes back with the focus on the card', async () => {
@@ -105,17 +137,26 @@ describe('« Reprendre en mode direct » in the note card menu', () => {
     expect(home.q('[data-double="live"]')?.getAttribute('data-resume')).toBe('');
   });
 
-  it('is disabled, with the reason, while several notes are selected', async () => {
+  it('is left out of the menu of several selected notes, which has a heading and no single-note entry', async () => {
     const home = await ready();
     await home.select('Liste de courses', 'Réunion parents');
     const items = await menuOf(home, 'Liste de courses');
+    const labels = items.map((el) => el.textContent?.trim());
+    expect(labels).not.toContain('Reprendre en mode direct');
+    expect(labels).not.toContain('Renommer');
+    expect(labels).not.toContain('Changer la date…');
+    expect(document.querySelector('[role="menu"] .menu-heading')?.textContent).toBe('2 notes sélectionnées');
+  });
+
+  it('is offered on a card outside the selection, which the menu then acts on alone', async () => {
+    const home = await ready();
+    await home.select('Liste de courses', 'Réunion parents');
+    const path = pathOf('Cours de physique');
+    const items = await menuOf(home, 'Cours de physique');
     const resume = item(items, 'Reprendre en mode direct');
-    expect(resume.getAttribute('aria-disabled')).toBe('true');
-    expect(resume.title).toBe('Sélectionnez une seule note pour reprendre le mode direct.');
+    expect(resume.getAttribute('aria-disabled')).toBeNull();
     await home.click(resume);
-    expect(home.q('[data-double="live"]')).toBeNull();
-    // The menu stays open (nothing was chosen), and the other items still work.
-    expect(home.card('Liste de courses').querySelector('[role="menu"]')).not.toBeNull();
+    expect(home.q('[data-double="live"]')?.getAttribute('data-resume')).toBe(path);
   });
 
   it('is available again with a single note selected', async () => {

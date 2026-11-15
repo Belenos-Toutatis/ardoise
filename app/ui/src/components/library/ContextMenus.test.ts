@@ -81,19 +81,41 @@ describe('the menu of a card', () => {
   it('opens under its « ⋯ » button for the Menu key, and for a click on the button', async () => {
     const view = await ready();
     const card = view.card('Liste de courses');
+    const button = card.querySelector<HTMLElement>('.card-menu button')!;
     menuKey(card);
     await view.settle();
+    // A menu of the window (it can be long): at the end of the document, kept inside the window, under the button.
     let menu = openMenu()!;
-    expect(card.contains(menu)).toBe(true);
-    expect(menu.style.left).toBe('');
+    expect(menu.parentElement).toBe(document.body);
+    expect(menu.style.left).not.toBe('');
+    expect(button.getAttribute('aria-expanded')).toBe('true');
     // Escape, then the button itself.
     document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     await view.settle();
     expect(openMenu()).toBeNull();
-    await view.click(card.querySelector('.card-menu button'));
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    await view.click(button);
     menu = openMenu()!;
-    expect(card.contains(menu)).toBe(true);
-    expect(menu.style.left).toBe('');
+    expect(menu.parentElement).toBe(document.body);
+    expect(entryLabels()).toContain('Renommer');
+    // A press on the button of an open menu closes it, and the click that ends the same gesture does not open it again.
+    button.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await view.click(button);
+    expect(openMenu()).toBeNull();
+  });
+
+  it("opens from a pen's barrel button and a finger's long press as from a right click", async () => {
+    const view = await ready();
+    for (const pointerType of ['pen', 'touch']) {
+      const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 0, clientX: 70, clientY: 80 });
+      Object.defineProperty(event, 'pointerType', { value: pointerType });
+      view.card('Liste de courses').dispatchEvent(event);
+      await view.settle();
+      expect(openMenu()!.style.left).toBe('70px');
+      expect(entryLabels()).toContain('Déplacer vers…');
+      document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      await view.settle();
+    }
   });
 
   it('chooses an entry, and Escape gives the focus to the « ⋯ » button', async () => {
@@ -165,7 +187,7 @@ describe('the menu of « Toutes les notes » and « Favoris »', () => {
     await view.click(entry('Tout sélectionner'));
     expect(view.q('[data-view="favorites"]')!.getAttribute('aria-current')).toBe('true');
     expect(view.titles()).toEqual(['Liste de courses']);
-    expect(view.q('.selection-bar')!.textContent).toContain('Sélection : 1');
+    expect(view.q('.selection-count')!.textContent).toBe('1 note sélectionnée');
 
     rightClick(view.q('[data-view="all"]')!);
     await view.settle();
@@ -174,7 +196,7 @@ describe('the menu of « Toutes les notes » and « Favoris »', () => {
     rightClick(view.q('[data-view="all"]')!);
     await view.settle();
     await view.click(entry('Tout sélectionner'));
-    expect(view.q('.selection-bar')!.textContent).toContain('Sélection : 3');
+    expect(view.q('.selection-count')!.textContent).toBe('3 notes sélectionnées');
   });
 
   it('speaks English', async () => {
@@ -208,7 +230,7 @@ describe('the menu of a tag', () => {
 describe('the trash', () => {
   async function trashOne(view: Ui) {
     await view.select('Réunion parents');
-    await view.click(view.button('Mettre à la corbeille', view.q('.selection-bar')!));
+    await view.choose('Réunion parents', 'Mettre à la corbeille');
     await vi.waitFor(() => expect(view.titles().length).toBe(2));
   }
 
@@ -290,7 +312,7 @@ describe('Ctrl + P in the library', () => {
     await view.click(view.q('.twisty'));
     await view.click(view.q('[data-binder="Classe/3e B"]'));
     await view.select('Cours de physique');
-    await view.click(view.button('Mettre à la corbeille', view.q('.selection-bar')!));
+    await view.choose('Cours de physique', 'Mettre à la corbeille');
     await vi.waitFor(() => expect(view.titles().length).toBe(0));
     await press(view, 'p');
     expect(view.q('[data-dialog="print"]')).toBeNull();
@@ -311,7 +333,7 @@ describe('Ctrl + P in the library', () => {
   it('does nothing under a dialog, but still keeps the browser\'s print off', async () => {
     const view = await ready();
     await view.select('Liste de courses');
-    await view.click(view.button('Exporter…', view.q('.selection-bar')!));
+    await view.choose('Liste de courses', 'Exporter…');
     expect(view.q('[role="dialog"]')).toBeTruthy();
     const event = await press(view, 'p');
     expect(event.defaultPrevented).toBe(true);

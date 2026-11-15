@@ -47,10 +47,10 @@ describe('tag colours', () => {
     // Kept by the library, under the tag in lower case.
     expect(await api.tagColors()).toEqual({ physique: 'blue' });
 
-    // The tags panel of the selection shows it too, and changes it.
+    // The tags dialog of the card menu shows it too, and changes it.
     await ui.select('Cours de physique');
-    await ui.click(ui.button('Étiquettes…'));
-    const panel = ui.byLabel('Étiquettes…', ui.q('.selection-bar')!);
+    await ui.choose('Cours de physique', 'Étiquettes…');
+    const panel = ui.q('[data-dialog="tags"]')!;
     const ofSelection = [...panel.querySelectorAll<HTMLElement>('.chip.removable')].find((c) => c.textContent?.includes('physique'))!;
     expect(ofSelection.dataset.tagColor).toBe('blue');
     const known = [...panel.querySelectorAll('.tag-entry')].find((e) => e.textContent?.includes('3e B'))!;

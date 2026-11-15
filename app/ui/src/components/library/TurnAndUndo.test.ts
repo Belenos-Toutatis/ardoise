@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Milestone M10: turning several notes from the selection bar, and « Annuler » after a turn or
+// Milestone M10: turning several notes from a card menu, and « Annuler » after a turn or
 // after « Mettre à la corbeille ».
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../../lib/api';
@@ -8,6 +8,7 @@ import { rotateQuarter } from '../../lib/editor/ops';
 import { undoNotice } from '../../lib/library-activity.svelte';
 import { freshStamp, mockLibrary, resetMockLibrary, type StoredNote } from '../../lib/mock-data';
 import type { Note } from '../../lib/note';
+import { cardMenuEntry } from './card-menu-test-helpers';
 import { renderHome, type Ui } from './library-test-helpers';
 
 let ui: Ui | null = null;
@@ -60,9 +61,10 @@ function expectSameDrawing(actual: Note, expected: Note) {
   });
 }
 
+/** Turns the selection from the menu of its first card, the way the library offers it. */
 async function turn(direction: 'left' | 'right') {
-  await ui!.click(ui!.q('.selection-bar [data-action="turn"]'));
-  await ui!.click(ui!.q(`.selection-bar [data-action="${direction === 'left' ? 'turn-ccw' : 'turn-cw'}"]`));
+  const title = ui!.q('.note-card.selected .card-title')!.textContent!.trim();
+  await ui!.choose(title, direction === 'left' ? 'Tourner à gauche' : 'Tourner à droite');
   await vi.waitFor(() => expect(ui!.q('.activity-progress')).toBeNull());
 }
 
@@ -77,7 +79,7 @@ describe('turning several notes', () => {
     const before = { physique: copyOf(stored('Cours de physique').note), courses: copyOf(stored('Liste de courses').note) };
     ui = await renderHome();
     await ui.select('Cours de physique', 'Liste de courses');
-    expect(ui.q('.selection-bar')?.textContent).toContain('Sélection : 2');
+    expect(ui.q('.selection-count')?.textContent).toBe('2 notes sélectionnées');
 
     await turn('right');
     for (const [title, note] of [
@@ -98,7 +100,7 @@ describe('turning several notes', () => {
     const offer = ui.q('.activity-offer');
     expect(offer?.textContent).toContain("2 notes tournées d'un quart de tour à droite.");
     // The selection stays, so that another turn is one click away.
-    expect(ui.q('.selection-bar')?.textContent).toContain('Sélection : 2');
+    expect(ui.q('.selection-count')?.textContent).toBe('2 notes sélectionnées');
 
     await ui.click(ui.button('Annuler', offer!));
     await vi.waitFor(() => expect(ui!.q('.activity-offer')?.textContent).toContain("Rotation annulée : 2 notes ont retrouvé leur sens d'origine."));
@@ -111,9 +113,7 @@ describe('turning several notes', () => {
     const before = copyOf(stored('Réunion parents').note);
     ui = await renderHome('en');
     await ui.select('Réunion parents');
-    await ui.click(ui.q('.selection-bar [data-action="turn"]'));
-    expect(ui.byLabel('Turn the selected notes').textContent).toContain('A quarter turn to the left');
-    await ui.click(ui.q('.selection-bar [data-action="turn-ccw"]'));
+    await ui.choose('Réunion parents', 'Turn left');
     await vi.waitFor(() => expect(ui!.q('.activity-offer')?.textContent).toContain('1 note turned a quarter turn to the left.'));
     expect(drawing(stored('Réunion parents').note)).toEqual(drawing(rotateQuarter(before, 'ccw')));
     expect(ui.button('Undo', ui.q('.activity-offer')!)).toBeTruthy();
@@ -169,14 +169,16 @@ describe('turning several notes', () => {
     });
     ui = await renderHome();
     await ui.select('Réunion parents', 'Liste de courses', 'Cours de physique');
-    await ui.click(ui.q('.selection-bar [data-action="turn"]'));
-    await ui.click(ui.q('.selection-bar [data-action="turn-cw"]'));
+    await ui.choose('Réunion parents', 'Tourner à droite');
 
     const progress = ui.q('.activity-progress');
     expect(progress?.textContent).toContain('Rotation des notes : 0 sur 3');
     expect(ui.q<HTMLProgressElement>('.activity-progress progress')?.max).toBe(3);
     // A second turn cannot start meanwhile.
-    expect(ui.q<HTMLButtonElement>('.selection-bar [data-action="turn"]')?.disabled).toBe(true);
+    await ui.openMenu('Réunion parents');
+    expect(cardMenuEntry('Tourner à droite').getAttribute('aria-disabled')).toBe('true');
+    expect(cardMenuEntry('Tourner à gauche').getAttribute('aria-disabled')).toBe('true');
+    await ui.key(document.activeElement!, 'Escape');
     release();
     await vi.waitFor(() => expect(ui!.q('.activity-progress')?.textContent).toContain('1 sur 3'));
     await ui.click(ui.button('Arrêter', ui.q('.activity-progress')!));
@@ -219,8 +221,7 @@ describe('several operations', () => {
     });
     ui = await renderHome();
     await ui.select('Cours de physique');
-    await ui.click(ui.q('.selection-bar [data-action="turn"]'));
-    await ui.click(ui.q('.selection-bar [data-action="turn-cw"]'));
+    await ui.choose('Cours de physique', 'Tourner à droite');
     expect(ui.q('.activity-progress')).not.toBeNull();
 
     // Meanwhile another note goes to the trash, and its « Annuler » is pressed.
@@ -258,7 +259,7 @@ describe('undo after « Mettre à la corbeille »', () => {
   it('restores the notes trashed with the button, into their binders', async () => {
     ui = await renderHome();
     await ui.select('Cours de physique', 'Réunion parents');
-    await ui.click(ui.button('Mettre à la corbeille', ui.q('.selection-bar')!));
+    await ui.choose('Cours de physique', 'Mettre à la corbeille');
     await vi.waitFor(() => expect(ui!.titles()).toEqual(['Liste de courses']));
     expect(mockLibrary().trash.size).toBe(2);
     const offer = ui.q('.activity-offer')!;
@@ -277,7 +278,7 @@ describe('undo after « Mettre à la corbeille »', () => {
     await ui.select('Cours de physique', 'Liste de courses', 'Réunion parents');
     // Deleted meanwhile on another computer (the listing has not caught up yet).
     mockLibrary().notes.delete(pathOf('Liste de courses'));
-    await ui.click(ui.button('Mettre à la corbeille', ui.q('.selection-bar')!));
+    await ui.choose('Cours de physique', 'Mettre à la corbeille');
     await vi.waitFor(() => expect(ui!.q('.activity-failures')).not.toBeNull());
     expect(mockLibrary().trash.size).toBe(2);
     expect(ui.q('.activity-failures')?.textContent).toContain("Une note n'a pas pu être mise à la corbeille :");

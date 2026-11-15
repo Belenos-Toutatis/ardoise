@@ -26,7 +26,7 @@ function items(picked: string[] = []): MenuItem[] {
   ];
 }
 
-async function open(options: { at?: { x: number; y: number }; list?: MenuItem[]; returnTo?: HTMLElement | null } = {}) {
+async function open(options: { at?: { x: number; y: number }; list?: MenuItem[]; returnTo?: HTMLElement | null; heading?: string } = {}) {
   // The menu's own size is measured: jsdom has no layout, so the box is faked (a 160 x 120 menu).
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const size = this.classList.contains('context-menu') ? { width: 160, height: 120 } : { width: 0, height: 0 };
@@ -42,9 +42,10 @@ async function open(options: { at?: { x: number; y: number }; list?: MenuItem[];
     props: {
       label: 'Menu de test',
       items: options.list ?? items(),
+      heading: options.heading,
       at: options.at ?? { x: 100, y: 80 },
-      onclose: () => {
-        closed();
+      onclose: (onTrigger?: boolean) => {
+        closed(onTrigger);
         handle.destroy();
       },
       returnTo: options.returnTo ?? null,
@@ -77,6 +78,24 @@ describe('the context menu', () => {
     expect(view.entries().map((e) => e.textContent?.trim())).toEqual(['Copier', 'Couper', 'Coller', 'Supprimer']);
     expect(document.activeElement).toBe(view.entries()[0]);
     expect(document.querySelectorAll('[role="separator"]').length).toBe(1);
+  });
+
+  it('shows a heading above the entries, which is text and not an entry', async () => {
+    const view = await open({ heading: '3 notes sélectionnées' });
+    const heading = view.menu()!.querySelector('.menu-heading')!;
+    expect(heading.textContent).toBe('3 notes sélectionnées');
+    expect(heading.getAttribute('role')).toBe('presentation');
+    expect(view.entries().length).toBe(4);
+    expect(document.activeElement).toBe(view.entries()[0]);
+    key(view.entries()[0], 'ArrowUp');
+    expect(document.activeElement).toBe(view.entries()[3]);
+  });
+
+  it('tells its owner when a press on the button that opens it closed it, so that the click does not open it again', async () => {
+    const opener = document.body.appendChild(document.createElement('button'));
+    const view = await open({ returnTo: opener });
+    opener.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(view.closed).toHaveBeenCalledWith(true);
   });
 
   it('stays inside the window, however near the edge the point is', async () => {

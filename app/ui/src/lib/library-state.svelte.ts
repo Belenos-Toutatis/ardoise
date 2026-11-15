@@ -114,6 +114,10 @@ export class LibraryState {
   dialog = $state<{ kind: 'export' | 'print' | 'assemble'; notes: NoteSummary[]; binder?: string } | null>(null);
   /** « Changer la date… » is open on this note. */
   dateNote = $state<NoteSummary | null>(null);
+  /** « Déplacer vers… » is open on these notes (paths). */
+  moveDialog = $state<string[] | null>(null);
+  /** « Étiquettes… » is open on these notes (paths). */
+  tagDialog = $state<string[] | null>(null);
   /** The summary of this binder is open (`''` never: only a binder has one). */
   summaryBinder = $state<string | null>(null);
   /** The place between two cards a drag would drop at, and the one a screen reader was last told about. */
@@ -336,9 +340,27 @@ export class LibraryState {
     this.notice = null;
   }
 
-  /** Opens the export, print or assemble dialog over the notes selected now. */
-  openDialog(kind: 'export' | 'print' | 'assemble'): void {
-    this.dialog = { kind, notes: [...this.selectedDisplayed] };
+  /** Opens the export, print or assemble dialog over `notes` (the card menu's), else over the notes selected now. */
+  openDialog(kind: 'export' | 'print' | 'assemble', notes: NoteSummary[] = this.selectedDisplayed): void {
+    this.dialog = { kind, notes: [...notes] };
+  }
+
+  /** Opens « Déplacer vers… » over these notes. */
+  openMove(paths: string[]): void {
+    this.moveDialog = [...paths];
+  }
+
+  closeMove(): void {
+    this.moveDialog = null;
+  }
+
+  /** Opens « Étiquettes… » over these notes. */
+  openTags(paths: string[]): void {
+    this.tagDialog = [...paths];
+  }
+
+  closeTags(): void {
+    this.tagDialog = null;
   }
 
   /** Opens « Exporter le classeur en PDF » or « Imprimer le classeur » over `binder`. */
@@ -942,10 +964,6 @@ export class LibraryState {
     if (made.length > 0) message += ` ${tn('library.move.recreated', made.length, { binder: made[0] })}`;
     if (atEnd.size > 0) message += ` ${tn('library.move.atEnd', atEnd.size)}`;
     this.activity.undone(message);
-  }
-
-  async moveSelected(binder: string): Promise<void> {
-    await this.moveNotes([...this.selected], binder);
   }
 
   async trashNotes(paths: string[]): Promise<void> {

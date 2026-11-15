@@ -9,24 +9,47 @@
   /**
    * A small "more actions" menu button: opens a list of actions under the button, closes on Escape or outside click;
    * `show()` opens it from the owner's right click: at the pointer (`show(point)`, a context menu), or under the button
-   * when the keyboard's Menu key asked (no point).
+   * when the keyboard's Menu key asked (no point). `onbeforeshow` runs before the menu opens (the owner builds its entries).
+   * `floating` makes the button's own list a context menu too (a long list: it stays inside the window and scrolls), just
+   * under the button; `heading` is a line above its entries; `menuLabel` names the menu when it is not the button's `label`.
    */
   import { tick } from 'svelte';
   import type { MenuItem, Point } from '../../lib/context-menu';
   import ContextMenu from '../ContextMenu.svelte';
 
-  let { label, items }: { label: string; items: MenuItem[] } = $props();
+  let {
+    label,
+    menuLabel,
+    items,
+    heading,
+    floating = false,
+    onbeforeshow,
+  }: {
+    label: string;
+    menuLabel?: string;
+    items: MenuItem[];
+    heading?: string;
+    floating?: boolean;
+    onbeforeshow?: () => void;
+  } = $props();
 
   let open = $state(false);
   /** Where the menu stands when a right click opened it at the pointer (then `open`, the one under the button, is off). */
   let pointAt = $state<Point | null>(null);
   let root = $state<HTMLElement | null>(null);
   let trigger = $state<HTMLButtonElement | null>(null);
+  /** When a press on the button closed the floating menu: the click that follows is the same gesture, not a new opening. */
+  let shutByButtonAt = -Infinity;
 
   async function toggle() {
+    if (floating && trigger) {
+      if (performance.now() - shutByButtonAt < 500) return;
+      return show();
+    }
     pointAt = null;
     open = !open;
     if (open) {
+      onbeforeshow?.();
       if (closeOpenMenu !== closeMe) closeOpenMenu?.();
       closeOpenMenu = closeMe;
       await tick();
@@ -39,7 +62,14 @@
    * and nothing when it is open there already.
    */
   export function show(at?: Point): void {
+    // The floating list stands just under the button, as the other one does.
+    if (floating && !at && trigger) {
+      const box = trigger.getBoundingClientRect();
+      at = { x: box.left, y: box.bottom + 2 };
+    }
     if (at) {
+      // The owner builds the entries now (they depend on the state of its screen).
+      onbeforeshow?.();
       open = false;
       if (closeOpenMenu !== closeMe) closeOpenMenu?.();
       closeOpenMenu = closeMe;
@@ -113,11 +143,13 @@
   </button>
   {#if pointAt}
     <ContextMenu
-      {label}
+      label={menuLabel ?? label}
       {items}
+      {heading}
       at={pointAt}
       returnTo={trigger}
-      onclose={() => {
+      onclose={(onTrigger) => {
+        if (onTrigger) shutByButtonAt = performance.now();
         pointAt = null;
         if (closeOpenMenu === closeMe) closeOpenMenu = null;
       }}

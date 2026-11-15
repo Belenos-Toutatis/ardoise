@@ -118,10 +118,12 @@ describe('drag a note out: the handle', () => {
     expect(ui.handle('Cours de physique')!.title).not.toMatch(/sélectionnées/);
   });
 
-  it('is explained in the help line of the selection bar', async () => {
+  it('leaves no help line on screen: the guides explain it, and the handle says what it does', async () => {
     const ui = await render();
     await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
-    expect(ui.target.querySelector('.selection-bar')?.textContent).toMatch(/poignée/);
+    expect(ui.target.querySelector('.selection-bar')).toBeNull();
+    expect(ui.target.textContent).not.toMatch(/par la poignée/);
+    expect(ui.handle('Réunion parents')!.title).toMatch(/Explorateur/);
   });
 });
 

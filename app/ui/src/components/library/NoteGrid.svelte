@@ -1,15 +1,14 @@
 <script lang="ts">
-  /** The note grid of the current view, with its heading, selection bar, empty states and problem list. */
+  /** The note grid of the current view, with its heading, the count of selected notes, empty states and problem list. */
   import { onMount, tick } from 'svelte';
   import { errorMessage } from '../../lib/api';
-  import { t } from '../../lib/i18n.svelte';
+  import { t, tn } from '../../lib/i18n.svelte';
   import type { LibraryState } from '../../lib/library-state.svelte';
   import { tablet } from '../../lib/tablet-state.svelte';
   import type { NoteSummary } from '../../lib/note';
   import { LIBRARY_LISTED_MARK, markWhenDrawn } from '../../lib/perf';
   import HandwritingResults from './HandwritingResults.svelte';
   import NoteCard from './NoteCard.svelte';
-  import SelectionBar from './SelectionBar.svelte';
 
   let {
     lib,
@@ -111,6 +110,11 @@
   <header class="section-header">
     <h2 id="library-heading">{heading}</h2>
     <span class="muted count">{notes.length}</span>
+    <!-- No bar of buttons: the actions on the selection are in the menu of a card. This says that a selection exists,
+         wherever the selected cards are scrolled to; the region is always there so that a change is announced. -->
+    <span class="selection-count" role="status" aria-live="polite" data-slot="selection-count"
+      >{lib.selectedNotes.length > 0 ? tn('library.selection.count', lib.selectedNotes.length) : ''}</span
+    >
   </header>
 
   {#if problems.length > 0}
@@ -130,10 +134,6 @@
         {/each}
       </ul>
     </div>
-  {/if}
-
-  {#if lib.selected.length > 0}
-    <SelectionBar {lib} />
   {/if}
 
   {#if searching}

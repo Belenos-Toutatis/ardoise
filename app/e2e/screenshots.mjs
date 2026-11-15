@@ -21,6 +21,7 @@
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { rightClick } from './card-menu.mjs';
 import { freePort, sleep, startApp } from './harness.mjs';
 import { penStroke } from './journeys-m8-input.mjs';
 import { attach, STATUS } from './journeys-m12-resume.mjs';
@@ -770,15 +771,20 @@ async function editorPanelsPicture(app) {
   await app.waitFor(`document.querySelector(${j(DIALOG)}) === null`, 'the dialog to close');
 }
 
-/** « library-views »: several notes selected, a search, the menu of a card. */
+/** « library-views »: several notes selected with the menu opened on them (no bar of buttons), a search, the menu of a card. */
 async function libraryViewsPicture(app) {
   await app.evaluate(`(() => { document.activeElement?.blur(); return true; })()`);
   await app.key('a', { ctrl: true });
   await app.waitFor(`document.querySelector('.note-card[aria-selected="true"], .note-card.selected, .note-card [aria-checked="true"]') !== null`, 'the cards selected').catch(() => {});
   await sleep(600);
-  await app.mouse('mouseMoved', 700, 800);
+  // The right click on one of the selected cards: the menu acts on all of them (its heading gives the count).
+  await rightClick(app, '.note-card:nth-child(2)');
+  await app.waitFor(`document.querySelector('.menu-list[role="menu"] .menu-heading') !== null`, 'the menu of the selection');
+  await sleep(400);
   await shoot(app, 'selection');
   await app.key('Escape');
+  await app.key('Escape');
+  await app.waitFor(`document.querySelector('.note-card.selected') === null`, 'the selection to go');
   await sleep(300);
 
   await app.click('input.search');
