@@ -79,7 +79,10 @@ en conflit, ce qui lui permet de fonctionner avec Nextcloud sur plusieurs ordina
 
 - **Classeurs** et sous-classeurs (des sous-dossiers), **ordre libre** des notes d'un classeur (glisser-déposer ou
   `Alt` + flèches), **étiquettes** en huit couleurs, **favoris**, corbeille avec « Annuler » ; `Ctrl + Z` annule aussi un
-  rangement des cartes d'un classeur.
+  rangement des cartes d'un classeur. Un déplacement de notes vers un autre classeur (glisser sur la barre latérale ou
+  « Déplacer vers… ») s'annule avec `Ctrl + Z` ou « Annuler », même après un changement de classeur : chaque note
+  retourne dans son classeur d'origine et reprend sa place dans l'ordre ; une note modifiée ou supprimée depuis reste où
+  elle est et le message le dit. Déposer des notes sur « Favoris » ou sur une étiquette s'annule aussi.
 - **Recherche** dans les titres, les étiquettes, les signets, les textes tapés, le code des équations et l'**écriture
   manuscrite** (reconnaissance d'écriture de Windows, hors connexion).
 - Dupliquer une note, **changer sa date**, tourner ou assembler plusieurs notes, créer une note depuis un PDF ou une
@@ -89,12 +92,16 @@ en conflit, ce qui lui permet de fonctionner avec Nextcloud sur plusieurs ordina
 
 ### L'éditeur
 
-- Sept **encres** sensibles à la pression, gomme, lasso, **calques**, papiers et modèles de page (ligné, Seyès, quadrillé,
-  millimétré, pointillé, portées), lignes, rectangles et ellipses (qui peuvent s'aimanter au quadrillage), redressement
-  des formes, découpe et assemblage de notes, retour à l'original de la tablette.
+- Sept **encres** sensibles à la pression, gomme, sélection au rectangle ou au lasso, **calques**, papiers et modèles de
+  page (ligné, Seyès, quadrillé, millimétré, pointillé, portées), lignes, rectangles et ellipses (qui peuvent s'aimanter
+  au quadrillage), redressement des formes, découpe et assemblage de notes, retour à l'original de la tablette.
+  L'outil **Sélection** choisit au **rectangle** ou au **lasso**, dans l'éditeur comme dans le mode direct : un nouveau
+  clic sur le bouton (ou `V`) change de façon, et la dernière façon utilisée est retenue sur l'ordinateur. Dans le
+  direct, on quitte la Sélection en choisissant **Stylo**.
 - **Texte tapé** au clavier, en Latin Modern ou en Andika, au milieu de l'écriture à la main : il revient à la ligne
-  tout seul au bord de la page (deux poignées sur les côtés d'un cadre en règlent la largeur), et une palette « αβγ »
-  insère l'alphabet grec et les symboles de physique-chimie d'un clic.
+  tout seul au bord de la page (deux poignées sur les côtés d'un cadre en règlent la largeur), et le bouton « αβγ » de
+  l'outil Texte ouvre l'onglet « Caractères » du panneau de côté, à côté de la page : une lettre touchée s'ajoute au
+  texte tapé (alphabet grec et symboles de physique-chimie).
 - **Équations en LaTeX**, chimie comprise (`\ce{2H2 + O2 -> 2H2O}`, `E_c = \dfrac{1}{2} m v^2`), avec un aperçu qui se
   dessine pendant la frappe, dessinées par Ardoise elle-même dans tous les exports.
 - **Signets** (un mot ou une courte phrase posés sur la page) pour le sommaire du classeur, la recherche et le plan du PDF.
@@ -181,7 +188,14 @@ pour Windows. Le code est public. Les essais ci-dessous disent honnêtement ce q
   tablette simulée.
 - **Essayés à la main le 14 novembre 2026**, sans compte rendu détaillé : l'impression (sans préciser l'imprimante), le
   plan et les liens d'un PDF dans un lecteur PDF, le clavier tactile de Windows dans un cadre de texte, une équation et
-  un signet, les menus du clic droit et le bouton **Guide**.
+  un signet, les menus du clic droit et le bouton **Guide** ; aussi le texte tapé qui revient à la ligne et ses
+  poignées (souris et stylet), la palette grecque (alors une fenêtre en surimpression), la question posée avant d'abandonner
+  une équation, `Échap` qui demande avant de quitter l'éditeur, `Ctrl + Z` après un rangement des cartes et l'export d'une
+  note avec du texte tapé.
+- **Ajoutés le 15 novembre 2026, pas encore essayés à la main** : l'onglet **Caractères** du panneau de côté (qui a
+  remplacé cette palette), la sélection au rectangle ou au lasso avec sa mémoire et dans le mode direct, l'annulation d'un
+  déplacement vers un autre classeur ou d'un dépôt sur **Favoris** ou une étiquette ; vérifiés par des tests automatiques
+  et des parcours seulement.
 - **Le reste** (bibliothèque, édition, relecture, exports, import d'Inkspace) est vérifié sous Windows par des tests
   automatiques sur le vrai exécutable, en français et en anglais. Jamais essayés à la main : l'export Word ouvert dans
   Word, l'import avec Inkspace ouvert, la fermeture de session de Windows avec une note non enregistrée. Windows 10 n'a
@@ -337,9 +351,12 @@ is in French and English. The pictures below show the demo library and simulated
 ![Live mode with the teacher's correction on a layer of its own](docs/guide/images/fr/direct.webp)
 
 - **Library and editor**: binders, free order, coloured tags, favourites, search (titles, tags, bookmarks, typed text,
-  handwriting through Windows' offline recognition), `Ctrl + Z` also undoing a rearrangement of a binder's cards; seven
-  pressure-sensitive inks, layers, shapes, typed text (Latin Modern or Andika; it wraps by itself, with a Greek alphabet
-  palette), LaTeX equations with chemistry (MathJax), bookmarks, PDF or image backgrounds, replay and narration.
+  handwriting through Windows' offline recognition), `Ctrl + Z` also undoing a rearrangement of a binder's cards, a move
+  of notes to another binder (even after you changed binder) and a drop onto "Favourites" or a tag; seven
+  pressure-sensitive inks, rectangle or lasso selection (in the editor and in live mode; the way used last is remembered),
+  layers, shapes, typed text (Latin Modern or Andika; it wraps by itself, with the Greek alphabet in the side panel's
+  Characters tab, beside the page), LaTeX equations with chemistry (MathJax), bookmarks, PDF or image backgrounds, replay
+  and narration.
 - **Exports**: PNG, JPG, WebP, SVG, PDF (layers kept apart on request), text, Markdown, Word (with the typed text and
   the equations as LaTeX), MP4, GIF, WebP, WebM, clipboard, printing; a whole binder in one PDF with its outline and an optional summary page. It can import Inkspace
   notes and can be driven by an assistant such as Claude Code or Claude Desktop through MCP.
@@ -353,7 +370,12 @@ is in French and English. The pictures below show the demo library and simulated
   14th the author reports that it works, without a step-by-step report), and several points are established by a
   simulated tablet only. Also tried by hand on 14 November 2026, without a detailed report: printing (the printer is not
   specified), a PDF's outline and links in a PDF reader, Windows' touch keyboard in a text frame, an equation and a
-  bookmark, the right-click menus and the **Guide** button. Everything else is checked on Windows by automated tests on
+  bookmark, the right-click menus and the **Guide** button, and also wrapping typed text with its side handles (mouse
+  and pen), the Greek palette (then a pop-up), the question asked before dropping an equation, `Esc` asking before leaving
+  the editor, `Ctrl + Z` after rearranging cards and the export of a note with typed text. Added on 15 November 2026 and
+  not yet tried by hand: the side panel's Characters tab (which replaced that palette), rectangle or lasso selection with
+  its memory and in live mode, and undoing a move to another binder or a drop onto Favourites or a tag; they are checked
+  by automated tests and journeys only. Everything else is checked on Windows by automated tests on
   the production executable, in French and English; never tried by hand: a Word export opened in Word, an Inkspace
   import with Inkspace open, a real Windows logoff with unsaved work; Windows 10 not tried.
 - **Requirements**: Windows 11 (Windows 10 not tried), WebView2, and Bluetooth LE for a tablet. No administrator rights.
