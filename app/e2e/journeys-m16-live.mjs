@@ -16,6 +16,7 @@
 // and the value stored in the browser's storage read back.
 import { closePanel, openPanel, PANEL } from './journeys-m11-share.mjs';
 import { canvasData, LIVE_CANVAS, registerTablet, STATUS, stopLive, text } from './journeys-m12-resume.mjs';
+import { chooseSelect } from './select-way.mjs';
 import { checkRecordingDot, collapsePanel, openTab, SIDE, sideState, tabButton, tabPanel } from './side-panel.mjs';
 
 const j = JSON.stringify;
@@ -92,6 +93,7 @@ async function openLive(app) {
 
 /** A lasso, with the mouse, around the page on the preview (the page is fitted whole: its margins are inside). */
 async function lassoPage(app) {
+  // The Select tool is a lasso here (the rectangle is `journeys-select-way.mjs`'s and the touch-up journeys').
   const box = await app.evaluate(`(() => { const r = document.querySelector(${j(LIVE_CANVAS)}).getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })()`);
   const corner = (fx, fy) => ({ x: box.x + box.w * fx, y: box.y + box.h * fy });
   await app.drag([corner(0.03, 0.03), corner(0.97, 0.03), corner(0.97, 0.97), corner(0.03, 0.97), corner(0.03, 0.05)]);
@@ -295,8 +297,7 @@ export const sidePanelLiveJourneys = [
 
       await check('Sélection (V), un lasso le panneau étant replié : il se rouvre, la barre de sélection est au-dessus de l’onglet ouvert', async () => {
         await openTab(app, 'layers');
-        await app.click(SELECT_BUTTON);
-        await app.waitFor(`${pressed(SELECT_BUTTON)} === 'true'`, 'the Select tool on');
+        await chooseSelect(app, 'lasso');
         await collapsePanel(app);
         await lassoPage(app);
         await inState(app, 'layers', false, 'the pane reopened by the selection');
@@ -318,7 +319,8 @@ export const sidePanelLiveJourneys = [
         if ((await app.evaluate(`document.querySelector('.live-preview ${BAR}') !== null`)) === true) throw new Error('the selection bar is still over the preview');
         await app.click(`${SIDE} ${BAR} button[data-action="deselect"]`);
         await app.waitFor(`document.querySelector(${j(BAR)}) === null`, 'the selection bar to go');
-        await app.click(SELECT_BUTTON);
+        // The tool is left by choosing the Pen tool (a click on its own button turns its way).
+        await app.click('button[data-action="pen"]');
         await app.waitFor(`${pressed(SELECT_BUTTON)} === 'false'`, 'the Select tool off');
       });
 

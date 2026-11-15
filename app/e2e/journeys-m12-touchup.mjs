@@ -11,8 +11,9 @@
 //     every `strokesEdited` event named. The model also checks, after each step, that nothing the tablet wrote was
 //     lost or doubled and that a stroke which came back is at its old place in the list.
 //
-// 1. The first journey: select with the toolbar button and the V key, lasso a group of strokes with real mouse events
-//    (the lasso is a rectangle, so the strokes it must pick are known from the geometry the stream carries), click
+// 1. The first journey: select with the toolbar button and the V key (which turns the tool from the rectangle to the lasso
+//    and back, Q22), choose a group of strokes with real mouse events, as a rectangle first and as a lasso for the steps
+//    that follow (both go round the same rectangle, so the strokes they must pick are known from the geometry the stream carries), click
 //    another stroke, Shift + click, Ctrl + click: the bar shows the count. The highlight is drawn in the control
 //    window only (pixels of the three canvases), and nothing about it goes through the stream. A swatch recolours
 //    the selection in the three places and leaves the pen's colour alone (the next stroke of the tablet is black).
@@ -58,6 +59,8 @@ import {
   text,
   titled,
 } from './journeys-m12-resume.mjs';
+
+import { chooseSelect, selectState } from './select-way.mjs';
 
 const j = JSON.stringify;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -691,16 +694,22 @@ const PEN_COLOR = `[...document.querySelectorAll('.swatches .swatch')].filter((b
 const barCount = `Number(document.querySelector(${j(`${BAR} .select-count`)})?.dataset.count ?? 0)`;
 const selectionIs = (n) => (n === 0 ? `document.querySelector(${j(BAR)}) === null` : `${barCount} === ${n}`);
 
-/** A lasso with real mouse events: the rectangle's outline, from its top left corner, closed. */
+/**
+ * The Select tool's gesture round a rectangle, with real mouse events, in the way the tool is in: a rectangle is a drag from
+ * the top left corner to the opposite one, a lasso is the rectangle's outline from its top left corner, closed. Both take the
+ * same strokes (the lasso's rule).
+ */
 async function drawLasso(app, map, rect, { shift = false } = {}) {
-  at('drawing a lasso');
-  const corners = [
+  const way = (await selectState(app))?.way ?? 'lasso';
+  at(`drawing a ${way}`);
+  const outline = [
     { x: rect.x0, y: rect.y0 },
     { x: rect.x1, y: rect.y0 },
     { x: rect.x1, y: rect.y1 },
     { x: rect.x0, y: rect.y1 },
     { x: rect.x0, y: rect.y0 },
-  ].map(map.at);
+  ];
+  const corners = (way === 'rectangle' ? [outline[0], outline[2]] : outline).map(map.at);
   const points = [];
   for (let k = 1; k < corners.length; k++) {
     const steps = Math.max(2, Math.ceil(Math.hypot(corners[k].x - corners[k - 1].x, corners[k].y - corners[k - 1].y) / 12));
@@ -1040,20 +1049,35 @@ export const touchUpJourneys = [
 
         // --- 2. Select ----------------------------------------------------------------------------------------------
 
-        await check('« Sélection » (bouton de la barre d’outils) : l’outil est actif ; la touche V le coupe puis le rallume', async () => {
-          await app.click(SELECT_BUTTON);
-          await app.waitFor(`document.querySelector(${j(SELECT_BUTTON)}).getAttribute('aria-pressed') === 'true'`, 'the Select tool on');
+        await check('« Sélection » (bouton de la barre d’outils) : l’outil est actif ; la touche V change de façon (lasso, rectangle) sans le couper ; « Stylo » le quitte et il revient dans la dernière façon', async () => {
+          const way = () => app.evaluate(`document.querySelector(${j(SELECT_BUTTON)}).dataset.way`);
+          const pressedNow = () => app.evaluate(`document.querySelector(${j(SELECT_BUTTON)}).getAttribute('aria-pressed')`);
+          await chooseSelect(app, 'rectangle');
           await app.waitFor(`document.querySelector(${j(`${LIVE_CANVAS}.selecting`)}) !== null`, 'the canvas to take the selection cursor');
+          const name = await app.evaluate(`document.querySelector(${j(SELECT_BUTTON)}).getAttribute('aria-label')`);
+          if (name !== l('live.select.rectangle')) throw new Error(`the button is named ${j(name)}`);
           await press(app, 'v');
-          await app.waitFor(`document.querySelector(${j(SELECT_BUTTON)}).getAttribute('aria-pressed') === 'false'`, 'the V key to turn it off');
+          await app.waitFor(`document.querySelector(${j(SELECT_BUTTON)}).dataset.way === 'lasso'`, 'the V key to turn it to the lasso');
+          if ((await pressedNow()) !== 'true') throw new Error('the V key left the Select tool');
+          if ((await app.evaluate(`document.querySelector('[data-slot="select-hint"]')?.textContent`)) !== l('live.select.helpLasso')) throw new Error('the help line does not say the lasso');
           await press(app, 'v');
-          await app.waitFor(`document.querySelector(${j(SELECT_BUTTON)}).getAttribute('aria-pressed') === 'true'`, 'the V key to turn it on again');
+          await app.waitFor(`document.querySelector(${j(SELECT_BUTTON)}).dataset.way === 'rectangle'`, 'the V key to turn it back to the rectangle');
+          // The tool is left by choosing the Pen tool; coming back gives the way used last (here after a turn to the lasso).
+          await press(app, 'v');
+          await app.waitFor(`document.querySelector(${j(SELECT_BUTTON)}).dataset.way === 'lasso'`, 'the lasso');
+          await app.click('button[data-action="pen"]');
+          await app.waitFor(`document.querySelector(${j(SELECT_BUTTON)}).getAttribute('aria-pressed') === 'false'`, 'the Pen tool to take over');
+          if ((await way()) !== 'lasso') throw new Error(`the button offers the ${await way()}, not the way used last`);
+          await app.click(SELECT_BUTTON);
+          await app.waitFor(`document.querySelector(${j(SELECT_BUTTON)}).getAttribute('aria-pressed') === 'true'`, 'the Select tool back');
+          if ((await way()) !== 'lasso') throw new Error('the tool did not come back in the way used last');
+          await chooseSelect(app, 'rectangle');
           await replan();
           baseline = await places.stats();
         });
 
         let selectMark = 0;
-        await check('lasso à la souris autour d’un groupe de traits : la barre annonce le nombre de traits pris', async () => {
+        await check('rectangle à la souris autour d’un groupe de traits : la barre annonce le nombre de traits pris', async () => {
           selectMark = stream.mark();
           // Away from the pen: when the page holds too few lines yet, a moment later it does.
           let strokes;
@@ -1069,7 +1093,7 @@ export const touchUpJourneys = [
           await replan();
           await drawLasso(app, map, plan.rect);
           await app.waitFor(selectionIs(plan.hits.length), `the bar to show ${plan.hits.length} strokes`);
-          console.log(`    lasso : ${plan.hits.length} traits pris (indices ${plan.hits.join(', ')})`);
+          console.log(`    rectangle : ${plan.hits.length} traits pris (indices ${plan.hits.join(', ')})`);
         });
 
         await check('rien de la sélection ailleurs : le halo n’est que dans la fenêtre de commande, le flux n’en dit rien', async () => {
@@ -1131,6 +1155,8 @@ export const touchUpJourneys = [
 
         let penBefore = '';
         await check('un échantillon de couleur recolore la sélection (Rouge) dans les trois endroits ; la couleur du stylo ne change pas', async () => {
+          // From here the groups are chosen with a lasso (the button turns the tool from the rectangle): both ways are measured.
+          await chooseSelect(app, 'lasso');
           penBefore = await app.evaluate(PEN_COLOR);
           if (penBefore !== l('editor.colors.black')) throw new Error(`the pen starts with ${j(penBefore)}, expected black`);
           const plan = lassoOf(edited.a.prints);
@@ -1836,8 +1862,7 @@ export const touchUpJourneys = [
         });
 
         await check('« Sélection » : l’outil est actif, lasso à la souris autour de trois traits (la barre en annonce le nombre)', async () => {
-          await app.click(SELECT_BUTTON);
-          await app.waitFor(`document.querySelector(${j(SELECT_BUTTON)}).getAttribute('aria-pressed') === 'true'`, 'the Select tool on');
+          await chooseSelect(app, 'lasso');
           let strokes;
           const plan = await until(() => {
             strokes = [...strokesNow()];

@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppState } from '../../lib/api';
 import { readEquationPath } from '../../lib/equation-path';
 import { setLocale } from '../../lib/i18n.svelte';
+import { selectPrefs } from '../../lib/select-prefs.svelte';
 import { mockLibrary, resetMockLibrary } from '../../lib/mock-data';
 import type { EquationObject, PageObject } from '../../lib/note';
 import Editor from './Editor.svelte';
@@ -51,6 +52,8 @@ const TITLE = 'Liste de courses';
 let cleanup: (() => void) | null = null;
 
 beforeEach(() => {
+  // The selection tool's way is the computer's preference: each test starts with the first-time rectangle.
+  selectPrefs.reset();
   resetMockLibrary();
   setLocale('fr');
   try {

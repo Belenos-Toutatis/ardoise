@@ -10,6 +10,7 @@ import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, type AppState } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
+import { selectPrefs } from '../../lib/select-prefs.svelte';
 import { openPdfPreviews } from '../../lib/mock-background';
 import { mockLibrary, resetMockLibrary } from '../../lib/mock-data';
 import { mockNarration, resetMockNarration, setMockNarration } from '../../lib/mock-narration';
@@ -64,6 +65,8 @@ function slowStroke(y: number, t0: number, t1: number): Stroke {
 let cleanup: (() => void) | null = null;
 
 beforeEach(() => {
+  // The selection tool's way is the computer's preference: each test starts with the first-time rectangle.
+  selectPrefs.reset();
   resetMockLibrary();
   resetMockNarration();
   resetMockShare();

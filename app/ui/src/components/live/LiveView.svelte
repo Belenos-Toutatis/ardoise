@@ -16,7 +16,8 @@
    * turns with its ink; on a page that keeps its shape only the two positions of its way round).
    *
    * Touching up (M12, this window only): the Select tool (V) lets the mouse and the pen choose strokes of
-   * the preview with a lasso or a click; a bar then deletes them (Delete, Backspace), the colour swatches
+   * the preview with a rectangle or a lasso (a click on the button while it is the tool, or V, turns from one to the other;
+   * from the Pen tool it comes back in the way used last, the editor's too: `selectPrefs`) or a click; a bar then deletes them (Delete, Backspace), the colour swatches
    * recolour them (and only them: with a selection a swatch does not change the pen's colour), Esc
    * deselects first. Dragging inside the selection's frame moves it and dragging a corner resizes it, with the pen, a finger or the mouse
    * (`transformSelected`, one edit and one step of the history; the selection stays). Undo and Redo (Ctrl+Z, Ctrl+Y) go through the page's history: a delete, a change
@@ -85,6 +86,7 @@
   } from '../../lib/live-actions';
   import { isSpaceKey, isTypingTarget, liveEditKeyAction, liveKeyAction, type LiveEditKeyAction } from '../../lib/live-keys';
   import { LiveSelection } from '../../lib/live-select.svelte';
+  import { selectPrefs } from '../../lib/select-prefs.svelte';
   import { LIVE_SHORTCUTS } from '../../lib/live-shortcuts';
   import { PagesFirst } from '../../lib/live-pages-first.svelte';
   import { LiveState, subscribeLive } from '../../lib/live-state.svelte';
@@ -237,6 +239,8 @@
   const sessionState = $derived(live.ready ? live.state : 'idle');
   /** The computer's tool on the preview. */
   const tool = $derived(selection.active ? 'select' : penOn ? 'pen' : 'none');
+  /** The Select tool's name: it says the way it selects (the tool's way is the computer's, shared with the editor). */
+  const selectName = $derived(t(selectPrefs.way === 'lasso' ? 'live.select.lasso' : 'live.select.rectangle'));
   const selectedMonitor = $derived(monitors.find((m) => m.key === monitorKey) ?? null);
   const aspect = $derived(aspectOf(live.presentation ?? selectedMonitor));
   const microphone = $derived(chosenMicrophone === undefined ? app.microphone : chosenMicrophone);
@@ -706,10 +710,17 @@
     void stepHistory(touchUp, again);
   }
 
-  /** The Select tool on or off; on, the Pen tool goes off. */
-  function toggleSelect(on = !selection.active) {
-    selection.toggle(on);
-    if (on) penOn = false;
+  /**
+   * The Select tool's button or key (V): from another tool (or none), the tool comes on, in the way used last
+   * (`selectPrefs`, shared with the editor), and the Pen tool goes off; while it is the tool, the other way. The tool is
+   * left by choosing the Pen tool (its button or P); Esc only drops the selection.
+   */
+  function chooseSelect() {
+    if (selection.active) selectPrefs.turn();
+    else {
+      selection.toggle(true);
+      penOn = false;
+    }
   }
 
   /** The Pen tool on or off; on, the Select tool goes off, and with it the selection. */
@@ -810,7 +821,7 @@
   function runEditKey(action: LiveEditKeyAction) {
     switch (action.kind) {
       case 'select':
-        toggleSelect();
+        chooseSelect();
         break;
       case 'pen':
         togglePen();
@@ -1126,10 +1137,20 @@
         data-action="select"
         class:active={selection.active}
         aria-pressed={selection.active}
-        title={t('live.select.hint')}
+        data-way={selectPrefs.way}
+        title="{selectName}. {t('live.select.hint')}"
+        aria-label={selectName}
         disabled={sessionState === 'idle'}
-        onclick={() => toggleSelect()}
+        onclick={() => chooseSelect()}
       >
+        <svg class="select-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          {#if selectPrefs.way === 'rectangle'}
+            <rect x="4" y="6" width="16" height="12" stroke-dasharray="3 2.5" />
+          {:else}
+            <path d="M12 5C7.6 5 4 7.2 4 10s3.6 5 8 5 8-2.2 8-5-3.6-5-8-5z" stroke-dasharray="3 2.5" />
+            <path d="M9.5 14.6C9 17 8 18.5 6 19.5" />
+          {/if}
+        </svg>
         {t('live.select.toggle')}
       </button>
       <button
@@ -1244,6 +1265,7 @@
         label={t('live.preview.label', { page: `${live.pageIndex + 1} / ${live.pageCount}` })}
         onview={setView}
         {tool}
+        way={selectPrefs.way}
         selection={selection.indices}
         onselect={(picked, combine) => selection.choose(live, picked, combine)}
         ontransform={(transform) => transformSelected(touchUp, transform)}
@@ -1420,7 +1442,7 @@
         </div>
       {/if}
       {#if selection.active}
-        <p class="pane-help" data-slot="select-hint">{t('live.select.help')}</p>
+        <p class="pane-help" data-slot="select-hint">{t(selectPrefs.way === 'lasso' ? 'live.select.helpLasso' : 'live.select.helpRectangle')}</p>
       {/if}
       {#if penOn}
         <p class="pane-help" data-slot="pen-hint">{t('live.pen.help')}</p>
@@ -1628,6 +1650,13 @@
     border-color: var(--accent);
     background: var(--accent);
     color: var(--accent-text);
+  }
+
+  /* The Select tool's icon: its way (rectangle or lasso), at the height of the text so that the button keeps its size. */
+  .select-icon {
+    width: 1rem;
+    height: 1rem;
+    vertical-align: -0.2em;
   }
 
   .laser-dot {

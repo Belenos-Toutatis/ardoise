@@ -737,12 +737,19 @@ ni d'ouvrir l'éditeur. Vous retouchez dans la fenêtre de commande, et **la tab
 
 **Choisir des traits**
 
-- Cliquez sur **Sélection** (groupe **Ordinateur**) dans la barre d'outils, ou appuyez sur `V`. Un second appui quitte
-  l'outil. **Sélection** et **Stylo** (voir **Corriger pendant le direct**) s'excluent : choisir l'un quitte l'autre.
-- **Lasso** : dans l'aperçu, appuyez avec la souris et entourez les traits, puis relâchez. Un trait est choisi quand la
-  moitié au moins de ses points est dans le lasso.
+- Cliquez sur **Sélection** (groupe **Ordinateur**) dans la barre d'outils, ou appuyez sur `V`. **Sélection** et **Stylo**
+  (voir **Corriger pendant le direct**) s'excluent : choisir l'un quitte l'autre. **On quitte l'outil Sélection en
+  choisissant Stylo** (le bouton, ou `P`) : un nouveau clic sur **Sélection**, ou un nouvel appui sur `V`, ne le quitte plus,
+  il change la façon de choisir. `Échap` enlève la sélection, sans quitter l'outil ; sans sélection, il demande de terminer
+  le mode direct, comme avant.
+- **Façon de choisir**, la même que dans l'éditeur : un **rectangle** (appuyez avec la souris sur un coin de l'aperçu,
+  glissez jusqu'au coin opposé, puis relâchez ; un cadre en pointillés montre la zone) ou un **lasso** (entourez les traits à
+  main levée). Un nouveau clic sur **Sélection** (ou un nouvel appui sur `V`) passe de l'un à l'autre ; le bouton (« Sélection :
+  rectangle » ou « Sélection : lasso »), son icône et la ligne d'aide le disent. Revenir à **Sélection** depuis **Stylo**
+  redonne la dernière façon utilisée, dans le direct comme dans l'éditeur. La première fois, c'est le rectangle. Un trait est
+  choisi quand la moitié au moins de ses points est dans la zone, rectangle ou lasso.
 - **Clic** : cliquez sur un trait pour le choisir seul. Cliquez sur l'encre elle-même, pas à côté.
-- `Maj` + lasso ou clic ajoute des traits à ceux déjà choisis. `Ctrl` + lasso ou clic en retire.
+- `Maj` + rectangle, lasso ou clic ajoute des traits à ceux déjà choisis. `Ctrl` + rectangle, lasso ou clic en retire.
 - Un geste dans le vide, ou `Échap`, enlève la sélection. `Échap` ne ferme rien d'autre tant que des traits sont choisis.
 - Un doigt hors du cadre de la sélection et la molette continuent de déplacer et de zoomer l'aperçu.
 - Les traits choisis sont entourés de bleu dans l'aperçu. La barre de la sélection, au-dessus de l'onglet ouvert du
@@ -761,8 +768,8 @@ de ses quatre coins.
   et au doigt. Glissez le long de la diagonale. Le coin opposé ne bouge pas ; l'épaisseur du trait
   suit la taille. On ne peut pas descendre sous un vingtième de la taille, ni dépasser vingt fois.
 - Un simple appui dans le cadre, sans glisser, ne change rien : il ne refait pas de sélection. Avec `Maj` ou `Ctrl`,
-  un geste est toujours un lasso, même sur le cadre. Hors du cadre, la souris et le stylet entourent comme avant et un doigt
-  déplace l'aperçu.
+  un geste choisit toujours (un rectangle ou un lasso, selon la façon), même sur le cadre. Hors du cadre, la souris et le stylet
+  choisissent comme avant et un doigt déplace l'aperçu.
 - Pendant le geste, les traits se voient soulevés, à la place où vous les menez, et l'endroit qu'ils quittent est vide. `Échap`
   (ou un deuxième doigt, qui prend le geste pour un zoom) abandonne le geste : les traits restent où ils étaient et rien n'est
   envoyé.
@@ -791,7 +798,7 @@ sa couleur. Sans sélection, une pastille règle la couleur du stylo, comme avan
   `Ctrl + Z` annule encore ses retouches. Les listes disparaissent quand vous terminez le mode direct.
 - Les boutons **Annuler** et **Rétablir** sont grisés quand il n'y a rien à faire.
 
-**Le vidéoprojecteur et l'autre écran du réseau ne voient que le résultat.** Jamais le contour bleu ni le lasso : un
+**Le vidéoprojecteur et l'autre écran du réseau ne voient que le résultat.** Jamais le contour bleu, ni le rectangle de sélection, ni le lasso : un
 trait supprimé disparaît, un trait recoloré change de couleur, un trait déplacé ou redimensionné apparaît à sa nouvelle place. Les annotations tracées sur la présentation ne sont pas
 des traits de la page : on ne les choisit pas.
 
@@ -844,7 +851,7 @@ mélanger à son écriture.
    **Sélection**.
 
 **Ce que montrent le vidéoprojecteur et le partage.** Les deux calques, mêlés, comme à l'écran, sauf les calques
-masqués, qu'ils ne montrent jamais. Ni le cadre, ni le lasso, ni le cercle de la gomme ne sont projetés.
+masqués, qu'ils ne montrent jamais. Ni le cadre, ni le rectangle de sélection, ni le lasso, ni le cercle de la gomme ne sont projetés.
 
 **Annuler avec `Ctrl + Z`.** Il annule les actions de l'*ordinateur* : un trait, un coup de gomme, une retouche,
 **Effacer la page** (voir **Retoucher pendant le direct**). Jamais l'écriture de la tablette. Les opérations sur les
@@ -1436,14 +1443,16 @@ La barre d'outils propose les outils suivants (**Outil**) :
   plus bas).
 - **Gomme** : **Traits entiers** ou **Partielle**, avec sa **Taille**. Elle n'efface que sur le calque choisi (voir
   **Calques**).
-- **Sélection** : un **rectangle** ou un **lasso**, au choix, sur les traits et les textes du calque choisi. Un clic sur
-  **Sélection** (depuis un autre outil) donne le **rectangle** : faites glisser d'un coin à l'autre pour sélectionner ce qu'il
+- **Sélection** : un **rectangle** ou un **lasso**, au choix, sur les traits et les textes du calque choisi. La première
+  fois, un clic sur **Sélection** donne le **rectangle** : faites glisser d'un coin à l'autre pour sélectionner ce qu'il
   contient. Un nouveau clic sur le bouton, ou un nouvel appui sur `V`, passe au **lasso** : entourez les éléments à main levée ;
-  un autre clic revient au rectangle, et ainsi de suite. Le bouton (« Sélection : rectangle » ou « Sélection : lasso »), son
-  infobulle et la ligne d'aide dessous disent lequel des deux est actif. Les deux prennent la même chose pour la même zone :
+  un autre clic revient au rectangle, et ainsi de suite. Le bouton garde son nom court (« Sélection ») : son icône, son
+  infobulle (« Sélection : rectangle » ou « Sélection : lasso ») et la ligne d'aide dessous disent lequel des deux est actif. Les deux prennent la même chose pour la même zone :
   un trait quand la moitié au moins de ses points est dedans, un texte, une équation ou un signet quand son milieu est dedans.
   Un clic sur un trait ou sur un texte le prend seul, un clic sur la page vide désélectionne ; `Maj` + rectangle (ou lasso)
-  ajoute, `Ctrl` + rectangle (ou lasso) retire. Revenir à **Sélection** depuis un autre outil redonne toujours le rectangle. Le
+  ajoute, `Ctrl` + rectangle (ou lasso) retire. Revenir à **Sélection** depuis un autre outil redonne **la dernière façon
+  utilisée**, et cette façon est la même dans l'éditeur et dans le mode direct : elle est retenue sur cet ordinateur, même
+  après avoir fermé Ardoise. Le
   bloc **Sélection**, au-dessus de l'onglet ouvert du panneau de côté, propose **Copier**, **Couper**, **Coller**,
   **Dupliquer**, **Redresser les formes**, **Supprimer**.
   Les changements de couleur, d'encre et d'épaisseur s'appliquent alors à la sélection ; on la déplace (en la saisissant
@@ -2324,7 +2333,7 @@ l'impression d'Ardoise (jamais l'impression de la fenêtre comme une page web). 
 | `Échap` | Par étapes, un appui par étape : abandonner le geste en cours, terminer la saisie d'un texte ou d'une équation (ce qui est écrit reste ; une équation au code incorrect reste dans son panneau) ; fermer la découpe, la relecture, le recadrage ou le réglage de **Redresser les formes** ; désélectionner ; revenir à la bibliothèque, en demandant d'enregistrer s'il y a des modifications (jamais pendant l'enregistrement d'une narration) |
 | `Maj`, `Alt` (tenues pendant le tracé d'une forme) | Inverser **Forme régulière** (`Maj`) ou **Depuis le centre** (`Alt`) pour ce tracé |
 | `Alt + ←`, `Alt + →` | **Page précédente**, **Page suivante** (la note d'avant, la note d'après dans la bibliothèque) |
-| `V`, `P`, `E`, `T`, `M`, `B`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Texte**, **Équation**, **Signet**, **Déplacer la page** (`V` quand **Sélection** est déjà l'outil : passe du rectangle au lasso, et inversement) |
+| `V`, `P`, `E`, `T`, `M`, `B`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Texte**, **Équation**, **Signet**, **Déplacer la page** (`V` quand **Sélection** est déjà l'outil : passe du rectangle au lasso, et inversement ; l'outil revient dans la dernière façon utilisée) |
 | `Espace` (maintenu) | Déplacer la page (sauf si un bouton a le focus : `Espace` agit alors sur ce bouton, y compris une icône du rail) |
 | `F` | **Redresser les formes** |
 | `R` | **Relecture** |
@@ -2360,7 +2369,7 @@ projection ; la fenêtre n'a pas d'autre touche.
 | `W` | **Largeur** |
 | `Maj + flèches` | Déplacer la zone projetée |
 | `Suppr` ou `Retour arrière` | Fenêtre de commande, **avec des traits choisis** : les supprimer (sans sélection, rien). Fenêtre projetée : effacer les annotations écrites sur la présentation |
-| `V` | Outil **Sélection** (fenêtre de commande) : lasso ou clic sur un trait du calque choisi |
+| `V` | Outil **Sélection** (fenêtre de commande) : rectangle, lasso ou clic sur un trait du calque choisi ; un nouvel appui passe du rectangle au lasso et inversement (on quitte l'outil en choisissant **Stylo**, `P`) |
 | `P` | Outil **Stylo** (fenêtre de commande) : écrire avec le stylet ou la souris de l'ordinateur sur le calque choisi |
 | `Ctrl + Z` | Annuler un trait ou un coup de gomme de l'ordinateur, une suppression, un changement de couleur ou **Effacer la page** (fenêtre de commande) |
 | `Ctrl + Y` ou `Ctrl + Maj + Z` | Rétablir (fenêtre de commande) |

@@ -2128,8 +2128,11 @@
     },
     "select": {
       "toggle": "Select",
-      "hint": "Pick strokes with a lasso or a click to delete them, change their colour, move them or resize them (V)",
-      "help": "Lasso: select · click: one stroke · Shift: add · Ctrl: remove · Esc: deselect. Drag inside the frame to move the selection, or by a corner to resize it (pen, finger or mouse). The colour swatches change the colour of the selection. Only strokes of the chosen layer are picked.",
+      "rectangle": "Select: rectangle",
+      "lasso": "Select: lasso",
+      "hint": "Pick strokes with a rectangle, a lasso or a click to delete them, change their colour, move them or resize them (V; pressing it again switches between the rectangle and the lasso)",
+      "helpRectangle": "Rectangle: drag a rectangle to select · click: one stroke · Shift: add · Ctrl: remove · Esc: deselect · click the button again (or V): lasso. Drag inside the frame to move the selection, or by a corner to resize it (pen, finger or mouse). The colour swatches change the colour of the selection. Only strokes of the chosen layer are picked.",
+      "helpLasso": "Lasso: draw an outline to select · click: one stroke · Shift: add · Ctrl: remove · Esc: deselect · click the button again (or V): rectangle. Drag inside the frame to move the selection, or by a corner to resize it (pen, finger or mouse). The colour swatches change the colour of the selection. Only strokes of the chosen layer are picked.",
       "bar": "Touch up the selection",
       "count": "Selected strokes: {count}",
       "delete": "Delete",
@@ -2223,7 +2226,7 @@
           "action": "Pen tool: write with the computer's pen or mouse"
         },
         "select": {
-          "action": "Select tool (lasso or click on a stroke; drag inside the frame to move, by a corner to resize)"
+          "action": "Select tool (rectangle or lasso, or click on a stroke; V again switches between the two; drag inside the frame to move, by a corner to resize)"
         },
         "delete": {
           "action": "Delete the selection"
