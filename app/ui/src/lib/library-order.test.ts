@@ -56,7 +56,7 @@ describe('the free order of a binder: the sort choice', () => {
   const binder: LibraryView = { kind: 'binder', binder: 'Classe' };
   it('is offered in a binder view only, and the other views fall back to the newest first', () => {
     expect(sortChoices(binder)).toEqual(['date-desc', 'date-asc', 'title-asc', 'title-desc', 'binder']);
-    for (const view of [{ kind: 'all' }, { kind: 'favorites' }, { kind: 'tag', tag: 'x' }, { kind: 'trash' }] as LibraryView[]) {
+    for (const view of [{ kind: 'all' }, { kind: 'favorites' }, { kind: 'unsorted' }, { kind: 'trash' }] as LibraryView[]) {
       expect(sortChoices(view)).not.toContain('binder');
       expect(orderIn('binder', view)).toBe('date-desc');
     }

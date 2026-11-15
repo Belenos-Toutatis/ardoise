@@ -40,21 +40,18 @@
         return t('library.unsorted');
       case 'binder':
         return view.binder.split('/').pop() ?? view.binder;
-      case 'tag':
-        return `# ${view.tag}`;
       default:
         return t('library.all');
     }
   });
   const emptyKey = $derived.by(() => {
     const kind = lib.view.kind;
+    if (lib.tagFilter.length > 0) return 'library.empty.tags';
     return kind === 'favorites'
       ? 'library.empty.favorites'
       : kind === 'unsorted'
         ? 'library.empty.unsorted'
-        : kind === 'binder'
-          ? 'library.empty.binder'
-          : 'library.empty.tag';
+        : 'library.empty.binder';
   });
   const problems = $derived(lib.listing?.problems ?? []);
   // Keeps the Tab stop inside the grid when notes disappear.
@@ -117,6 +114,33 @@
 <section class="library-section" aria-labelledby="library-heading">
   <header class="section-header">
     <h2 id="library-heading">{heading}</h2>
+    {#if lib.tagFilter.length > 0}
+      <!-- The tags the notes shown all carry, on top of the view: each one leaves the filter by its cross. -->
+      <ul class="chips tag-filter" aria-label={t('library.tagFilter.label')} data-slot="tag-filter">
+        {#each lib.tagFilter as tag (tag)}
+          {@const color = lib.tagColors.of(tag)}
+          <li>
+            <button
+              type="button"
+              class="chip removable"
+              data-tag-color={color}
+              data-filter-tag={tag}
+              aria-label={t('library.tagFilter.remove', { tag })}
+              title={t('library.tagFilter.remove', { tag })}
+              onclick={() => lib.toggleTagFilter(tag)}
+              >{#if color}<span class="tag-dot" aria-hidden="true"></span>{:else}#{/if}{tag}<span aria-hidden="true"> ×</span></button
+            >
+          </li>
+        {/each}
+        {#if lib.tagFilter.length > 1}
+          <li>
+            <button type="button" class="chip clear-tags" data-action="clear-tags" onclick={() => lib.clearTagFilter()}
+              >{t('library.tagFilter.clear')}</button
+            >
+          </li>
+        {/if}
+      </ul>
+    {/if}
     <span class="muted count">{notes.length}</span>
     <!-- No bar of buttons: the actions on the selection are in the menu of a card. This says that a selection exists,
          wherever the selected cards are scrolled to; the region is always there so that a change is announced. -->

@@ -193,6 +193,28 @@ export const libraryJourneys = [
         await app.waitFor(`${cards} === 8`, 'all the notes again');
       });
 
+      await check('un classeur et deux étiquettes : seules les notes du classeur qui portent les deux', async () => {
+        /** Every card shown is in « Classe » (or below) and carries each of `tags`, and there are some. */
+        const only = (tags) => `(() => {
+          const shown = [...document.querySelectorAll('.note-card')];
+          return shown.length > 0 && shown.every((card) => {
+            const binder = card.querySelector('.card-binder')?.textContent.trim() ?? '';
+            const carried = [...card.querySelectorAll('.chips .chip')].map((chip) => chip.textContent.trim());
+            return (binder === 'Classe' || binder.startsWith('Classe/')) && ${JSON.stringify(tags)}.every((tag) => carried.includes(tag));
+          });
+        })()`;
+        await app.click('.sidebar [data-binder="Classe"]');
+        await app.click('.sidebar [data-tag="physique"]');
+        await app.waitFor(only(['physique']), 'the notes of Classe tagged physique');
+        await app.click('.sidebar [data-tag="3e B"]');
+        await app.waitFor(only(['physique', '3e B']), 'the notes of Classe tagged physique and 3e B');
+        await app.waitFor(`document.querySelectorAll('[data-filter-tag]').length === 2`, 'the two tags next to the title');
+        await app.click('[data-action="clear-tags"]');
+        await app.waitFor(`document.querySelector('[data-slot="tag-filter"]') === null`, 'no tag left in the filter');
+        await app.click('[data-view="all"]');
+        await app.waitFor(`${cards} === 8`, 'all the notes again');
+      });
+
       await check(`« ${l('library.binder.rename')} » : « Perso » devient « ${newName} », le dossier aussi`, async () => {
         await app.click('.sidebar .nav-row:has([data-binder="Perso"]) .menu .icon-button');
         await app.click('.sidebar .menu-list button', l('library.binder.rename'));

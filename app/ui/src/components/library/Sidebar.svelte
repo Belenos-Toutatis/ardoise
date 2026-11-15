@@ -4,7 +4,7 @@
    * notes; each one can be renamed or deleted from its menu), tags (each with its colour), trash,
    * the Inkspace import, then the tablet block with the entry that opens the tablet test.
    */
-  import { onMount, tick } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { menuPoint, pointOf, type MenuItem, type Point } from '../../lib/context-menu';
   import { t } from '../../lib/i18n.svelte';
@@ -124,7 +124,9 @@
 
   function tagItems(tag: string): MenuItem[] {
     return [
-      { id: 'show', label: t('contextMenu.show'), onselect: () => lib.setView({ kind: 'tag', tag }) },
+      lib.hasTagFilter(tag)
+        ? { id: 'hide', label: t('library.tagFilter.removeShort'), onselect: () => lib.toggleTagFilter(tag) }
+        : { id: 'show', label: t('contextMenu.show'), onselect: () => lib.showTag(tag) },
       { id: 'color', label: t('contextMenu.tagColor'), onselect: () => pickers[tag]?.show() },
     ];
   }
@@ -185,12 +187,46 @@
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
     dropTarget = placeKey(place);
+    if (opening && placeKey(binderPlace(opening.path)) !== dropTarget) stopOpening();
   }
+
+  /**
+   * Dragged notes held over a closed binder that has sub-binders open it after a moment, so that they can be dropped in
+   * a sub-binder (user request 2026-11-15). The binders opened that way stay open after the drop.
+   */
+  const OPEN_WHILE_DRAGGING_MS = 700;
+  /** The binder that opens if the drag stays over it: plain (not reactive), only the timer reads it. */
+  let opening: { path: string; timer: ReturnType<typeof setTimeout> } | null = null;
+
+  function stopOpening() {
+    if (opening) clearTimeout(opening.timer);
+    opening = null;
+  }
+
+  function openWhileDragging(node: BinderNode) {
+    if (!lib.dragging || node.children.length === 0 || expanded.has(node.path) || opening?.path === node.path) return;
+    stopOpening();
+    const path = node.path;
+    opening = {
+      path,
+      timer: setTimeout(() => {
+        opening = null;
+        if (lib.dragging && dropTarget === placeKey(binderPlace(path))) expanded.add(path);
+      }, OPEN_WHILE_DRAGGING_MS),
+    };
+  }
+
+  // A drag that ends (dropped anywhere, or cancelled with Escape) opens nothing more.
+  $effect(() => {
+    if (!lib.dragging) stopOpening();
+  });
+  onDestroy(stopOpening);
 
   function drop(event: DragEvent, place: DropPlace) {
     if (!lib.dragging) return;
     event.preventDefault();
     dropTarget = null;
+    stopOpening();
     if (place.kind === 'binder') void lib.dropOn(place.path);
     else if (place.kind === 'unsorted') void lib.dropOn('');
     else if (place.kind === 'favorites') void lib.dropOnFavorites();
@@ -244,8 +280,14 @@
         data-binder={node.path}
         aria-current={current(view)}
         onclick={() => lib.setView(view)}
-        ondragover={(event) => dragover(event, binderPlace(node.path))}
-        ondragenter={(event) => dragover(event, binderPlace(node.path))}
+        ondragover={(event) => {
+          dragover(event, binderPlace(node.path));
+          openWhileDragging(node);
+        }}
+        ondragenter={(event) => {
+          dragover(event, binderPlace(node.path));
+          openWhileDragging(node);
+        }}
         ondragleave={() => dragleave(binderPlace(node.path))}
         ondrop={(event) => drop(event, binderPlace(node.path))}
         oncontextmenu={(event) => {
@@ -418,8 +460,9 @@
                 ondragleave={() => dragleave({ kind: 'tag', tag: entry.tag })}
                 ondrop={(event) => drop(event, { kind: 'tag', tag: entry.tag })}
                 data-tag-color={color}
-                aria-current={current({ kind: 'tag', tag: entry.tag })}
-                onclick={() => lib.setView({ kind: 'tag', tag: entry.tag })}
+                aria-pressed={lib.hasTagFilter(entry.tag)}
+                title={lib.hasTagFilter(entry.tag) ? t('library.tagFilter.remove', { tag: entry.tag }) : t('library.tagFilter.add', { tag: entry.tag })}
+                onclick={() => lib.toggleTagFilter(entry.tag)}
                 oncontextmenu={(event) => showMenu(event, t('contextMenu.tagLabel', { tag: entry.tag }), tagItems(entry.tag))}
               >
                 <span class="nav-label">

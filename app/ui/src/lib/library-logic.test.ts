@@ -9,6 +9,7 @@ import {
   matchesSearch,
   normalize,
   notesOfView,
+  withTags,
   oldestFirst,
   originalBinder,
   parseTags,
@@ -102,9 +103,25 @@ describe('search in the handwriting', () => {
 });
 
 describe('views', () => {
-  it('filters favourites, tags and binders (a binder includes its sub-binders)', () => {
+  it('narrows a view to the notes carrying every tag of the filter, whatever the case', () => {
+    const tagged = [
+      note({ path: 'p', tags: ['Physique', '3e B'], binder: 'Classe' }),
+      note({ path: 'q', tags: ['physique'], binder: 'Classe' }),
+      note({ path: 'r', tags: ['physique', '3e b'], binder: 'Perso' }),
+    ];
+    const paths = (shown: NoteSummary[]) => shown.map((n) => n.path).sort();
+    expect(paths(withTags(tagged, []))).toEqual(['p', 'q', 'r']);
+    expect(paths(withTags(tagged, ['physique']))).toEqual(['p', 'q', 'r']);
+    expect(paths(withTags(tagged, ['physique', '3e B']))).toEqual(['p', 'r']);
+    // A binder and two tags: the notes of that binder that carry both.
+    const classe = { kind: 'binder', binder: 'Classe' } as const;
+    expect(paths(visibleNotes(tagged, classe, '', 'title-asc', 'fr', new Map(), undefined, ['3e B', 'Physique']))).toEqual(['p']);
+    expect(paths(visibleNotes(tagged, { kind: 'unsorted' }, '', 'title-asc', 'fr', new Map(), undefined, ['physique']))).toEqual([]);
+  });
+
+  it('filters favourites, the notes in no binder and binders (a binder includes its sub-binders)', () => {
     expect(notesOfView(notes, { kind: 'favorites' }).map((n) => n.path)).toEqual(['b']);
-    expect(notesOfView(notes, { kind: 'tag', tag: 'école' }).map((n) => n.path)).toEqual(['a']);
+    expect(notesOfView(notes, { kind: 'unsorted' }).map((n) => n.path)).toEqual(['c']);
     expect(notesOfView(notes, { kind: 'binder', binder: 'Classe' }).map((n) => n.path)).toEqual(['b', 'd']);
     expect(notesOfView(notes, { kind: 'binder', binder: 'Classe/3e B' }).map((n) => n.path)).toEqual(['b']);
     expect(notesOfView(notes, { kind: 'trash' })).toEqual([]);

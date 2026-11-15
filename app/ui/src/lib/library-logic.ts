@@ -9,8 +9,9 @@ export type LibraryView =
   /** The notes in no binder, at the root of the library (user request 2026-11-15). */
   | { kind: 'unsorted' }
   | { kind: 'binder'; binder: string }
-  | { kind: 'tag'; tag: string }
   | { kind: 'trash' };
+// Tags are not a view but a filter on top of one (`LibraryState.tagFilter`, user request 2026-11-15): a binder and two
+// tags show the notes of that binder that carry both tags.
 
 /**
  * `binder`: the free order of a binder (`_ardoise-order.json`), only in the view of a binder; the other
@@ -70,8 +71,13 @@ export function handwritingMatches(
 export function sameView(a: LibraryView, b: LibraryView): boolean {
   if (a.kind !== b.kind) return false;
   if (a.kind === 'binder' && b.kind === 'binder') return a.binder === b.binder;
-  if (a.kind === 'tag' && b.kind === 'tag') return a.tag === b.tag;
   return true;
+}
+
+/** The notes that carry every one of `tags` (none: all of them). Case does not matter, as everywhere for tags. */
+export function withTags(notes: NoteSummary[], tags: readonly string[]): NoteSummary[] {
+  if (tags.length === 0) return notes;
+  return notes.filter((n) => tags.every((tag) => n.tags.some((t) => sameTag(t, tag))));
 }
 
 /** True when `binder` is `ancestor` or lies inside it. The root (`''`) contains everything. */
@@ -90,8 +96,6 @@ export function notesOfView(notes: NoteSummary[], view: LibraryView): NoteSummar
       return notes.filter((n) => !n.binder);
     case 'binder':
       return notes.filter((n) => isInBinder(n.binder, view.binder));
-    case 'tag':
-      return notes.filter((n) => n.tags.some((t) => sameTag(t, view.tag)));
     case 'trash':
       return [];
   }
@@ -119,8 +123,8 @@ export interface BinderOrders {
 }
 
 /**
- * The notes shown for a view, search (with what the handwriting search found) and order. `binderOrders`
- * (the tree of binders and the orders of the listing) serves the order `binder` of a binder's view.
+ * The notes shown for a view, tags (every one), search (with what the handwriting search found) and order.
+ * `binderOrders` (the tree of binders and the orders of the listing) serves the order `binder` of a binder's view.
  */
 export function visibleNotes(
   notes: NoteSummary[],
@@ -130,8 +134,9 @@ export function visibleNotes(
   locale: string,
   hits: ReadonlyMap<string, HandwritingHit> = new Map(),
   binderOrders?: BinderOrders,
+  tags: readonly string[] = [],
 ): NoteSummary[] {
-  const shown = notesOfView(notes, view).filter((n) => matchesSearch(n, query, hits.get(n.path)));
+  const shown = withTags(notesOfView(notes, view), tags).filter((n) => matchesSearch(n, query, hits.get(n.path)));
   if (order === 'binder' && view.kind === 'binder' && binderOrders) {
     return arrangeByBinderOrder(shown, view.binder, binderOrders, locale);
   }

@@ -1047,7 +1047,7 @@ Every action on notes is there: there is no bar of buttons above the cards. Rena
 
 **The right click** never shows a web page's menu ("Save image as…", "More tools"…): Ardoise shows its own menu, or nothing.
 The menu opens **under the pointer** (the `Menu` key, or `Shift + F10`, on a card or a binder opens it under its **⋯** button).
-There is one on: a card and a binder (above); **All notes**, **Favourites** and **Not in a binder** (**Show**, **Select all**); a tag (**Show**,
+There is one on: a card and a binder (above); **All notes**, **Favourites** and **Not in a binder** (**Show**, **Select all**); a tag (**Show**, or **Remove from the filter** when it is in it already,
 **Colour…**, which opens the colour palette); the **Trash** (**Open the trash**, **Empty the trash…**, with the same
 confirmation question as the button); a note in the trash (**Restore**, **Delete permanently…**, which asks to confirm); a
 layer and the editor's page (chapter 8). The arrows, `Home`, `End` and `Enter` drive the menu; `Esc`, a click elsewhere,
@@ -1065,7 +1065,8 @@ of unsaved changes that can be recovered (chapter 8).
 A binder is simply a *subfolder* of the library. Click the **New binder** icon (or **New sub-binder in…** next to a
 binder), type the **Binder name** and click **Create**. To file notes, drag them onto a binder in the sidebar, or
 right-click a note (one of the selected notes, to move several) and choose **Move to…** (**Library (root)** takes them back to
-the root).
+the root). To drop them in a hidden sub-binder, hold them a moment over its binder: it opens and shows its sub-binders (for
+example, held over **Classe**, the note brings up **3e B**, where you let it go). The binder stays open afterwards.
 
 **A filing mistake can be undone.** After each move, a message says where the notes went ("Shopping list" moved to "Perso".",
 "3 notes moved to "Classe/3e B".") and offers **Undo**; `Ctrl + Z` does the same, **even when the card has left the binder on
@@ -1170,7 +1171,11 @@ them and what they hold. The summary is not shown again when you come back from 
 
 Select one or several notes, right-click one of them (or click its **⋯** button) and choose **Tags…**: in the window, type a
 tag (several, separated by a comma) and click **Add**; an existing
-tag is removed with its cross. A click on a tag in the sidebar, or on a card's tag, shows only the notes that carry it.
+tag is removed with its cross. A click on a tag in the sidebar, or on a card's tag, shows only the notes that carry it, **in the binder shown** (or in
+**All notes**, **Favourites**, **Not in a binder**). Tags add up: with "physique" then "3e B", only the notes that carry
+both stay. For example, **Classe**, then **physique** and **3e B**, shows the physics notes of Classe for 3e B. The tags
+chosen are highlighted in the sidebar and shown next to the view's title; they stay when you change binder. Another
+click on a tag in the sidebar, or its cross next to the title, takes it off; **Remove all the tags** takes them all off.
 The star of a card (or **Add to favourites**, in the card's menu) adds it to the **Favourites**. You can also drag a card (or the whole
 selection) onto **Favourites** or onto a tag of the sidebar: the notes become favourites, or get that tag, and stay in
 their binder. Dropped onto **Not in a binder** (or onto **All notes**), they leave their binder and join the notes in no

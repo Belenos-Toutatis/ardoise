@@ -40,6 +40,13 @@
     "all": "All notes",
     "favorites": "Favourites",
     "unsorted": "Not in a binder",
+    "tagFilter": {
+      "label": "Tags the notes shown carry",
+      "add": "Show only the notes that also carry the tag {tag}",
+      "remove": "Remove the tag {tag} from the filter",
+      "removeShort": "Remove from the filter",
+      "clear": "Remove all the tags"
+    },
     "unsortedHint": "The notes in no binder. Drop notes here to take them out of their binder.",
     "binders": "Binders",
     "tags": "Tags",
@@ -138,7 +145,7 @@
       "favorites": "No favourites yet. Click a note's star to find it here.",
       "binder": "This binder is empty. Drag notes into it.",
       "unsorted": "Every note is in a binder.",
-      "tag": "No note has this tag.",
+      "tags": "No note of this view carries all these tags.",
       "search": "No note matches “{query}”."
     },
     "problems": "Unreadable files: {count}",

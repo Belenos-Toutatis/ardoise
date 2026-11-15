@@ -91,6 +91,11 @@ export class LibraryState {
   /** Message of the last failed operation, shown in a banner. */
   error = $state<string | null>(null);
   #view = $state<LibraryView>({ kind: 'all' });
+  /**
+   * The tags the notes shown must all carry, on top of the view (user request 2026-11-15): « Classe » with « physique »
+   * and « 3e B » shows the notes of Classe that carry both. They stay when another binder is shown.
+   */
+  tagFilter = $state<string[]>([]);
   #query = $state('');
   #order = $state<SortOrder>('date-desc');
   /**
@@ -183,16 +188,24 @@ export class LibraryState {
   /** The orders the sort menu offers in this view. */
   readonly sortChoices = $derived(sortChoices(this.view));
   readonly visible = $derived(
-    visibleNotes(this.notes, this.view, this.#query, this.order, currentLocale(), this.hits, {
-      tree: this.tree,
-      orders: this.listing?.orders ?? {},
-    }),
+    visibleNotes(
+      this.notes,
+      this.view,
+      this.#query,
+      this.order,
+      currentLocale(),
+      this.hits,
+      { tree: this.tree, orders: this.listing?.orders ?? {} },
+      this.tagFilter,
+    ),
   );
   /**
    * Cards can be moved among each other: the free order of a binder is shown and nothing narrows the notes (a search
    * would hide cards whose places matter).
    */
-  readonly canReorder = $derived(this.effectiveOrder === 'binder' && this.view.kind === 'binder' && this.#query.trim() === '');
+  readonly canReorder = $derived(
+    this.effectiveOrder === 'binder' && this.view.kind === 'binder' && this.#query.trim() === '' && this.tagFilter.length === 0,
+  );
   /** `selected` as a set: every card asks whether it is selected. */
   readonly #selectedSet = $derived(new Set(this.selected));
   readonly selectedNotes = $derived(this.notes.filter((n) => this.#selectedSet.has(n.path)));
@@ -289,7 +302,9 @@ export class LibraryState {
       }
       const view = this.view;
       if (view.kind === 'binder' && !this.hasBinder(view.binder)) this.view = { kind: 'all' };
-      if (view.kind === 'tag' && !listing.tags.some((t) => sameTag(t.tag, view.tag))) this.view = { kind: 'all' };
+      // A tag no note carries any more leaves the filter.
+      const kept = this.tagFilter.filter((tag) => listing.tags.some((t) => sameTag(t.tag, tag)));
+      if (kept.length !== this.tagFilter.length) this.tagFilter = kept;
       // Notes may have moved or changed: their handwriting hits too.
       if (queryWords(this.#query).length > 0) this.searchHandwritingSoon(false);
     } catch (error) {
@@ -440,6 +455,36 @@ export class LibraryState {
   setView(view: LibraryView): void {
     if (sameView(view, this.view)) return;
     this.view = view;
+    this.clearSelection();
+  }
+
+  /** True when `tag` is one of the tags the notes shown must carry. */
+  hasTagFilter(tag: string): boolean {
+    return this.tagFilter.some((t) => sameTag(t, tag));
+  }
+
+  /**
+   * A click on a tag of the sidebar: it is added to the tags the notes shown must all carry, or removed when it was one.
+   * The binder (or Favoris, Non classées…) shown stays; from the trash, the notes come back.
+   */
+  toggleTagFilter(tag: string): void {
+    this.tagFilter = this.hasTagFilter(tag) ? this.tagFilter.filter((t) => !sameTag(t, tag)) : [...this.tagFilter, tag];
+    if (this.view.kind === 'trash') this.view = { kind: 'all' };
+    this.clearSelection();
+  }
+
+  /** « Afficher » of a tag, or a click on a card's tag: the tag joins the filter (nothing when it is in it already). */
+  showTag(tag: string): void {
+    if (this.view.kind === 'trash') this.view = { kind: 'all' };
+    if (this.hasTagFilter(tag)) return;
+    this.tagFilter = [...this.tagFilter, tag];
+    this.clearSelection();
+  }
+
+  /** Removes every tag from the filter. */
+  clearTagFilter(): void {
+    if (this.tagFilter.length === 0) return;
+    this.tagFilter = [];
     this.clearSelection();
   }
 

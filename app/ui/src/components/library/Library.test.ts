@@ -186,12 +186,51 @@ describe('library: listing and sidebar', () => {
     await ui.view('[data-binder="Classe"]');
     expect(ui.titles()).toEqual(['Cours de physique']);
 
+    // A tag narrows the binder shown: « Classe » has no note tagged « réunion ».
     await ui.view('[data-tag="réunion"]');
-    expect(ui.titles()).toEqual(['Réunion parents']);
+    expect(ui.titles()).toEqual([]);
+    expect(ui.target.textContent).toContain('Aucune note de cette vue ne porte toutes ces étiquettes.');
+    expect(ui.q('[data-tag="réunion"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(ui.q('[data-binder="Classe"]')?.getAttribute('aria-current')).toBe('true');
     expect(ui.q('[data-tag="réunion"] .count')?.textContent).toBe('1');
 
+    // The tag stays when another view is shown.
     await ui.view('[data-view="all"]');
+    expect(ui.titles()).toEqual(['Réunion parents']);
+    expect(ui.q('[data-filter-tag="réunion"]')).not.toBeNull();
+    // Its cross, next to the title, takes it off.
+    await ui.click(ui.q('[data-filter-tag="réunion"]')!);
     expect(ui.titles().length).toBe(3);
+    expect(ui.q('[data-tag="réunion"]')?.getAttribute('aria-pressed')).toBe('false');
+    expect(ui.q('[data-slot="tag-filter"]')).toBeNull();
+  });
+
+  it('shows only the notes that carry every tag clicked, in the binder shown, and a click on a tag takes it off', async () => {
+    const ui = await render();
+    await ui.view('[data-tag="physique"]');
+    expect(ui.titles()).toEqual(['Cours de physique']);
+    await ui.view('[data-tag="3e B"]');
+    expect(ui.titles()).toEqual(['Cours de physique']);
+    expect([...ui.all('[data-filter-tag]')].map((chip) => chip.dataset.filterTag)).toEqual(['physique', '3e B']);
+    // A third tag no note carries with the other two: nothing is left.
+    await ui.view('[data-tag="réunion"]');
+    expect(ui.titles()).toEqual([]);
+    // A click on a tag of the sidebar takes it off again.
+    await ui.view('[data-tag="réunion"]');
+    expect(ui.titles()).toEqual(['Cours de physique']);
+    // « Perso » with « physique » and « 3e B »: no note.
+    await ui.view('[data-binder="Perso"]');
+    expect(ui.titles()).toEqual([]);
+    // « Retirer toutes les étiquettes » shows all of Perso again.
+    await ui.click(ui.q('[data-action="clear-tags"]')!);
+    expect(ui.titles()).toEqual(['Réunion parents']);
+    expect(ui.q('[data-slot="tag-filter"]')).toBeNull();
+    // A card's tag joins the filter, without taking the others off.
+    await ui.view('[data-view="all"]');
+    await ui.click(ui.q('.note-card .chip[aria-label*="réunion"]')!);
+    expect(ui.titles()).toEqual(['Réunion parents']);
+    await ui.click(ui.q('.note-card .chip[aria-label*="réunion"]')!);
+    expect(ui.titles()).toEqual(['Réunion parents']);
   });
 
   it('explains empty views', async () => {
@@ -496,6 +535,50 @@ describe('library: drag and drop', () => {
     await ui.settle();
     expect(notesIn('Classe/3e B').sort()).toEqual(['Cours de physique', 'Liste de courses']);
     expect(ui.q('[data-binder="Classe/3e B"] .count')?.textContent).toBe('2');
+  });
+
+  it('opens a closed binder held under a drag for a moment, to drop in its sub-binder', async () => {
+    const ui = await render();
+    const sub = () => ui.q('[data-binder="Classe/3e B"]');
+    expect(sub()).toBeNull();
+    ui.open('Liste de courses').dispatchEvent(ui.drag('dragstart'));
+    await ui.settle();
+
+    // Passing over « Classe » on the way to « Perso » opens nothing.
+    ui.q('[data-binder="Classe"]')!.dispatchEvent(ui.drag('dragenter'));
+    await ui.settle();
+    ui.q('[data-binder="Perso"]')!.dispatchEvent(ui.drag('dragover'));
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    await ui.settle();
+    expect(sub()).toBeNull();
+
+    // Held over « Classe »: not at once, then its sub-binders appear.
+    ui.q('[data-binder="Classe"]')!.dispatchEvent(ui.drag('dragover'));
+    await ui.settle();
+    expect(sub()).toBeNull();
+    await vi.waitFor(() => expect(sub()).not.toBeNull(), { timeout: 2000 });
+    expect(ui.byLabel('Replier Classe').getAttribute('aria-expanded')).toBe('true');
+
+    const over = ui.drag('dragover');
+    sub()!.dispatchEvent(over);
+    expect(over.defaultPrevented).toBe(true);
+    sub()!.dispatchEvent(ui.drag('drop'));
+    await ui.settle();
+    expect(notesIn('Classe/3e B').sort()).toEqual(['Cours de physique', 'Liste de courses']);
+    // The binder opened by the drag stays open.
+    expect(sub()).not.toBeNull();
+  });
+
+  it('opens nothing when the drag ends before the moment is up', async () => {
+    const ui = await render();
+    ui.open('Liste de courses').dispatchEvent(ui.drag('dragstart'));
+    await ui.settle();
+    ui.q('[data-binder="Classe"]')!.dispatchEvent(ui.drag('dragover'));
+    await ui.settle();
+    ui.open('Liste de courses').dispatchEvent(ui.drag('dragend'));
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    await ui.settle();
+    expect(ui.q('[data-binder="Classe/3e B"]')).toBeNull();
   });
 
   it('shows the notes in no binder under « Non classées », and takes dropped notes out of their binder', async () => {

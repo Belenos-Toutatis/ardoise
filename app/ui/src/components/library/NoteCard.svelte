@@ -369,7 +369,7 @@
             class="chip"
             data-tag-color={color}
             aria-label={t('library.card.filterTag', { tag })}
-            onclick={() => lib.setView({ kind: 'tag', tag })}
+            onclick={() => lib.showTag(tag)}
             >{#if color}<span class="tag-dot" aria-hidden="true"></span>{/if}{tag}</button
           >
         </li>
