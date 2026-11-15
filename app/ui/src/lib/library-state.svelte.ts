@@ -7,8 +7,9 @@ import { api, errorMessage, followHandwritingStatus, onLibraryChanged } from './
 import { dragOutSupported } from './drag-out';
 import type { HandwritingHit, IndexStatus } from './handwriting';
 import { currentLocale, t, tn } from './i18n.svelte';
-import { LibraryActivity } from './library-activity.svelte';
-import type { TurnDirection } from './library-batch';
+import { LibraryActivity, failuresOf } from './library-activity.svelte';
+import type { BatchFailure, TurnDirection } from './library-batch';
+import { fileNameOf, placeBack, rememberOrders, withoutIds, type MovedNote, type OrderMemory } from './library-move';
 import { TagColorState } from './tag-colors.svelte';
 import {
   arrangeByBinderOrder,
@@ -54,6 +55,16 @@ interface OrderStep {
   /** The notes that moved: their paths (a held key extends the step of the same cards) and their titles. */
   paths: string[];
   titles: string[];
+}
+
+/** A move of notes to a binder, as the undo needs it (`LibraryState.undoMove`). */
+interface BinderMove {
+  /** The notes that changed binder, each with where it came from and where it went. */
+  moved: MovedNote[];
+  /** The binder they went to (`''` is the root). */
+  target: string;
+  /** The free orders of the binders they came from, as they were. */
+  memory: Map<string, OrderMemory>;
 }
 
 /** Thumbnails kept: at least this many, and enough for the whole library (up to the maximum). */
@@ -299,19 +310,22 @@ export class LibraryState {
     }
   }
 
-  /** Applies `action` to each note, keeps going after a failure and reports the first one. */
-  private async each(notes: NoteSummary[], action: (note: NoteSummary) => Promise<unknown>): Promise<void> {
+  /** Applies `action` to each note, keeps going after a failure and reports the first one. Returns the notes it was done for. */
+  private async each(notes: NoteSummary[], action: (note: NoteSummary) => Promise<unknown>): Promise<NoteSummary[]> {
     this.error = null;
     let first: string | null = null;
+    const done: NoteSummary[] = [];
     for (const note of notes) {
       try {
         await action(note);
+        done.push(note);
       } catch (error) {
         first ??= errorMessage(error);
       }
     }
     if (first) this.error = first;
     await this.refresh();
+    return done;
   }
 
   dismissError(): void {
@@ -662,18 +676,86 @@ export class LibraryState {
     if (paths.length > 0) await this.moveNotes(paths, binder);
   }
 
-  /** The dragged notes are dropped on « Favoris »: they become favourites (those that are already stay so). */
+  /**
+   * The dragged notes are dropped on « Favoris »: they become favourites (those that are already stay so). The notice
+   * offers « Annuler »: the undo takes the star off the notes this made favourites, and only them.
+   */
   async dropOnFavorites(): Promise<void> {
-    const notes = this.draggedNotes();
+    const notes = this.draggedNotes().filter((note) => !note.favorite);
     this.endDrag();
-    if (notes.length > 0) await this.setFavorite(notes, true);
+    if (notes.length === 0) return;
+    const done = await this.each(notes, (note) => api.setNoteFavorite(note.path, true, note.stamp));
+    const given = done.map((note) => ({ id: note.id, title: displayTitle(note, currentLocale()) }));
+    if (given.length === 0) return;
+    const message = tn('library.favoriteDrop.done', given.length, { title: given[0].title });
+    this.activity.show(
+      message,
+      () => this.takeBack(given, 'library.favoriteDrop', {}, (note) => (note.favorite ? api.setNoteFavorite(note.path, false, note.stamp) : null)),
+      { keep: true },
+    );
   }
 
-  /** The dragged notes are dropped on a tag of the sidebar: they get that tag (it is never taken off this way). */
+  /**
+   * The dragged notes are dropped on a tag of the sidebar: they get that tag (it is never taken off this way). The notice
+   * offers « Annuler »: the undo takes the tag off the notes that did not have it before, and only them.
+   */
   async dropOnTag(tag: string): Promise<void> {
-    const notes = this.draggedNotes();
+    const added = parseTags(tag);
+    const notes = this.draggedNotes().filter((note) => added.some((one) => !note.tags.some((had) => sameTag(had, one))));
     this.endDrag();
-    if (notes.length > 0) await this.addTags(notes, tag);
+    if (notes.length === 0 || added.length === 0) return;
+    const done = await this.each(notes, (note) => api.setNoteTags(note.path, mergeTags(note.tags, added), note.stamp));
+    const given = done.map((note) => ({ id: note.id, title: displayTitle(note, currentLocale()) }));
+    if (given.length === 0) return;
+    const message = tn('library.tagDrop.done', given.length, { title: given[0].title, tag: added[0] });
+    const has = (note: NoteSummary) => note.tags.some((had) => added.some((one) => sameTag(had, one)));
+    this.activity.show(
+      message,
+      () =>
+        this.takeBack(given, 'library.tagDrop', { tag: added[0] }, (note) =>
+          has(note) ? api.setNoteTags(note.path, note.tags.filter((had) => !added.some((one) => sameTag(had, one))), note.stamp) : null,
+        ),
+      { keep: true },
+    );
+  }
+
+  /**
+   * The undo of a drop on « Favoris » or on a tag: `change` takes back what the drop gave to each note (`items`), read as
+   * the library holds it now (null: nothing to take back, the note no longer has it). A note that is no longer in the library,
+   * or that cannot be written, is listed and stays as it is; the others are done. Says what became of the notes.
+   */
+  private async takeBack(
+    items: { id: string; title: string }[],
+    key: string,
+    params: Record<string, string>,
+    change: (note: NoteSummary) => Promise<unknown> | null,
+  ): Promise<void> {
+    this.error = null;
+    const failed: BatchFailure[] = [];
+    const done: string[] = [];
+    try {
+      const byId = new Map((await api.libraryList()).notes.map((note) => [note.id, note]));
+      for (const item of items) {
+        const note = byId.get(item.id);
+        if (!note) {
+          failed.push({ path: item.id, title: item.title, message: t('library.undoGone') });
+          continue;
+        }
+        try {
+          await change(note);
+          done.push(item.title);
+        } catch (error) {
+          failed.push({ path: note.path, title: item.title, message: errorMessage(error) });
+        }
+      }
+    } catch (error) {
+      this.activity.refused(t(`${key}.undoError`, { message: errorMessage(error) }));
+      return;
+    } finally {
+      await this.refresh();
+    }
+    if (failed.length > 0) this.activity.failures = { heading: tn(`${key}.undoFailed`, failed.length), items: failed };
+    if (done.length > 0) this.activity.undone(tn(`${key}.undone`, done.length, { title: done[0], ...params }));
   }
 
   private draggedNotes(): NoteSummary[] {
@@ -736,9 +818,130 @@ export class LibraryState {
     return done === true;
   }
 
+  /**
+   * Moves notes into `binder` (`''` is the root): every way of moving goes through here (a drop on the sidebar, « Déplacer
+   * vers… »). The notice says where they went and offers « Annuler », which puts each back in the binder it came from
+   * (`undoMove`): the step is kept beyond the notice (Ctrl+Z), and it does not depend on the view, since the notes leave
+   * the binder being shown. Notes that could not move are listed.
+   */
   async moveNotes(paths: string[], binder: string): Promise<void> {
-    await this.run(() => api.moveNotes(paths, binder));
+    const asked = paths.flatMap((path) => this.notes.filter((note) => note.path === path));
+    const locale = currentLocale();
+    const memory = rememberOrders(asked, this.notes, this.listing?.orders ?? {}, locale);
+    const done = await this.run(() => api.moveNotes(paths, binder));
     this.clearSelection();
+    if (!done) return;
+    const byPath = new Map(asked.map((note) => [note.path, note]));
+    this.activity.failures = failuresOf(tn('library.move.failed', done.failed.length), done.failed, (path) => {
+      const note = byPath.get(path);
+      return note ? displayTitle(note, locale) : fileNameOf(path);
+    });
+    const moved: MovedNote[] = [];
+    for (const { from, to, stamp } of done.moved) {
+      const note = byPath.get(from);
+      // A note already there stays (from = to); one whose new stamp is unknown cannot be checked by the undo.
+      if (!note || from === to || !stamp) continue;
+      moved.push({ id: note.id, title: displayTitle(note, locale), binder: note.binder, from, to, stamp });
+    }
+    if (moved.length === 0) return;
+    const step: BinderMove = { moved, target: binder, memory };
+    this.activity.show(
+      tn('library.move.done', moved.length, { title: moved[0].title, binder: this.binderName(binder) }),
+      () => this.undoMove(step),
+      { keep: true },
+    );
+  }
+
+  /** What the notices call a binder: its path, and for the root what the move panel calls it. */
+  private binderName(binder: string): string {
+    return binder === '' ? t('library.root') : binder;
+  }
+
+  /**
+   * Ctrl+Z or « Annuler » after a move: each note goes back to the binder it came from, under its file name, if its file
+   * is still the one that was moved (a note changed, moved again, trashed or deleted since stays, and is listed with
+   * the reason; the others of the step still go back). A name taken in the source binder gives a numbered name, a
+   * binder deleted meanwhile is made again: both are said. The note also gets its place back in the source binder's
+   * free order (`placeBack`) and leaves the target's order, through the queue of the order writes, over the order
+   * the library holds (never over a newer one: an order that changed meanwhile keeps the note at the end of its binder).
+   * Says what became of the notes.
+   */
+  private undoMove(step: BinderMove): Promise<void> {
+    this.#orderWrites += 1;
+    this.#orderEpoch += 1;
+    const run = this.#orderChain.then(async () => {
+      try {
+        await this.#putBack(step);
+      } catch (error) {
+        this.activity.refused(t('library.move.undoError', { message: errorMessage(error) }));
+      }
+    });
+    this.#orderChain = run;
+    return run.then(async () => {
+      this.#orderWrites -= 1;
+      this.#orderEpoch += 1;
+      if (this.#orderWrites === 0) await this.refresh();
+    });
+  }
+
+  async #putBack(step: BinderMove): Promise<void> {
+    const locale = currentLocale();
+    const existed = new Set(this.listing?.binders ?? []);
+    const byWhere = new Map(step.moved.map((note) => [note.to, note]));
+    const done = await api.moveNotesBack(step.moved.map((note) => ({ path: note.to, stamp: note.stamp, original: note.from })));
+    const returned = done.moved.flatMap(({ from, to }) => {
+      const note = byWhere.get(from);
+      return note ? [{ note, to }] : [];
+    });
+    const failed: BatchFailure[] = done.failed.map(({ path, error }) => ({
+      path,
+      title: byWhere.get(path)?.title ?? fileNameOf(path),
+      message:
+        error.code === 'noteConflict'
+          ? t('library.move.changed')
+          : error.code === 'noteNotFound'
+            ? t('library.move.gone')
+            : errorMessage(error),
+    }));
+    if (failed.length > 0) this.activity.failures = { heading: tn('library.move.undoFailed', failed.length), items: failed };
+    if (returned.length === 0) return;
+
+    // Their places in the free orders: the source binders get them back, the target forgets them.
+    const fresh = await api.libraryList();
+    const atEnd = new Set<string>();
+    for (const binder of new Set(returned.map(({ note }) => note.binder))) {
+      const ids = returned.filter(({ note }) => note.binder === binder).map(({ note }) => note.id);
+      const held = fresh.orders[binder];
+      const placement = placeBack(step.memory.get(binder), ids, held, fresh.notes.filter((note) => note.binder === binder), locale);
+      if (placement.kind !== 'write' || !held) continue;
+      try {
+        await api.setBinderOrder(binder, placement.ids, held);
+        for (const id of placement.atEnd) atEnd.add(id);
+      } catch {
+        // The order changed again meanwhile, or cannot be written: the notes come back after the listed ones, and nothing is lost.
+      }
+    }
+    const heldTarget = fresh.orders[step.target];
+    const without = withoutIds(heldTarget, returned.map(({ note }) => note.id));
+    if (without && heldTarget) {
+      try {
+        await api.setBinderOrder(step.target, without, heldTarget);
+      } catch {
+        // An id of a note that left stays listed, which does no harm: the order ignores it.
+      }
+    }
+
+    const binders = [...new Set(returned.map(({ note }) => note.binder))];
+    let message =
+      binders.length === 1
+        ? tn('library.move.undone', returned.length, { title: returned[0].note.title, binder: this.binderName(binders[0]) })
+        : tn('library.move.undoneMixed', returned.length);
+    const renamed = returned.filter(({ note, to }) => fileNameOf(to) !== fileNameOf(note.from));
+    if (renamed.length > 0) message += ` ${tn('library.move.renamed', renamed.length, { name: fileNameOf(renamed[0].to) })}`;
+    const made = binders.filter((binder) => binder !== '' && !existed.has(binder));
+    if (made.length > 0) message += ` ${tn('library.move.recreated', made.length, { binder: made[0] })}`;
+    if (atEnd.size > 0) message += ` ${tn('library.move.atEnd', atEnd.size)}`;
+    this.activity.undone(message);
   }
 
   async moveSelected(binder: string): Promise<void> {

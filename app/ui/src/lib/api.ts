@@ -132,6 +132,27 @@ export interface TrashedNotes {
   failed: FailedNote[];
 }
 
+/** What moving notes to a binder, or back (an undo), did (`MovedNotes` in `organize.rs`). */
+export interface MovedNotes {
+  /**
+   * Each note moved: where it was, where it is (a name taken there gives it a ` (n)` suffix) and the stamp of its file there
+   * (a move does not rewrite it; null when it could not be read). `from` = `to` for a note already in the binder.
+   */
+  moved: { from: string; to: string; stamp: FileStamp | null }[];
+  /** The notes that stayed where they were, each with its reason (`path` is where it was asked for). */
+  failed: FailedNote[];
+}
+
+/** One note to put back where a move took it from (`MoveBack` in `organize.rs`). */
+export interface MoveBack {
+  /** Where the note is now. */
+  path: string;
+  /** The stamp it had when it was moved: another stamp means it changed since, and it stays. */
+  stamp: FileStamp;
+  /** The path it had before the move. */
+  original: string;
+}
+
 /** What deleting a binder did (`BinderDeleted` in `organize.rs`). */
 export interface BinderDeleted {
   /** Its notes, now in the trash, each restorable to its own binder. */
@@ -207,8 +228,14 @@ export const api = {
   /** A new blank note (A4 landscape, white) in `binder`; returns its summary. */
   createNote: (binder: string, title: string) => call<NoteSummary>('create_note', { binder, title }),
   createBinder: (binder: string) => call<void>('create_binder', { binder }),
-  /** Moves notes into `binder`; returns their new paths, in order. */
-  moveNotes: (paths: string[], binder: string) => call<string[]>('move_notes', { paths, binder }),
+  /** Moves each note it can into `binder` (`''` is the root); says which went (with their new paths) and which failed. */
+  moveNotes: (paths: string[], binder: string) => call<MovedNotes>('move_notes', { paths, binder }),
+  /**
+   * Undoes a move: each note goes back to its binder under its file name (a ` (n)` suffix if that name is taken, the
+   * binder made again if it is gone), only if its file still has `stamp` (`noteConflict` otherwise, `noteNotFound` for a
+   * note moved again, renamed, trashed or deleted); the others still go back.
+   */
+  moveNotesBack: (items: MoveBack[]) => call<MovedNotes>('move_notes_back', { items }),
   /** Moves each note it can to the trash; says which went (with their trash ids) and which failed. */
   trashNotes: (paths: string[]) => call<TrashedNotes>('trash_notes', { paths }),
   trashList: () => call<TrashEntry[]>('trash_list'),

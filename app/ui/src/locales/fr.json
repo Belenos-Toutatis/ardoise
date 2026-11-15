@@ -227,6 +227,74 @@
       "undoRefused": "Rangement non annulé : l'ordre du classeur a changé depuis (une note copiée, un autre ordinateur, une synchronisation). Le nouvel ordre est conservé.",
       "undoFailed": "Le rangement n'a pas pu être annulé : {message}"
     },
+    "undoGone": "la note n'est plus dans la bibliothèque (mise à la corbeille ou supprimée) ; elle n'a pas été modifiée.",
+    "move": {
+      "done": {
+        "one": "« {title} » déplacée dans « {binder} ».",
+        "other": "{count} notes déplacées dans « {binder} »."
+      },
+      "failed": {
+        "one": "Une note n'a pas pu être déplacée :",
+        "other": "{count} notes n'ont pas pu être déplacées :"
+      },
+      "undone": {
+        "one": "Déplacement annulé : « {title} » est revenue dans « {binder} ».",
+        "other": "Déplacement annulé : {count} notes sont revenues dans « {binder} »."
+      },
+      "undoneMixed": {
+        "one": "Déplacement annulé : {count} note est revenue dans son classeur d'origine.",
+        "other": "Déplacement annulé : {count} notes sont revenues dans leur classeur d'origine."
+      },
+      "atEnd": {
+        "one": "L'ordre du classeur a changé depuis : elle a été placée à la fin.",
+        "other": "L'ordre du classeur a changé depuis : elles ont été placées à la fin."
+      },
+      "renamed": {
+        "one": "Son nom de fichier étant déjà pris dans ce classeur, elle s'appelle maintenant « {name} ».",
+        "other": "Leur nom de fichier étant déjà pris dans ce classeur, {count} notes ont reçu un numéro."
+      },
+      "recreated": {
+        "one": "Le classeur « {binder} » n'existait plus : il a été recréé.",
+        "other": "{count} classeurs n'existaient plus : ils ont été recréés."
+      },
+      "undoFailed": {
+        "one": "Une note n'a pas pu être remise dans son classeur :",
+        "other": "{count} notes n'ont pas pu être remises dans leur classeur :"
+      },
+      "changed": "elle a été modifiée depuis ; elle reste où elle est.",
+      "gone": "elle n'est plus à cet endroit (déplacée de nouveau, renommée, mise à la corbeille ou supprimée).",
+      "undoError": "Le déplacement n'a pas pu être annulé : {message}"
+    },
+    "favoriteDrop": {
+      "done": {
+        "one": "« {title} » ajoutée aux favoris.",
+        "other": "{count} notes ajoutées aux favoris."
+      },
+      "undone": {
+        "one": "Ajout aux favoris annulé : « {title} » n'est plus un favori.",
+        "other": "Ajout aux favoris annulé : {count} notes ne sont plus des favoris."
+      },
+      "undoFailed": {
+        "one": "Une note n'a pas pu être retirée des favoris :",
+        "other": "{count} notes n'ont pas pu être retirées des favoris :"
+      },
+      "undoError": "L'ajout aux favoris n'a pas pu être annulé : {message}"
+    },
+    "tagDrop": {
+      "done": {
+        "one": "Étiquette « {tag} » ajoutée à « {title} ».",
+        "other": "Étiquette « {tag} » ajoutée à {count} notes."
+      },
+      "undone": {
+        "one": "Étiquette annulée : « {title} » n'a plus l'étiquette « {tag} ».",
+        "other": "Étiquette annulée : {count} notes n'ont plus l'étiquette « {tag} »."
+      },
+      "undoFailed": {
+        "one": "Une note n'a pas pu perdre l'étiquette :",
+        "other": "{count} notes n'ont pas pu perdre l'étiquette :"
+      },
+      "undoError": "L'étiquette n'a pas pu être retirée : {message}"
+    },
     "turn": {
       "button": "Tourner",
       "panel": "Tourner les notes sélectionnées",

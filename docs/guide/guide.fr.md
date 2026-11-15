@@ -1131,6 +1131,19 @@ Un classeur est un simple *sous-dossier* de la bibliothèque. Cliquez sur l'icô
 ranger des notes, glissez-les sur un classeur de la barre latérale, ou sélectionnez-les puis **Déplacer vers…**
 (**Bibliothèque (racine)** ramène à la racine).
 
+**Un classement par erreur s'annule.** Après chaque déplacement, un message dit où sont allées les notes (« « Liste de courses »
+déplacée dans « Perso ». », « 3 notes déplacées dans « Classe/3e B ». ») et propose **Annuler** ; `Ctrl + Z` fait la même chose,
+**même quand la carte a quitté le classeur affiché, quand le message a disparu et quand vous avez changé de classeur entre-temps**
+(allez regarder dans le classeur d'arrivée, puis `Ctrl + Z`). Chaque note retourne dans le classeur d'où elle venait (les notes d'une
+sélection peuvent venir de classeurs différents), sous son nom de fichier d'origine, et reprend sa place dans l'ordre de ce classeur :
+« Déplacement annulé : « Liste de courses » est revenue dans « Bibliothèque (racine) ». » Ardoise ne fait rien à l'aveugle : une note
+**modifiée**, **déplacée de nouveau**, **mise à la corbeille** ou **supprimée** depuis reste où elle est et est listée avec la raison
+(les autres notes du même déplacement retournent quand même, et le message dit combien) ; un nom de fichier déjà pris dans le classeur
+d'origine donne un nom numéroté, et le message le dit ; un classeur d'origine supprimé entre-temps est recréé, et le message le dit.
+Si l'ordre du classeur d'origine a été réarrangé depuis, la note revient **à la fin** du classeur et le message le dit. Déposer des
+notes sur **Favoris** ou sur une étiquette s'annule de la même façon (« Ajout aux favoris annulé : … », « Étiquette annulée : … ») :
+seules les notes qui n'étaient pas déjà favorites, ou qui n'avaient pas l'étiquette, la perdent.
+
 Sous la date, chaque carte indique le classeur de la note, avec son chemin complet s'il est dans un autre classeur
 (par exemple `Classe/3e B`). Une note qui n'est dans aucun classeur, donc à la racine de la bibliothèque, porte la
 mention **Non classée** : vous voyez d'un coup d'œil ce qu'il reste à ranger. Une note étant un fichier, elle est dans un
@@ -1165,7 +1178,8 @@ la plus récente d'abord ; votre choix revient dès que vous rouvrez un classeur
 - **Annuler un rangement** : `Ctrl + Z` (ou le bouton **Annuler** du message qui s'affiche après le rangement) remet l'ordre
   précédent et dit ce qui est revenu : « Rangement annulé : « Beta » est revenue à sa place. » (ou « Rangement annulé : 3 notes sont
   revenues à leur place. »). Plusieurs rangements s'annulent un par un, dans l'ordre inverse, même quand leurs messages ont
-  disparu ; la liste est vidée quand vous quittez le classeur ou changez le tri. Ardoise **n'écrase jamais un ordre plus récent** :
+  disparu ; la liste est vidée quand vous quittez le classeur ou changez le tri (ce n'est pas le cas des déplacements vers un autre
+  classeur, voir « Classeurs »). Ardoise **n'écrase jamais un ordre plus récent** :
   si l'ordre du classeur a changé depuis (un autre ordinateur, la synchronisation, une note copiée), elle ne fait rien et le dit :
   « Rangement non annulé : l'ordre du classeur a changé depuis… Le nouvel ordre est conservé. »
 - **Le classeur parent** montre ses propres notes d'abord, puis celles de chaque sous-classeur, dans l'ordre de ce
@@ -1311,7 +1325,8 @@ bas de la bibliothèque (« 3 notes mises à la corbeille. ») avec un bouton **
 quelques secondes (8), et tant que la souris ou le clavier est dessus. `Ctrl + Z` fait la même chose depuis la
 bibliothèque (hors d'un champ de texte, et pas dans l'éditeur, qui a son propre **Annuler**). Les messages **Annuler**
 de **Tourner**, de **Dupliquer**, de **Changer la date…** et de la suppression d'un classeur marchent de la même façon, et
-`Ctrl + Z` annule la plus récente de ces actions ; le rangement des cartes d'un classeur s'annule aussi (voir « Ordre du classeur »).
+`Ctrl + Z` annule la plus récente de ces actions ; le rangement des cartes d'un classeur et le déplacement de notes vers un autre
+classeur (ou sur **Favoris** ou une étiquette) s'annulent aussi (voir « Ordre du classeur » et « Classeurs »).
 **Chaque annulation est suivie d'un message qui dit ce qui a été annulé** (« Mise à la corbeille annulée : « Liste de courses »
 est de retour dans son classeur. », « Copie annulée : « Cours (copie) » est à la corbeille. », « Changement de date annulé : … »),
 lu à voix haute par un lecteur d'écran et qui disparaît seul au bout de quelques secondes. Si une note ne peut pas aller à la corbeille (elle a été supprimée entre-temps sur un autre ordinateur,
@@ -2316,7 +2331,7 @@ l'impression d'Ardoise (jamais l'impression de la fenêtre comme une page web). 
 | `Échap` | Désélectionner |
 | `F2` | Renommer la note |
 | `Suppr` | Mettre la note (ou la sélection) à la corbeille |
-| `Ctrl + Z` | Annuler la dernière action : mise à la corbeille, **Dupliquer**, **Changer la date…**, **Tourner**, suppression d'un classeur, rangement des cartes d'un classeur (plusieurs rangements, un par un) ; un message dit ce qui a été annulé |
+| `Ctrl + Z` | Annuler la dernière action : mise à la corbeille, **Dupliquer**, **Changer la date…**, **Tourner**, suppression d'un classeur, rangement des cartes d'un classeur (plusieurs rangements, un par un), déplacement de notes vers un autre classeur, dépôt sur **Favoris** ou sur une étiquette ; un message dit ce qui a été annulé |
 | `Alt + ←`, `Alt + →`, `Alt + Début`, `Alt + Fin` | Dans un classeur trié par **Ordre du classeur** : déplacer la carte (ou la sélection) d'une place, ou au début, ou à la fin |
 
 ### Éditeur

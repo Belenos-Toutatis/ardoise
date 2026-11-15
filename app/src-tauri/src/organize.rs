@@ -6,8 +6,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use ardoise_core::library::{Library, LibraryError};
-use serde::Serialize;
+use ardoise_core::library::{FileStamp, Library, LibraryError};
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::AppContext;
@@ -52,6 +52,84 @@ pub fn trash_notes_in(library: &Library, paths: &[String]) -> TrashedNotes {
             }),
             Err(error) => done.failed.push(FailedNote {
                 path: path.clone(),
+                error: library_error(error),
+            }),
+        }
+    }
+    done
+}
+
+/// A note a move took from `from` to `to` (full paths: a name taken in the target gives it a ` (n)` suffix), with
+/// the stamp of its file there (a move does not rewrite the file: it is the stamp the undo expects to find; `None`
+/// when it cannot be read).
+#[derive(Debug, Serialize)]
+pub struct MovedNote {
+    pub from: String,
+    pub to: String,
+    pub stamp: Option<FileStamp>,
+}
+
+/// What `move_notes` and `move_notes_back` did (`MovedNotes` in `api.ts`): each note moved, and each that could
+/// not be (`path` is where it was asked for).
+#[derive(Debug, Serialize)]
+pub struct MovedNotes {
+    pub moved: Vec<MovedNote>,
+    pub failed: Vec<FailedNote>,
+}
+
+/// Moves each note into `binder` (created if needed); one that fails (gone meanwhile, held open…) does not stop the
+/// others. A note already there stays (`from` = `to`).
+pub fn move_notes_in(library: &Library, paths: &[String], binder: &str) -> MovedNotes {
+    let binder = binder_path(binder);
+    let mut done = MovedNotes {
+        moved: Vec::new(),
+        failed: Vec::new(),
+    };
+    for path in paths {
+        match library.move_to(Path::new(path), &binder) {
+            Ok(to) => done.moved.push(MovedNote {
+                from: path.clone(),
+                stamp: FileStamp::of(&to).ok(),
+                to: path_text(&to),
+            }),
+            Err(error) => done.failed.push(FailedNote {
+                path: path.clone(),
+                error: library_error(error),
+            }),
+        }
+    }
+    done
+}
+
+/// A note to put back where a move took it from: where it is now (`path`), the stamp it had when it was moved, and the
+/// path it had before (`original`).
+#[derive(Debug, Deserialize)]
+pub struct MoveBack {
+    pub path: String,
+    pub stamp: FileStamp,
+    pub original: String,
+}
+
+/// Puts each note back (`Library::move_back`: only if it is still the file that was moved, never over another note);
+/// one that cannot go back does not stop the others.
+pub fn move_notes_back_in(library: &Library, items: &[MoveBack]) -> MovedNotes {
+    let mut done = MovedNotes {
+        moved: Vec::new(),
+        failed: Vec::new(),
+    };
+    for item in items {
+        match library.move_back(
+            Path::new(&item.path),
+            Path::new(&item.original),
+            &item.stamp,
+        ) {
+            Ok(to) => done.moved.push(MovedNote {
+                from: item.path.clone(),
+                stamp: FileStamp::of(&to).ok(),
+                to: path_text(&to),
+            }),
+            Err(error) => done.failed.push(FailedNote {
+                path: item.path.clone(),
                 error: library_error(error),
             }),
         }
@@ -134,6 +212,27 @@ pub async fn delete_binder(
 ) -> CommandResult<BinderDeleted> {
     let library = library_of(&context)?;
     blocking(move || delete_binder_in(&library, &binder)).await
+}
+
+/// Moves notes into a binder: the ones moved (with their new paths) and the ones that failed.
+#[tauri::command]
+pub async fn move_notes(
+    context: State<'_, AppContext>,
+    paths: Vec<String>,
+    binder: String,
+) -> CommandResult<MovedNotes> {
+    let library = library_of(&context)?;
+    blocking(move || Ok(move_notes_in(&library, &paths, &binder))).await
+}
+
+/// Undoes a move: puts each note back in its binder under its name, if it did not change since.
+#[tauri::command]
+pub async fn move_notes_back(
+    context: State<'_, AppContext>,
+    items: Vec<MoveBack>,
+) -> CommandResult<MovedNotes> {
+    let library = library_of(&context)?;
+    blocking(move || Ok(move_notes_back_in(&library, &items))).await
 }
 
 /// Colour of every tag that has one, keyed by the tag in lower case (`tag_key`).
@@ -298,5 +397,52 @@ mod tests {
         assert_eq!(error.code(), "tagColorsConflict");
         let error = tag_colors_error(LibraryError::InvalidTagColor { color: "X".into() });
         assert_eq!(error.code(), "invalidTagColor");
+    }
+
+    fn text(path: &Path) -> String {
+        path_text(path)
+    }
+
+    #[test]
+    fn a_move_says_what_moved_and_what_failed_and_goes_back() {
+        let (dir, library) = library();
+        let a = write_sample(&library, "Perso", "Un");
+        let b = write_sample(&library, "Perso", "Deux");
+        let missing = text(&dir.path().join("Perso").join("2026-10-24 Absent.ardoise"));
+        let done = move_notes_in(
+            &library,
+            &[text(&a.path), missing.clone(), text(&b.path)],
+            "Classe/3e B",
+        );
+        // One failure does not stop the others.
+        assert_eq!(done.moved.len(), 2);
+        assert_eq!(done.failed.len(), 1);
+        assert_eq!(done.failed[0].path, missing);
+        assert_eq!(done.failed[0].error.code(), "noteNotFound");
+        // The shape the interface reads.
+        let json = serde_json::to_value(&done).unwrap();
+        assert_eq!(json["moved"][0]["from"], text(&a.path));
+        // The stamp the undo expects: a move does not rewrite the file.
+        assert_eq!(done.moved[0].stamp, Some(a.stamp));
+        assert_eq!(json["failed"][0]["error"]["code"], "noteNotFound");
+
+        // Back: each note only if it is still the file that was moved.
+        library
+            .set_tags(Path::new(&done.moved[1].to), &["x".to_owned()], None)
+            .unwrap();
+        let items = [(&a, &done.moved[0]), (&b, &done.moved[1])].map(|(saved, moved)| MoveBack {
+            path: moved.to.clone(),
+            stamp: saved.stamp,
+            original: text(&saved.path),
+        });
+        let back = move_notes_back_in(&library, &items);
+        assert_eq!(back.moved.len(), 1);
+        assert_eq!(back.moved[0].to, text(&a.path));
+        assert!(a.path.is_file());
+        assert_eq!(back.failed.len(), 1);
+        assert_eq!(back.failed[0].path, done.moved[1].to);
+        assert_eq!(back.failed[0].error.code(), "noteConflict");
+        assert!(Path::new(&done.moved[1].to).is_file());
+        assert!(!b.path.exists());
     }
 }

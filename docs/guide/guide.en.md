@@ -1064,6 +1064,18 @@ A binder is simply a *subfolder* of the library. Click the **New binder** icon (
 binder), type the **Binder name** and click **Create**. To file notes, drag them onto a binder in the sidebar, or
 select them and use **Move to…** (**Library (root)** takes them back to the root).
 
+**A filing mistake can be undone.** After each move, a message says where the notes went ("Shopping list" moved to "Perso".",
+"3 notes moved to "Classe/3e B".") and offers **Undo**; `Ctrl + Z` does the same, **even when the card has left the binder on
+display, when the message is gone and when you changed binder meanwhile** (go and look in the target binder, then press
+`Ctrl + Z`). Each note goes back to the binder it came from (the notes of a selection may come from different binders), under
+its original file name, and takes its place again in the order of that binder: "Move undone: "Shopping list" is back in "Library
+(root)"." Ardoise does nothing blindly: a note that was **changed**, **moved again**, **trashed** or **deleted** since stays where
+it is and is listed with the reason (the other notes of the same move still go back, and the message says how many); a file name
+already taken in the original binder gives a numbered name, and the message says so; an original binder deleted meanwhile is made
+again, and the message says so. If the order of the original binder was rearranged since, the note goes back **to the end** of the
+binder and the message says so. Dropping notes onto **Favourites** or onto a tag is undone the same way ("Favourite undone: …",
+"Tag undone: …"): only the notes that were not favourites already, or that did not have the tag, lose it.
+
 Under the date, each card names the note's binder, with its whole path if it sits inside another binder (for example
 `Classe/3e B`). A note in no binder, so at the root of the library, says **Not in a binder**: you see at a glance what is
 left to file. As a note is a file, it is in one binder at a time.
@@ -1095,7 +1107,7 @@ comes back as soon as you open a binder again.
 - **Undoing an arrangement**: `Ctrl + Z` (or the **Undo** button of the message shown after the arrangement) puts the previous
   order back and says what came back: "Rearrangement undone: "Beta" is back where it was." (or "Rearrangement undone: 3 notes are
   back where they were."). Several arrangements are undone one by one, last first, even once their messages are gone; the list is
-  emptied when you leave the binder or change the sort. Ardoise **never overwrites a newer order**: if the binder's order has
+  emptied when you leave the binder or change the sort (not so for moves to another binder, see "Binders"). Ardoise **never overwrites a newer order**: if the binder's order has
   changed since (another computer, the sync, a note copied), it does nothing and says so: "Rearrangement not undone: the binder's
   order has changed since… The new order is kept."
 - **A parent binder** shows its own notes first, then those of each sub-binder in that sub-binder's order (the sub-binders in
@@ -1230,7 +1242,7 @@ of the library ("3 notes moved to the trash.") with an **Undo** button that rest
 seconds (8), and as long as the mouse or the keyboard is on it. `Ctrl + Z` does the same from the library (outside a text
 field, and not in the editor, which has its own **Undo**). The **Undo** messages of **Turn**, **Duplicate**, **Change the date…**
 and deleting a binder work the same way, and `Ctrl + Z` undoes the most recent of these actions; arranging the cards of a binder
-can be undone too (see "Binder order"). **Every undo is followed by a message that says what was undone** ("Move to the trash
+and moving notes to another binder (or onto **Favourites** or a tag) can be undone too (see "Binder order" and "Binders"). **Every undo is followed by a message that says what was undone** ("Move to the trash
 undone: "Shopping list" is back in its binder.", "Copy undone: "Course (copy)" is in the trash.", "Date change undone: …"), read
 aloud by a screen reader and gone by itself after a few seconds. If a note cannot go to the trash (it was deleted
 meanwhile on another computer, for example), the others go anyway; that one is reported and stays selected.
@@ -2182,7 +2194,7 @@ keys stay as described in this chapter.
 | `Esc` | Deselect |
 | `F2` | Rename the note |
 | `Delete` | Move the note (or the selection) to the trash |
-| `Ctrl + Z` | Undo the last action: move to trash, **Duplicate**, **Change the date…**, **Turn**, deleting a binder, arranging the cards of a binder (several arrangements, one by one); a message says what was undone |
+| `Ctrl + Z` | Undo the last action: move to trash, **Duplicate**, **Change the date…**, **Turn**, deleting a binder, arranging the cards of a binder (several arrangements, one by one), moving notes to another binder, dropping onto **Favourites** or a tag; a message says what was undone |
 | `Alt + ←`, `Alt + →`, `Alt + Home`, `Alt + End` | In a binder sorted by **Binder order**: move the card (or the selection) one place, or to the start, or to the end |
 
 ### Editor
