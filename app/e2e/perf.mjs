@@ -495,6 +495,11 @@ async function measureLiveTouchUp(local) {
     const idleIntervals = await app.evaluate(FRAMES(TOUCHUP_IDLE_MS));
     await app.click('button[data-action="select"]');
     await app.waitFor(`document.querySelector('canvas.live-canvas.selecting') !== null`, 'the Select tool');
+    // The gesture measured is a lasso: a second click on the button turns the tool from the rectangle (the way used last).
+    if ((await app.evaluate(`document.querySelector('button[data-action="select"]').dataset.way`)) !== 'lasso') {
+      await app.click('button[data-action="select"]');
+      await app.waitFor(`document.querySelector('button[data-action="select"]').dataset.way === 'lasso'`, 'the lasso');
+    }
 
     const geometry = await app.evaluate(`(() => {
       const c = document.querySelector('canvas.live-canvas');
