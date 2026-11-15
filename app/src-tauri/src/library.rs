@@ -291,22 +291,6 @@ pub fn create_note_in(
     Ok(summary_of(library, &saved.path, &file.note, saved.stamp))
 }
 
-pub fn move_notes_in(
-    library: &Library,
-    paths: &[String],
-    binder: &str,
-) -> Result<Vec<String>, LibraryError> {
-    let binder = binder_path(binder);
-    paths
-        .iter()
-        .map(|path| {
-            library
-                .move_to(Path::new(path), &binder)
-                .map(|p| path_text(&p))
-        })
-        .collect()
-}
-
 /// Writes a copy of the note at `path` (`Library::duplicate`) and returns its summary. `copy_word`
 /// is the interface's translated word for « copie ».
 pub fn duplicate_note_in(
@@ -450,18 +434,6 @@ pub async fn create_note(
 pub async fn create_binder(context: State<'_, AppContext>, binder: String) -> CommandResult<()> {
     with_library_blocking(&context, move |library| {
         library.create_binder(&binder_path(&binder)).map(|_| ())
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn move_notes(
-    context: State<'_, AppContext>,
-    paths: Vec<String>,
-    binder: String,
-) -> CommandResult<Vec<String>> {
-    with_library_blocking(&context, move |library| {
-        move_notes_in(library, &paths, &binder)
     })
     .await
 }
@@ -920,25 +892,33 @@ pub(crate) mod tests {
         library.create_binder(&binder_path("Perso/Idées")).unwrap();
         assert!(library.root().join("Perso").join("Idées").is_dir());
 
-        let moved =
-            move_notes_in(&library, &[text(&a.path), text(&b.path)], "Classe/3e B").unwrap();
-        assert_eq!(moved.len(), 2);
-        for path in &moved {
-            assert!(Path::new(path).is_file());
-            assert!(Path::new(path).starts_with(library.root().join("Classe").join("3e B")));
+        let done = crate::organize::move_notes_in(
+            &library,
+            &[text(&a.path), text(&b.path)],
+            "Classe/3e B",
+        );
+        assert!(done.failed.is_empty());
+        assert_eq!(done.moved.len(), 2);
+        for note in &done.moved {
+            assert!(Path::new(&note.to).is_file());
+            assert!(Path::new(&note.to).starts_with(library.root().join("Classe").join("3e B")));
         }
+        assert_eq!(done.moved[0].from, text(&a.path));
         assert!(!a.path.exists());
         // The file is not rewritten: its stamp is still valid.
-        assert_eq!(FileStamp::of(Path::new(&moved[0])).unwrap(), a.stamp);
+        assert_eq!(
+            FileStamp::of(Path::new(&done.moved[0].to)).unwrap(),
+            a.stamp
+        );
 
         let outside = tempfile::tempdir().unwrap();
-        let error = move_notes_in(
+        let done = crate::organize::move_notes_in(
             &library,
             &[text(&outside.path().join("2026-10-24 X.ardoise"))],
             "",
-        )
-        .unwrap_err();
-        assert_eq!(error.code(), "notInLibrary");
+        );
+        assert!(done.moved.is_empty());
+        assert_eq!(done.failed[0].error.code(), "notInLibrary");
     }
 
     #[test]

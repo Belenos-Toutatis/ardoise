@@ -370,7 +370,7 @@ export function deepestFolders(folders: readonly string[]): string[] {
 }
 
 /** The failures to list under `heading`, or null when there are none. */
-function failuresOf(heading: string, failed: FailedNote[], titleOf: (path: string) => string) {
+export function failuresOf(heading: string, failed: FailedNote[], titleOf: (path: string) => string) {
   if (failed.length === 0) return null;
   return { heading, items: failed.map((f) => ({ path: f.path, title: titleOf(f.path), message: errorMessage(f.error) })) };
 }

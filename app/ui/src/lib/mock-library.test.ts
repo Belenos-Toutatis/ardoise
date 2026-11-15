@@ -88,9 +88,21 @@ describe('browser stand-in for the library commands', () => {
     expect((await api.libraryList()).binders).toContain('Archives');
     const created = await api.createNote('Archives/2026', 'Neuf');
     expect(created.binder).toBe('Archives/2026');
-    const [moved] = await api.moveNotes([created.path], 'Perso');
-    expect(moved.startsWith('C:\\demo\\Ardoise\\Perso\\')).toBe(true);
-    await expect(api.moveNotes([created.path], 'Perso')).rejects.toMatchObject({ code: 'noteNotFound' });
+    const done = await api.moveNotes([created.path], 'Perso');
+    expect(done.moved[0].from).toBe(created.path);
+    expect(done.moved[0].to.startsWith('C:\\demo\\Ardoise\\Perso\\')).toBe(true);
+    // The file is not rewritten: its stamp is the one it had.
+    expect(done.moved[0].stamp).toEqual(created.stamp);
+    // A note that is not there is reported, not thrown: the others still move.
+    const again = await api.moveNotes([created.path], 'Perso');
+    expect(again.moved).toEqual([]);
+    expect(again.failed[0]).toMatchObject({ path: created.path, error: { code: 'noteNotFound' } });
+    // Back: only the file that was moved, under its name.
+    const back = await api.moveNotesBack([{ path: done.moved[0].to, stamp: created.stamp, original: created.path }]);
+    expect(back.moved[0].to).toBe(created.path);
+    const stale = await api.moveNotes([back.moved[0].to], 'Perso');
+    const refused = await api.moveNotesBack([{ path: stale.moved[0].to, stamp: { ...created.stamp, len: 1 }, original: created.path }]);
+    expect(refused.failed[0].error.code).toBe('noteConflict');
     await expect(api.createBinder('..')).rejects.toMatchObject({ code: 'invalidName' });
   });
 

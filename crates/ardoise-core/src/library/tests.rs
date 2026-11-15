@@ -612,6 +612,105 @@ fn move_to_another_binder() {
 }
 
 #[test]
+fn move_back_returns_a_note_to_its_binder_and_name() {
+    let (_dir, library) = new_library();
+    let saved = library
+        .create(Path::new("Perso"), &note_file("a", "Cours"))
+        .unwrap();
+    let moved = library
+        .move_to(&saved.path, Path::new("Classe/3e B"))
+        .unwrap();
+    // A move does not rewrite the file: the stamp from before is the one the undo expects.
+    let back = library
+        .move_back(&moved, &saved.path, &saved.stamp)
+        .unwrap();
+    assert_eq!(back, saved.path);
+    assert!(!moved.exists());
+    assert_eq!(FileStamp::of(&back).unwrap(), saved.stamp);
+
+    // The name it had in the target (suffixed there) is not the name it goes back under.
+    let twin = library
+        .create(Path::new("Classe/3e B"), &note_file("b", "Cours"))
+        .unwrap();
+    let in_target = library.move_to(&back, Path::new("Classe/3e B")).unwrap();
+    assert_eq!(
+        in_target.file_name().unwrap(),
+        "2026-10-24 Cours (2).ardoise"
+    );
+    let again = library
+        .move_back(&in_target, &saved.path, &saved.stamp)
+        .unwrap();
+    assert_eq!(again, saved.path);
+    assert!(twin.path.is_file());
+}
+
+#[test]
+fn move_back_suffixes_a_taken_name_and_recreates_a_missing_binder() {
+    let (dir, library) = new_library();
+    let saved = library
+        .create(Path::new("Perso"), &note_file("a", "Cours"))
+        .unwrap();
+    let moved = library.move_to(&saved.path, Path::new("Classe")).unwrap();
+    // Another note took the name in the source binder meanwhile.
+    let squatter = library
+        .create(Path::new("Perso"), &note_file("b", "Cours"))
+        .unwrap();
+    let back = library
+        .move_back(&moved, &saved.path, &saved.stamp)
+        .unwrap();
+    assert_eq!(back.file_name().unwrap(), "2026-10-24 Cours (2).ardoise");
+    assert!(squatter.path.is_file());
+    assert_eq!(library.read(&squatter.path).unwrap().file.note.id, "b");
+
+    // The source binder was deleted meanwhile: it is made again, never refused.
+    let moved = library.move_to(&back, Path::new("Classe")).unwrap();
+    fs::remove_file(&squatter.path).unwrap();
+    fs::remove_dir(dir.path().join("Perso")).unwrap();
+    let back = library
+        .move_back(&moved, &saved.path, &FileStamp::of(&moved).unwrap())
+        .unwrap();
+    assert_eq!(back, saved.path);
+    assert!(back.is_file());
+}
+
+#[test]
+fn move_back_refuses_a_note_that_changed_or_is_gone_and_touches_nothing() {
+    let (_dir, library) = new_library();
+    let saved = library
+        .create(Path::new("Perso"), &note_file("a", "Cours"))
+        .unwrap();
+    let moved = library.move_to(&saved.path, Path::new("Classe")).unwrap();
+
+    // Changed since (another computer, the editor): it stays where it is.
+    edit_elsewhere(&moved, "Autre titre");
+    let error = library
+        .move_back(&moved, &saved.path, &saved.stamp)
+        .unwrap_err();
+    assert!(matches!(error, LibraryError::Conflict { .. }));
+    assert!(moved.is_file());
+    assert!(!saved.path.exists());
+
+    // Gone (moved again, trashed, deleted): nothing to put back.
+    library.trash(&moved).unwrap();
+    let error = library
+        .move_back(&moved, &saved.path, &saved.stamp)
+        .unwrap_err();
+    assert!(matches!(error, LibraryError::NotFound { .. }));
+
+    // Paths outside the library are refused.
+    let outside = tempfile::tempdir().unwrap();
+    let elsewhere = outside.path().join("2026-10-24 X.ardoise");
+    assert!(matches!(
+        library.move_back(&elsewhere, &saved.path, &saved.stamp),
+        Err(LibraryError::NotInLibrary { .. })
+    ));
+    assert!(matches!(
+        library.move_back(&moved, &elsewhere, &saved.stamp),
+        Err(LibraryError::NotInLibrary { .. })
+    ));
+}
+
+#[test]
 fn tags_are_normalised_and_counted() {
     let (_dir, library) = new_library();
     let a = library.create(Path::new(""), &note_file("a", "A")).unwrap();

@@ -143,7 +143,7 @@ describe('library: listing and sidebar', () => {
     const binderOf = (title: string) => ui.card(title).querySelector<HTMLElement>('.card-binder')!;
     const path = ui.card('Liste de courses').dataset.path!;
 
-    const [moved] = await api.moveNotes([path], 'Perso');
+    const moved = (await api.moveNotes([path], 'Perso')).moved[0].to;
     notifyLibraryChanged();
     await vi.waitFor(() => expect(binderOf('Liste de courses').textContent?.trim()).toBe('Perso'));
     expect(binderOf('Liste de courses').classList.contains('unsorted')).toBe(false);

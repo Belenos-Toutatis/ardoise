@@ -128,6 +128,22 @@ export function freePath(library: MockLibrary, binder: string, name: string, ign
   return candidate;
 }
 
+/** A note the library failed to handle, with its reason (`FailedNote`). */
+interface MockFailure {
+  path: string;
+  error: { code: string; message: string };
+}
+
+/** Moves the note at `path` into `binder` under `name` (its own by default), a ` (n)` suffix if taken: the new path. */
+function moveInto(library: MockLibrary, path: string, stored: StoredNote, binder: string, name = baseName(path)): string {
+  if (stored.binder.toLowerCase() === binder.toLowerCase()) return path;
+  library.notes.delete(path);
+  const target = freePath(library, binder, name);
+  stored.binder = binder;
+  library.notes.set(target, stored);
+  return target;
+}
+
 function find(library: MockLibrary, path: string): StoredNote {
   return library.notes.get(path) ?? failure('noteNotFound', path);
 }
@@ -236,19 +252,39 @@ export function mockLibraryInvoke(command: string, args: Record<string, unknown>
     case 'move_notes': {
       const library = mockLibrary();
       const binder = cleanBinder(args.binder as string);
-      const paths = args.paths as string[];
-      paths.forEach((path) => find(library, path));
       addBinder(library, binder);
-      const moved = paths.map((path) => {
-        const stored = find(library, path);
-        library.notes.delete(path);
-        const target = freePath(library, binder, baseName(path));
-        stored.binder = binder;
-        library.notes.set(target, stored);
-        return target;
-      });
+      const done = { moved: [] as { from: string; to: string; stamp: FileStamp }[], failed: [] as MockFailure[] };
+      for (const path of args.paths as string[]) {
+        const stored = library.notes.get(path);
+        if (!stored) {
+          done.failed.push({ path, error: { code: 'noteNotFound', message: path } });
+          continue;
+        }
+        done.moved.push({ from: path, to: moveInto(library, path, stored, binder), stamp: stored.stamp });
+      }
       notifyLibraryChanged();
-      return moved;
+      return done;
+    }
+
+    case 'move_notes_back': {
+      const library = mockLibrary();
+      const done = { moved: [] as { from: string; to: string; stamp: FileStamp }[], failed: [] as MockFailure[] };
+      for (const item of args.items as { path: string; stamp: FileStamp; original: string }[]) {
+        const stored = library.notes.get(item.path);
+        if (!stored) done.failed.push({ path: item.path, error: { code: 'noteNotFound', message: item.path } });
+        else if (!sameStamp(stored.stamp, item.stamp)) {
+          done.failed.push({ path: item.path, error: { code: 'noteConflict', message: item.path } });
+        } else {
+          // Back under its own name, in its binder (made again if it is gone).
+          const original = item.original;
+          const folder = original.slice(library.root.length + 1, original.lastIndexOf('\\'));
+          const binder = folder.split('\\').filter(Boolean).join('/');
+          addBinder(library, binder);
+          done.moved.push({ from: item.path, to: moveInto(library, item.path, stored, binder, baseName(original)), stamp: stored.stamp });
+        }
+      }
+      notifyLibraryChanged();
+      return done;
     }
 
     case 'trash_notes': {

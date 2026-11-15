@@ -227,6 +227,74 @@
       "undoRefused": "Rearrangement not undone: the binder's order has changed since (a note copied, another computer, a sync). The new order is kept.",
       "undoFailed": "The rearrangement could not be undone: {message}"
     },
+    "undoGone": "the note is no longer in the library (trashed or deleted); it was not changed.",
+    "move": {
+      "done": {
+        "one": "\"{title}\" moved to \"{binder}\".",
+        "other": "{count} notes moved to \"{binder}\"."
+      },
+      "failed": {
+        "one": "One note could not be moved:",
+        "other": "{count} notes could not be moved:"
+      },
+      "undone": {
+        "one": "Move undone: \"{title}\" is back in \"{binder}\".",
+        "other": "Move undone: {count} notes are back in \"{binder}\"."
+      },
+      "undoneMixed": {
+        "one": "Move undone: {count} note is back in the binder it came from.",
+        "other": "Move undone: {count} notes are back in the binders they came from."
+      },
+      "atEnd": {
+        "one": "The binder's order has changed since: it was put at the end.",
+        "other": "The binder's order has changed since: they were put at the end."
+      },
+      "renamed": {
+        "one": "Its file name being already taken in this binder, it is now called \"{name}\".",
+        "other": "Their file names being already taken in this binder, {count} notes were given a number."
+      },
+      "recreated": {
+        "one": "The binder \"{binder}\" no longer existed: it was created again.",
+        "other": "{count} binders no longer existed: they were created again."
+      },
+      "undoFailed": {
+        "one": "One note could not be put back in its binder:",
+        "other": "{count} notes could not be put back in their binder:"
+      },
+      "changed": "it was changed since; it stays where it is.",
+      "gone": "it is no longer there (moved again, renamed, trashed or deleted).",
+      "undoError": "The move could not be undone: {message}"
+    },
+    "favoriteDrop": {
+      "done": {
+        "one": "\"{title}\" added to the favourites.",
+        "other": "{count} notes added to the favourites."
+      },
+      "undone": {
+        "one": "Favourite undone: \"{title}\" is no longer a favourite.",
+        "other": "Favourites undone: {count} notes are no longer favourites."
+      },
+      "undoFailed": {
+        "one": "One note could not be taken off the favourites:",
+        "other": "{count} notes could not be taken off the favourites:"
+      },
+      "undoError": "The favourite could not be undone: {message}"
+    },
+    "tagDrop": {
+      "done": {
+        "one": "Tag \"{tag}\" added to \"{title}\".",
+        "other": "Tag \"{tag}\" added to {count} notes."
+      },
+      "undone": {
+        "one": "Tag undone: \"{title}\" no longer has the tag \"{tag}\".",
+        "other": "Tag undone: {count} notes no longer have the tag \"{tag}\"."
+      },
+      "undoFailed": {
+        "one": "One note could not lose the tag:",
+        "other": "{count} notes could not lose the tag:"
+      },
+      "undoError": "The tag could not be removed: {message}"
+    },
     "turn": {
       "button": "Turn",
       "panel": "Turn the selected notes",

@@ -884,6 +884,45 @@ impl Library {
         self.move_unique(&path, &dir, note_stem(name))
     }
 
+    /// Puts a note moved by [`Library::move_to`] back where it was: into the folder of `original` (its path before the
+    /// move, created again if it is gone), under `original`'s file name (with a ` (n)` suffix if that name is taken
+    /// there, as `move_to` does). The note at `path` must still carry `expected`, the stamp it had when it was moved
+    /// (a move does not rewrite the file): another stamp means it was changed since, and it stays where it is
+    /// ([`LibraryError::Conflict`]); a file that is not there any more (moved again, renamed, trashed, deleted) is
+    /// [`LibraryError::NotFound`]. Returns the note's new path.
+    pub fn move_back(
+        &self,
+        path: &Path,
+        original: &Path,
+        expected: &FileStamp,
+    ) -> Result<PathBuf, LibraryError> {
+        let path = self.note_path(path)?;
+        let original = self.note_path(original)?;
+        if !path.is_file() {
+            return Err(LibraryError::NotFound { path });
+        }
+        let stamp = FileStamp::of(&path).map_err(io_error(&path))?;
+        if stamp != *expected {
+            return Err(LibraryError::Conflict { path });
+        }
+        let binder = original
+            .parent()
+            .and_then(|parent| parent.strip_prefix(&self.root).ok())
+            .unwrap_or(Path::new(""));
+        let name = original
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        let dir = self.create_binder(binder)?;
+        let same_folder = path.parent().is_some_and(|parent| {
+            parent.to_string_lossy().to_lowercase() == dir.to_string_lossy().to_lowercase()
+        });
+        if same_folder {
+            return Ok(path);
+        }
+        self.move_unique(&path, &dir, note_stem(name))
+    }
+
     /// Replaces a note's tags (normalised by [`normalize_tags`]). Returns the new stamp.
     pub fn set_tags(
         &self,
