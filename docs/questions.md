@@ -413,7 +413,9 @@ Décisions du développeur, à confirmer :
 
 **SPEC** : §4.3 ne parle pas de cette vue ; une phrase est à proposer à l'utilisateur.
 
-## Q25 — Un classeur et des étiquettes ensemble (2026-11-15) — **tranchée le 2026-11-15**
+## Q25 — Un classeur et des étiquettes ensemble (2026-11-15) — **tranchée le 2026-11-15, essayée par l'utilisateur le 2026-11-15**
+
+**Essai à la main (2026-11-15)** : l'utilisateur a essayé la version de Program et répond « C'est bon, tout fonctionne » ; les décisions ci-dessous sont gardées telles quelles.
 
 Demande de l'utilisateur, mot pour mot : « Je clique sur un classeur et une étiquette, je ne devrais avoir que les notes du classeur avec cette étiquette. C'est un comportement supplémentaire que je souhaite. voir avec plusieurs étiquettes. »
 
@@ -426,7 +428,9 @@ Décisions du développeur, à confirmer : le clic sur l'étiquette d'une carte,
 
 **SPEC** : §4.3 dit « recherche par titre et étiquettes » ; une phrase sur le filtre combiné est à proposer à l'utilisateur.
 
-## Q26 — Déposer une note dans un sous-classeur caché (2026-11-15) — **faite le 2026-11-15**
+## Q26 — Déposer une note dans un sous-classeur caché (2026-11-15) — **faite et essayée par l'utilisateur le 2026-11-15**
+
+**Essai à la main (2026-11-15)** : l'utilisateur a essayé la version de Program et répond « C'est bon, tout fonctionne » ; les décisions ci-dessous sont gardées telles quelles.
 
 Demande de l'utilisateur, mot pour mot : « Lorsque je clique et que je glisse une note vers un classeur, si je reste dessus, il faudrait que les sous-classeurs se déplient. pour que je puisse déposer dans un sous-classeur. »
 
