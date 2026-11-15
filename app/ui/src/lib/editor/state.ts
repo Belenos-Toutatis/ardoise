@@ -55,6 +55,18 @@ export function equationToolSize(tools: ToolSettings): number {
 }
 export type EraserMode = 'whole' | 'partial';
 
+/**
+ * How the selection tool selects: a rectangle (a drag from one corner to the opposite one) or a lasso (a free outline).
+ * A click on the tool's button while it is the tool turns to the other one, and so on (`nextSelectWay`); from another
+ * tool, the tool comes back in the way used last (`lib/select-prefs.svelte.ts`: one preference for the editor and live mode).
+ */
+export type SelectWay = 'rectangle' | 'lasso';
+
+/** The other way. */
+export function nextSelectWay(way: SelectWay): SelectWay {
+  return way === 'rectangle' ? 'lasso' : 'rectangle';
+}
+
 /** The text tool's settings (SPEC §4.4): its colour is the tool's colour (`ToolSettings.color`). */
 export interface TextSettings {
   font: FontFamily;

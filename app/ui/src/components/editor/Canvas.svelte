@@ -7,7 +7,8 @@
   /**
    * The page: an SVG whose `viewBox` is the visible part of the page in device units, the
    * rendered background as an `<image>`, then one non-zero filled path per visible stroke in
-   * drawing order (outlines cached per stroke object). Handles drawing, erasing, lasso, moving
+   * drawing order (outlines cached per stroke object). Handles drawing, erasing, selecting (a rectangle or a lasso, by
+   * the selection tool's way, `selectPrefs.way`; the pen's barrel button always draws a lasso), moving
    * and resizing the selection, manual crop, zoom (wheel at the cursor) and pan (middle button,
    * Space + drag, or the pan tool). A drag shows transient state and reports one change at the end.
    *
@@ -92,6 +93,7 @@
   } from '../../lib/gestures';
   import { GRAB_TOLERANCE, corners, grabAt as grabOnFrame } from '../../lib/selection-grab';
   import { touchPrefs } from '../../lib/touch-prefs.svelte';
+  import { selectPrefs } from '../../lib/select-prefs.svelte';
   import { placedImage } from '../../lib/editor/image';
   import { MIN_CROP } from '../../lib/editor/ops';
   import type { SplitPreview } from '../../lib/editor/split';
@@ -277,8 +279,11 @@
     | { kind: 'eraser'; id: number; last: Vec }
     /** A shape tool: the two ends, the keys held now (Shift, Alt), and the time of the pointer-down as the pen has it. */
     | { kind: 'shape'; id: number; shape: ShapeKind; start: Vec; end: Vec; shift: boolean; alt: boolean; t0: number; base: number }
-    /** `barrel`: started by the pen's barrel button, which ends when the button is released. */
-    | { kind: 'lasso'; id: number; points: Vec[]; combine: Combine; barrel?: boolean }
+    /**
+     * `barrel`: started by the pen's barrel button, which ends when the button is released. `box`: the selection tool's
+     * rectangle (`points` holds the two corners, the press and the pointer now) rather than a free outline.
+     */
+    | { kind: 'lasso'; id: number; points: Vec[]; combine: Combine; barrel?: boolean; box?: boolean }
     | { kind: 'zone'; id: number; points: Vec[] }
     | { kind: 'move'; id: number; start: Vec }
     | { kind: 'scale'; id: number; anchor: Vec; start: Vec }
@@ -297,7 +302,9 @@
   let transient = $state.raw<Doc | null>(null);
   let dragAffine = $state.raw<Affine | null>(null);
   let lasso = $state.raw<Vec[] | null>(null);
-  /** The lasso removes from the selection (drawn in the danger colour). */
+  /** The selection tool's rectangle being drawn (page units; dashed like the lasso). */
+  let marquee = $state.raw<Rect | null>(null);
+  /** The lasso or the rectangle removes from the selection (drawn in the danger colour). */
   let lassoRemoves = $state(false);
   let cropRect = $state.raw<Rect | null>(null);
   let livePath = $state('');
@@ -763,6 +770,7 @@
     livePath = '';
     transient = null;
     lasso = null;
+    marquee = null;
     cropRect = null;
     dragAffine = null;
   }
@@ -941,11 +949,15 @@
         begin({ kind: 'shape', id, shape: tools.mode, start: p, end: p, shift: e.shiftKey, alt: e.altKey, t0: e.timeStamp, base: strokeBase(e.timeStamp) });
         break;
       case 'select': {
-        // With Shift or Ctrl the gesture is always a lasso, even on the selection's frame.
+        // With Shift or Ctrl the gesture always selects (a rectangle or a lasso, by the tool's way), even on the selection's frame.
         const combine: Combine = e.ctrlKey || e.metaKey ? 'remove' : e.shiftKey ? 'add' : 'replace';
         const grab = combine === 'replace' ? frameGrab(e) : null;
         if (grab) begin(grab);
-        else {
+        else if (selectPrefs.way === 'rectangle') {
+          begin({ kind: 'lasso', id, points: [p], combine, box: true });
+          marquee = rectFromCorners(p, p);
+          lassoRemoves = combine === 'remove';
+        } else {
           begin({ kind: 'lasso', id, points: [p], combine });
           lasso = [p];
           lassoRemoves = combine === 'remove';
@@ -1027,8 +1039,13 @@
         break;
       case 'lasso':
       case 'zone':
-        drag.points.push(pagePoint(e));
-        lasso = [...drag.points];
+        if (drag.kind === 'lasso' && drag.box) {
+          drag.points = [drag.points[0], pagePoint(e)];
+          marquee = rectFromCorners(drag.points[0], drag.points[1]);
+        } else {
+          drag.points.push(pagePoint(e));
+          lasso = [...drag.points];
+        }
         break;
       case 'move': {
         const p = pagePoint(e);
@@ -1156,6 +1173,7 @@
       }
       case 'lasso': {
         lasso = null;
+        marquee = null;
         if (cancelled) break;
         const bounds = boundsOfPoints(d.points);
         // The selection takes strokes and objects of the chosen layer only.
@@ -1169,8 +1187,10 @@
           picked = hit === null ? [] : [hit];
           pickedObjects = frame === null ? [] : [frame];
         } else {
-          picked = selectInLasso(chosen, d.points);
-          pickedObjects = objectsInLasso(doc.note, d.points, doc.activeLayer);
+          // The rectangle takes what a lasso along its edge would (the same rules, so the same things for the same area).
+          const area = d.box && bounds ? corners(bounds) : d.points;
+          picked = selectInLasso(chosen, area);
+          pickedObjects = objectsInLasso(doc.note, area, doc.activeLayer);
         }
         const combineWith = (current: readonly number[], found: number[]) =>
           d.combine === 'add' ? [...current, ...found] : d.combine === 'remove' ? current.filter((i) => !found.includes(i)) : found;
@@ -1356,6 +1376,9 @@
     {/if}
     {#if lasso}
       <polyline class="lasso" class:removing={lassoRemoves} points={lasso.map((p) => `${p.x},${p.y}`).join(' ')} />
+    {/if}
+    {#if marquee}
+      <rect class="lasso marquee" class:removing={lassoRemoves} x={marquee.x} y={marquee.y} width={marquee.width} height={marquee.height} />
     {/if}
     {#if cropRect}
       <rect class="crop" x={cropRect.x} y={cropRect.y} width={cropRect.width} height={cropRect.height} />

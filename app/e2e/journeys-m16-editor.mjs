@@ -1,4 +1,4 @@
-// M16 journey, the editor's side panel (docs/design/side-panel.md, §10 "End-to-end journeys"): six tabs, each with its
+// M16 journey, the editor's side panel (docs/design/side-panel.md, §10 "End-to-end journeys"): seven tabs, each with its
 // content, collapse and reopening, the keyboard on the rail, the view remembered when the note is closed and opened
 // again, the selection above the open tab, the replay showing Son, the badges (the hidden layer, the sharing) and the
 // share started from the Projection tab (the button has left the toolbar).
@@ -21,8 +21,11 @@ import { checkRecordingDot, collapsePanel, openTab, SIDE, sideState, tabButton, 
 const j = JSON.stringify;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** The rail's tabs in the editor in M16, in order (the Page, Fond, Son and Aide tabs exist here; docs/design/side-panel.md §1). */
-const TABS = ['layers', 'page', 'background', 'sound', 'projection', 'help'];
+/**
+ * The rail's tabs in the editor, in order (the Page, Fond, Son and Aide tabs exist here; docs/design/side-panel.md §1; the
+ * « Caractères » tab of the Text tool since 2026-11-15, the editor's only).
+ */
+const TABS = ['layers', 'page', 'background', 'sound', 'projection', 'characters', 'help'];
 const STORAGE_KEY = 'ardoise.sidePanel.editor';
 /** What each tab shows, one control or block that must be on screen once the tab is open (§7). */
 const CONTENT = {
@@ -32,6 +35,8 @@ const CONTENT = {
   // M17: the mode of the recording (« Pendant que j'écris » by default, its own recording below it).
   sound: '[data-section="narration"] [data-field="narration-mode"]',
   projection: '[data-section="share"] button[data-action="share"]',
+  // Without a frame being typed: its keys (disabled) under the sentence that says to touch the page with the Text tool.
+  characters: '[data-slot="greek-palette"] [data-slot="greek-hint"]',
   help: '[data-section="shortcuts"] dl.keys',
 };
 /** The other blocks of the Page tab (§7). */
@@ -88,7 +93,7 @@ export const sidePanelEditorJourneys = [
     async run(app, check) {
       const l = (key) => text(app.language, key);
 
-      await check('ouvrir une note de démonstration : six onglets dans l’ordre, Calques ouvert', async () => {
+      await check('ouvrir une note de démonstration : sept onglets dans l’ordre, Calques ouvert', async () => {
         await app.waitFor(`document.querySelectorAll('.note-card').length > 0`, 'the demo notes');
         await app.click('.note-card .card-open');
         await app.waitFor(`${strokeCount} > 0`, 'the strokes of the note');

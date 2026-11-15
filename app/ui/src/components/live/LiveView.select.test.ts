@@ -7,6 +7,7 @@ import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, type AppState } from '../../lib/api';
 import { setLocale, t } from '../../lib/i18n.svelte';
+import { selectPrefs } from '../../lib/select-prefs.svelte';
 import { FakeContext } from '../../lib/live-fake-canvas';
 import { SELECTION_COLORS } from '../../lib/live-render';
 import { fitTransform, pageToScreen } from '../../lib/live-view';
@@ -48,6 +49,8 @@ let cleanup: (() => void) | null = null;
 let contexts: FakeContext[] = [];
 
 beforeEach(() => {
+  // The Select tool's way is the computer's preference (the editor's too): each test starts with the first-time rectangle.
+  selectPrefs.reset();
   resetMockLive();
   resetMockTablet();
   resetMockNarration();
@@ -116,7 +119,15 @@ function render(resume: string | null = sheetPath()) {
     for (const [key, value] of Object.entries(props)) Object.defineProperty(event, key, { value, configurable: true });
     canvas().dispatchEvent(event);
   };
+  /** A gesture round the area, in the way the tool is in: a drag from one corner to the opposite one, or an outline. */
   const lasso = (x0: number, y0: number, x1: number, y1: number, init: Init = {}) => {
+    if (selectPrefs.way === 'rectangle') {
+      fire('pointerdown', at(x0, y0), init);
+      fire('pointermove', at((x0 + x1) / 2, (y0 + y1) / 2), init);
+      fire('pointermove', at(x1, y1), init);
+      fire('pointerup', at(x1, y1), init);
+      return;
+    }
     const corners = [at(x0, y0), at(x1, y0), at(x1, y1), at(x0, y1)];
     fire('pointerdown', corners[0], init);
     for (const corner of corners.slice(1)) fire('pointermove', corner, init);
@@ -127,7 +138,7 @@ function render(resume: string | null = sheetPath()) {
     fire('pointerdown', at(x, y), init);
     fire('pointerup', at(x, y), init);
   };
-  /** A lasso round the first stroke (the wave at y = 3000), the second one (y = 6000), both. */
+  /** A gesture round the first stroke (the wave at y = 3000), the second one (y = 6000), both. */
   const first = (init: Init = {}) => lasso(1500, 1800, 22500, 4200, init);
   const second = (init: Init = {}) => lasso(1500, 5000, 20500, 7000, init);
   const both = () => lasso(1500, 1800, 22500, 7000);
@@ -156,7 +167,7 @@ async function selected() {
 }
 
 describe('the Select tool', () => {
-  it('is a toggle of the toolbar, off at first, with the editor\'s name and the V key', async () => {
+  it('is a button of the toolbar, off at first, with the editor\'s name and the V key, which turns the way', async () => {
     const view = render();
     // Nothing to touch up before the session runs.
     expect(view.action('select')!.disabled).toBe(true);
@@ -164,6 +175,7 @@ describe('the Select tool', () => {
     const toggle = view.action('select')!;
     expect(toggle.disabled).toBe(false);
     expect(toggle.textContent?.trim()).toBe('Sélection');
+    expect(toggle.getAttribute('aria-label')).toBe('Sélection : rectangle');
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
     expect(view.canvas().classList.contains('selecting')).toBe(false);
 
@@ -171,9 +183,23 @@ describe('the Select tool', () => {
     await tick();
     expect(toggle.getAttribute('aria-pressed')).toBe('true');
     expect(view.canvas().classList.contains('selecting')).toBe(true);
-    expect(view.target.querySelector('[data-slot="select-hint"]')?.textContent).toContain('Lasso');
+    expect(view.target.querySelector('[data-slot="select-hint"]')?.textContent).toMatch(/^Rectangle : /);
 
+    // The key does what a second click does: the other way; the tool stays on (it is left by choosing the Pen tool).
     expect(press('v').defaultPrevented).toBe(true);
+    await tick();
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(toggle.getAttribute('aria-label')).toBe('Sélection : lasso');
+    expect(toggle.title).toMatch(/^Sélection : lasso. /);
+    expect(toggle.dataset.way).toBe('lasso');
+    expect(view.target.querySelector('[data-slot="select-hint"]')?.textContent).toMatch(/^Lasso : /);
+    toggle.click();
+    await tick();
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(toggle.dataset.way).toBe('rectangle');
+    expect(view.target.querySelector('[data-slot="select-hint"]')?.textContent).toContain('un nouveau clic sur le bouton (ou V) : lasso');
+
+    view.action('pen')!.click();
     await tick();
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
     expect(view.target.querySelector('[data-slot="select-hint"]')).toBeNull();
@@ -184,6 +210,7 @@ describe('the Select tool', () => {
     const view = render();
     await live(view);
     expect(view.action('select')!.textContent?.trim()).toBe('Select');
+    expect(view.action('select')!.getAttribute('aria-label')).toBe('Select: rectangle');
     expect(view.action('undo-edit')!.textContent?.trim()).toBe('Undo');
     expect(view.action('redo-edit')!.textContent?.trim()).toBe('Redo');
     press('v');
@@ -194,10 +221,10 @@ describe('the Select tool', () => {
     expect(view.action('delete-selection')!.textContent?.trim()).toBe('Delete');
     expect(view.action('deselect')!.textContent?.trim()).toBe('Deselect');
     expect(view.bar()!.getAttribute('aria-label')).toBe('Touch up the selection');
-    expect(view.target.querySelector('[data-slot="select-hint"]')?.textContent).toContain('Lasso: select');
+    expect(view.target.querySelector('[data-slot="select-hint"]')?.textContent).toContain('Rectangle: drag a rectangle to select');
   });
 
-  it('chooses with a lasso or a click, shows the bar, and turning the tool off drops the selection', async () => {
+  it('chooses with a rectangle or a click, shows the bar, and leaving the tool drops the selection', async () => {
     const view = render();
     await live(view);
     view.action('select')!.click();
@@ -217,7 +244,11 @@ describe('the Select tool', () => {
 
     view.both();
     await vi.waitFor(() => expect(view.bar()!.textContent).toContain('Traits sélectionnés : 2'));
+    // A click on the button turns the way, the selection stays; the Pen tool leaves the tool.
     view.action('select')!.click();
+    await tick();
+    expect(view.bar()!.textContent).toContain('Traits sélectionnés : 2');
+    view.action('pen')!.click();
     await vi.waitFor(() => expect(view.bar()).toBeNull());
   });
 
@@ -232,6 +263,111 @@ describe('the Select tool', () => {
       expect(contexts.some((c) => c.ops('fill').length >= 3 && c.count('strokeRect') === 1 && c.count('fillRect') === 1)).toBe(true),
     );
     expect(sent.map((spy) => spy.mock.calls.length)).toEqual([0, 0, 0, 0]);
+  });
+});
+
+describe('the way of the Select tool: a rectangle or a lasso, one preference of the computer', () => {
+  it('starts with the rectangle, turns with the button and with V, and is left only by choosing the Pen tool', async () => {
+    const view = render();
+    await live(view);
+    const select = view.action('select')!;
+    expect(select.dataset.way).toBe('rectangle');
+    select.click();
+    await tick();
+    for (const way of ['lasso', 'rectangle', 'lasso'] as const) {
+      press('v');
+      await tick();
+      expect(select.dataset.way).toBe(way);
+      expect(select.getAttribute('aria-pressed')).toBe('true');
+    }
+    // Escape keeps its steps: it drops a selection, never the tool; with none it asks about ending live mode.
+    press('Escape');
+    await vi.waitFor(() => expect(document.querySelector('[data-action="leave-confirm"]')).not.toBeNull());
+    expect(select.getAttribute('aria-pressed')).toBe('true');
+    view.action('pen')!.click();
+    await tick();
+    expect(select.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('comes back in the way used last, from the Pen tool, and shows it meanwhile', async () => {
+    const view = render();
+    await live(view);
+    press('v');
+    press('v');
+    await tick();
+    expect(view.action('select')!.dataset.way).toBe('lasso');
+    press('p');
+    await tick();
+    expect(view.action('select')!.getAttribute('aria-pressed')).toBe('false');
+    // The button offers what a click gives.
+    expect(view.action('select')!.dataset.way).toBe('lasso');
+    expect(view.action('select')!.getAttribute('aria-label')).toBe('Sélection : lasso');
+    press('v');
+    await tick();
+    expect(view.action('select')!.getAttribute('aria-pressed')).toBe('true');
+    expect(view.action('select')!.dataset.way).toBe('lasso');
+    expect(view.target.querySelector('[data-slot="select-hint"]')?.textContent).toMatch(/^Lasso : /);
+    // A lasso it is: an outline chooses, a plain diagonal does not.
+    view.first();
+    await vi.waitFor(() => expect(view.bar()).not.toBeNull());
+  });
+
+  it('is the editor way: one preference, remembered on this computer', async () => {
+    // What the editor stored (or the editor's button turned): live mode opens with it.
+    selectPrefs.set('lasso');
+    expect(localStorage.getItem('ardoise.select.way')).toBe('lasso');
+    const view = render();
+    await live(view);
+    expect(view.action('select')!.dataset.way).toBe('lasso');
+    view.action('select')!.click();
+    await tick();
+    expect(view.action('select')!.dataset.way).toBe('lasso');
+    // Turned here, the editor finds it turned.
+    view.action('select')!.click();
+    await tick();
+    expect(selectPrefs.way).toBe('rectangle');
+    expect(localStorage.getItem('ardoise.select.way')).toBe('rectangle');
+  });
+
+  it.each(['rectangle', 'lasso'] as const)('takes the same strokes in either way: the %s round the same area', async (way) => {
+    selectPrefs.set(way);
+    const view = render();
+    await live(view);
+    press('v');
+    await tick();
+    view.first();
+    await vi.waitFor(() => expect(view.bar()!.textContent).toContain('Traits sélectionnés : 1'));
+    view.both();
+    await vi.waitFor(() => expect(view.bar()!.textContent).toContain('Traits sélectionnés : 2'));
+  });
+
+  it('draws the rectangle on the preview of this window only: nothing is sent while it is dragged, nor when it ends', async () => {
+    const sent = [vi.spyOn(api, 'liveEditStrokes'), vi.spyOn(api, 'liveCommand'), vi.spyOn(api, 'liveSetView'), vi.spyOn(api, 'liveSetStyle')];
+    const view = render();
+    await live(view);
+    press('v');
+    await tick();
+    view.fire('pointerdown', at(1500, 1800));
+    view.fire('pointermove', at(12000, 3000));
+    view.fire('pointermove', at(22500, 4200));
+    await vi.waitFor(() => expect(contexts.some((c) => c.ops('fill').some((f) => f.fillStyle === SELECTION_COLORS.light.box))).toBe(true));
+    expect(sent.map((spy) => spy.mock.calls.length)).toEqual([0, 0, 0, 0]);
+    view.fire('pointerup', at(22500, 4200));
+    await vi.waitFor(() => expect(view.bar()).not.toBeNull());
+    expect(sent.map((spy) => spy.mock.calls.length)).toEqual([0, 0, 0, 0]);
+  });
+
+  it('speaks English: the name, the tooltip and the help line', async () => {
+    setLocale('en');
+    const view = render();
+    await live(view);
+    press('v');
+    press('v');
+    await tick();
+    const select = view.action('select')!;
+    expect(select.getAttribute('aria-label')).toBe('Select: lasso');
+    expect(select.title).toMatch(/^Select: lasso. /);
+    expect(view.target.querySelector('[data-slot="select-hint"]')?.textContent).toMatch(/^Lasso: draw an outline/);
   });
 });
 

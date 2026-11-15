@@ -153,10 +153,10 @@ const PROBES: Record<string, (v: View) => Promise<void>> = {
   select: async (v) => {
     await v.tool('Stylo');
     await v.press('select');
-    expect(v.pressed()).toBe('Sélection');
+    expect(v.pressed()).toBe('Sélection : rectangle');
   },
   pen: async (v) => {
-    await v.tool('Sélection');
+    await v.tool('Sélection : rectangle');
     await v.press('pen');
     expect(v.pressed()).toBe('Stylo');
   },

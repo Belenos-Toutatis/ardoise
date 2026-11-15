@@ -14,6 +14,7 @@ import { SELECTION_COLORS } from '../../lib/live-render';
 import type { Combine } from '../../lib/live-select.svelte';
 import { LiveState } from '../../lib/live-state.svelte';
 import { fitTransform, pageToScreen } from '../../lib/live-view';
+import type { SelectWay } from '../../lib/editor/state';
 import type { Layer, Note, Stroke } from '../../lib/note';
 import LiveCanvas from './LiveCanvas.svelte';
 
@@ -97,7 +98,7 @@ const TRANSFORM = fitTransform(A4, { width: 800, height: 560 }, 12);
 const at = (x: number, y: number) => pageToScreen(TRANSFORM, { x, y });
 
 async function render(
-  options: { mode?: 'preview' | 'presentation'; selecting?: boolean; selection?: readonly number[]; strokes?: Stroke[]; computerLayer?: number } = {},
+  options: { mode?: 'preview' | 'presentation'; selecting?: boolean; way?: SelectWay; selection?: readonly number[]; strokes?: Stroke[]; computerLayer?: number } = {},
 ) {
   const live = new LiveState();
   live.initial({ ...snapshot(options.strokes ?? [line(3000, 4000), line(3000, 8000), line(12000, 4000, 1)]), computerLayer: options.computerLayer ?? 0 });
@@ -118,6 +119,7 @@ async function render(
       onselect,
       onmarks,
       tool: options.selecting === false ? 'none' : 'select',
+      way: options.way,
       selection: options.selection ?? [],
     },
   });
@@ -155,11 +157,19 @@ async function render(
     fire('pointermove', at(x0, y0 + 10), init);
     fire('pointerup', at(x0, y0 + 10), init);
   };
+  /** A rectangle: a drag from one corner to the opposite one (`until` looks at the preview before the button is let go). */
+  const box = (x0: number, y0: number, x1: number, y1: number, init: Init = {}, until?: () => void) => {
+    fire('pointerdown', at(x0, y0), init);
+    fire('pointermove', at((x0 + x1) / 2, (y0 + y1) / 2), init);
+    fire('pointermove', at(x1, y1), init);
+    until?.();
+    fire('pointerup', at(x1, y1), init);
+  };
   const click = (x: number, y: number, init: Init = {}) => {
     fire('pointerdown', at(x, y), init);
     fire('pointerup', at(x, y), init);
   };
-  return { live, canvas, fire, lasso, click, onview, onselect, onmarks };
+  return { live, canvas, fire, lasso, box, click, onview, onselect, onmarks };
 }
 
 describe('live preview with the Select tool', () => {
@@ -297,6 +307,83 @@ describe('presentation window', () => {
     view.fire('pointermove', { x: 500, y: 300 });
     view.fire('pointerup', { x: 500, y: 300 });
     expect(view.onmarks).toHaveBeenLastCalledWith(1);
+    expect(view.onselect).not.toHaveBeenCalled();
+  });
+});
+
+describe('live preview with the rectangle', () => {
+  it('chooses what a lasso along its edge would, with the real geometry, in any corner order', async () => {
+    const view = await render({ way: 'rectangle' });
+    view.box(2500, 3000, 4500, 5000);
+    expect(view.onselect).toHaveBeenCalledExactlyOnceWith([0], 'replace');
+    view.onselect.mockClear();
+    view.box(4500, 9000, 2500, 3000);
+    expect(view.onselect).toHaveBeenCalledExactlyOnceWith([0, 1], 'replace');
+    // The area was not dragged.
+    expect(view.onview).not.toHaveBeenCalled();
+  });
+
+  it('picks the same strokes as the lasso for the same areas, and takes the chosen layer only', async () => {
+    const areas: [number, number, number, number][] = [
+      [2500, 3000, 4500, 5000],
+      [2500, 3000, 4500, 9000],
+      [3200, 3000, 4500, 9000],
+      [500, 500, 29000, 20000],
+      [14500, 11000, 17500, 13000],
+    ];
+    for (const area of areas) {
+      const rectangle = await render({ way: 'rectangle' });
+      rectangle.box(...area);
+      const lasso = await render({ way: 'lasso' });
+      lasso.lasso(...area);
+      expect(rectangle.onselect.mock.calls, `area ${area}`).toEqual(lasso.onselect.mock.calls);
+      cleanup?.();
+    }
+  });
+
+  it('Shift adds and Ctrl removes, a click takes the stroke under it, a click on nothing clears', async () => {
+    const view = await render({ way: 'rectangle' });
+    view.box(2500, 3000, 4500, 5000, { shiftKey: true });
+    expect(view.onselect).toHaveBeenLastCalledWith([0], 'add');
+    view.box(2500, 3000, 4500, 5000, { ctrlKey: true });
+    expect(view.onselect).toHaveBeenLastCalledWith([0], 'remove');
+    view.click(3500, 8000);
+    expect(view.onselect).toHaveBeenLastCalledWith([1], 'replace');
+    view.click(25000, 18000);
+    expect(view.onselect).toHaveBeenLastCalledWith([], 'replace');
+  });
+
+  it('is drawn with the lasso\'s overlay while the button is down (a closed outline), and nowhere after', async () => {
+    const view = await render({ way: 'rectangle' });
+    const filled = () => contexts.reduce((n, c) => n + c.ops('fill').filter((f) => f.fillStyle === SELECTION_COLORS.light.box).length, 0);
+    expect(filled()).toBe(0);
+    view.fire('pointerdown', at(2500, 3000));
+    view.fire('pointermove', at(3500, 4000));
+    view.fire('pointermove', at(4500, 5000));
+    await vi.waitFor(() => expect(filled()).toBeGreaterThan(0));
+    view.fire('pointerup', at(4500, 5000));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    // Let go: a new frame draws no rectangle (the selection's own frame is a strokeRect, not this fill).
+    const drawn = filled();
+    view.live.changeView({ zoom: 2, x: 5000, y: 5000, board: false, laser: false }, async () => {});
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(filled()).toBe(drawn);
+  });
+
+  it('is never drawn by the presentation window, which writes its marks as before', async () => {
+    const view = await render({ mode: 'presentation', selecting: true, way: 'rectangle' });
+    view.fire('pointerdown', { x: 300, y: 300 });
+    view.fire('pointermove', { x: 500, y: 340 });
+    view.fire('pointerup', { x: 500, y: 340 });
+    expect(view.onselect).not.toHaveBeenCalled();
+    expect(contexts.every((c) => c.ops('fill').every((f) => f.fillStyle !== SELECTION_COLORS.light.box))).toBe(true);
+  });
+
+  it('keeps a finger navigating and a drag on the selection frame moving it, as with the lasso', async () => {
+    const view = await render({ way: 'rectangle' });
+    view.fire('pointerdown', at(3000, 4000), { pointerType: 'touch', pointerId: 5 });
+    view.fire('pointermove', at(4000, 4500), { pointerType: 'touch', pointerId: 5 });
+    view.fire('pointerup', at(4000, 4500), { pointerType: 'touch', pointerId: 5 });
     expect(view.onselect).not.toHaveBeenCalled();
   });
 });

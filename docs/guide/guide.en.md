@@ -692,12 +692,18 @@ touch up in the control window, and **the tablet keeps writing meanwhile**.
 
 **Choosing strokes**
 
-- Click **Select** (the **Computer** group) in the toolbar, or press `V`. Pressing it again leaves the tool. **Select**
-  and **Pen** (see **Correcting during live mode**) exclude each other: choosing one leaves the other.
-- **Lasso**: in the preview, press with the mouse and draw around the strokes, then release. A stroke is chosen when at
-  least half of its points are inside the lasso.
+- Click **Select** (the **Computer** group) in the toolbar, or press `V`. **Select** and **Pen** (see **Correcting
+  during live mode**) exclude each other: choosing one leaves the other. **You leave the Select tool by choosing Pen** (the
+  button, or `P`): clicking **Select** again, or pressing `V` again, no longer leaves it, it changes the way of choosing.
+  `Esc` clears the selection without leaving the tool; with no selection it asks to end live mode, as before.
+- **Way of choosing**, the same as in the editor: a **rectangle** (press the mouse on one corner of the preview, drag to the
+  opposite corner, then release; a dashed frame shows the area) or a **lasso** (draw around the strokes freehand). Clicking
+  **Select** again (or pressing `V` again) switches from one to the other; the button ("Select: rectangle" or "Select:
+  lasso"), its icon and the help line say which. Coming back to **Select** from **Pen** gives the way used last, in live mode
+  as in the editor. The first time, it is the rectangle. A stroke is chosen when at least half of its points are inside the
+  area, rectangle or lasso.
 - **Click**: click a stroke to choose it alone. Click on the ink itself, not next to it.
-- `Shift` + lasso or click adds strokes to the ones already chosen. `Ctrl` + lasso or click removes some.
+- `Shift` + rectangle, lasso or click adds strokes to the ones already chosen. `Ctrl` + rectangle, lasso or click removes some.
 - A gesture on empty paper, or `Esc`, clears the selection. While strokes are chosen, `Esc` does nothing else.
 - A finger outside the selection's frame and the wheel still move and zoom the preview.
 - The chosen strokes are outlined in blue in the preview. The selection bar, above the open tab of the side panel, says
@@ -716,8 +722,8 @@ corners.
   finger. Drag along the diagonal. The opposite corner stays where it is; the thickness of the line follows
   the size. You cannot go below a twentieth of the size, nor above twenty times.
 - A plain press in the frame, without dragging, changes nothing: it does not make a new selection. With `Shift` or
-  `Ctrl`, a gesture is always a lasso, even on the frame. Outside the frame, the mouse and the pen draw a lasso as
-  before and a finger moves the preview.
+  `Ctrl`, a gesture always chooses (a rectangle or a lasso, by the way), even on the frame. Outside the frame, the mouse and
+  the pen choose as before and a finger moves the preview.
 - During the gesture the strokes are shown lifted, where you are taking them, and the place they leave is empty. `Esc`
   (or a second finger, which turns the gesture into a zoom) drops the gesture: the strokes stay where they were and
   nothing is sent.
@@ -744,7 +750,7 @@ chosen, a swatch sets the pen's colour, as before.
   still undoes its touch-ups. The lists are gone when you finish live mode.
 - The **Undo** and **Redo** buttons are greyed out when there is nothing to do.
 
-**The projector and the other screen on the network only see the result.** Never the blue outline or the lasso: a
+**The projector and the other screen on the network only see the result.** Never the blue outline, the selection rectangle or the lasso: a
 deleted stroke disappears, a recoloured stroke changes colour, a moved or resized stroke appears at its new place. The annotations drawn over the presentation are not
 strokes of the page: they cannot be chosen.
 
@@ -793,7 +799,7 @@ anything into their writing.
 6. To touch up what the pupil wrote, click their layer in the zone, then use the pen's eraser or **Select**.
 
 **What the projector and the share show.** Both layers, mixed, as on screen, except hidden layers, which they never
-show. Neither the frame, nor the lasso, nor the eraser's circle is projected.
+show. Neither the frame, nor the selection rectangle, nor the lasso, nor the eraser's circle is projected.
 
 **Undoing with `Ctrl + Z`.** It undoes the *computer's* actions: a stroke, an erasing, a touch-up, **Clear the page**
 (see **Touching up during live mode**). Never what the tablet wrote. Layer operations (adding, hiding, renaming,
@@ -1058,6 +1064,18 @@ A binder is simply a *subfolder* of the library. Click the **New binder** icon (
 binder), type the **Binder name** and click **Create**. To file notes, drag them onto a binder in the sidebar, or
 select them and use **Move to…** (**Library (root)** takes them back to the root).
 
+**A filing mistake can be undone.** After each move, a message says where the notes went ("Shopping list" moved to "Perso".",
+"3 notes moved to "Classe/3e B".") and offers **Undo**; `Ctrl + Z` does the same, **even when the card has left the binder on
+display, when the message is gone and when you changed binder meanwhile** (go and look in the target binder, then press
+`Ctrl + Z`). Each note goes back to the binder it came from (the notes of a selection may come from different binders), under
+its original file name, and takes its place again in the order of that binder: "Move undone: "Shopping list" is back in "Library
+(root)"." Ardoise does nothing blindly: a note that was **changed**, **moved again**, **trashed** or **deleted** since stays where
+it is and is listed with the reason (the other notes of the same move still go back, and the message says how many); a file name
+already taken in the original binder gives a numbered name, and the message says so; an original binder deleted meanwhile is made
+again, and the message says so. If the order of the original binder was rearranged since, the note goes back **to the end** of the
+binder and the message says so. Dropping notes onto **Favourites** or onto a tag is undone the same way ("Favourite undone: …",
+"Tag undone: …"): only the notes that were not favourites already, or that did not have the tag, lose it.
+
 Under the date, each card names the note's binder, with its whole path if it sits inside another binder (for example
 `Classe/3e B`). A note in no binder, so at the root of the library, says **Not in a binder**: you see at a glance what is
 left to file. As a note is a file, it is in one binder at a time.
@@ -1089,7 +1107,7 @@ comes back as soon as you open a binder again.
 - **Undoing an arrangement**: `Ctrl + Z` (or the **Undo** button of the message shown after the arrangement) puts the previous
   order back and says what came back: "Rearrangement undone: "Beta" is back where it was." (or "Rearrangement undone: 3 notes are
   back where they were."). Several arrangements are undone one by one, last first, even once their messages are gone; the list is
-  emptied when you leave the binder or change the sort. Ardoise **never overwrites a newer order**: if the binder's order has
+  emptied when you leave the binder or change the sort (not so for moves to another binder, see "Binders"). Ardoise **never overwrites a newer order**: if the binder's order has
   changed since (another computer, the sync, a note copied), it does nothing and says so: "Rearrangement not undone: the binder's
   order has changed since… The new order is kept."
 - **A parent binder** shows its own notes first, then those of each sub-binder in that sub-binder's order (the sub-binders in
@@ -1224,7 +1242,7 @@ of the library ("3 notes moved to the trash.") with an **Undo** button that rest
 seconds (8), and as long as the mouse or the keyboard is on it. `Ctrl + Z` does the same from the library (outside a text
 field, and not in the editor, which has its own **Undo**). The **Undo** messages of **Turn**, **Duplicate**, **Change the date…**
 and deleting a binder work the same way, and `Ctrl + Z` undoes the most recent of these actions; arranging the cards of a binder
-can be undone too (see "Binder order"). **Every undo is followed by a message that says what was undone** ("Move to the trash
+and moving notes to another binder (or onto **Favourites** or a tag) can be undone too (see "Binder order" and "Binders"). **Every undo is followed by a message that says what was undone** ("Move to the trash
 undone: "Shopping list" is back in its binder.", "Copy undone: "Course (copy)" is in the trash.", "Date change undone: …"), read
 aloud by a screen reader and gone by itself after a few seconds. If a note cannot go to the trash (it was deleted
 meanwhile on another computer, for example), the others go anyway; that one is reported and stays selected.
@@ -1309,6 +1327,9 @@ panel, *collapses* it: the page takes the whole width and the rail stays. The ta
 - **Projection**: the **Projector** (the projection screen, **Project**, **Stop projecting**), the **Projected area**
   (zoom, **Whole page**, **Width**) and **Share on the network** (the button is no longer in the toolbar; see the end of
   chapter 6). See **Projecting the note on a video projector** below.
+- **Characters**: the Greek alphabet and the symbols to add to the typed text, with any tool (see **Typing text** below;
+  the **αβγ** button of the **Text** tool opens this tab). With no text being typed, the letters are greyed out and the tab
+  offers **Text tool**.
 - **Help**: the editor's keyboard shortcuts (see chapter 17).
 
 Ardoise remembers the open tab and the collapsed state of the editor, on this PC, and finds them again when you open
@@ -1343,9 +1364,15 @@ The toolbar offers these tools (**Tool**):
 - **Equation**: a formula or a chemical equation written in LaTeX (see **Writing an equation**, below).
 - **Bookmark**: a word or a short phrase put at a spot of the page, to find a passage again (see **Putting bookmarks**, below).
 - **Eraser**: **Whole strokes** or **Partial**, with its **Size**. It erases only on the chosen layer (see **Layers**).
-- **Select** (the lasso): draw around strokes and texts of the chosen layer to select them (a text is taken when its middle
-  is in the lasso; a click on a text takes it alone); `Shift` + lasso adds, `Ctrl` + lasso removes. The
-  **Selection** block, above the open tab of the side panel, offers **Copy**, **Cut**, **Paste**, **Duplicate**,
+- **Select**: a **rectangle** or a **lasso**, as you like, on the strokes and texts of the chosen layer. The first time, a
+  click on **Select** gives the **rectangle**: drag from one corner to the opposite one to select what it holds. Clicking the
+  button again, or pressing `V` again, switches to the **lasso**: draw around the items freehand; another click goes back to
+  the rectangle, and so on. The button keeps its short name ("Select"): its icon, its tooltip ("Select: rectangle" or "Select:
+  lasso") and the help line below say which of the two is on. Both take the same things for the same area: a stroke when at least half of its points are inside, a text, an
+  equation or a bookmark when its middle is inside. A click on a stroke or a text takes it alone, a click on the empty page
+  deselects; `Shift` + rectangle (or lasso) adds, `Ctrl` + rectangle (or lasso) removes. Coming back to **Select** from another
+  tool gives **the way used last**, and that way is the same in the editor and in live mode: it is remembered on this computer,
+  even after Ardoise is closed. The **Selection** block, above the open tab of the side panel, offers **Copy**, **Cut**, **Paste**, **Duplicate**,
   **Straighten shapes**, **Delete**. Changes of
   colour, ink and width then apply to the selection; you move it (by grabbing it inside its frame) and resize it (by the
   frame's handles) with the mouse, or with the pen (see below and chapter 12).
@@ -1413,11 +1440,12 @@ Under the toolbar, with the **Text** tool or when texts are selected:
   subscripts ₀…₉) can be typed in both fonts, in bold too: they come from Latin Modern Math, the maths font of the same family.
   A character no font of Ardoise has (an emoji, an ideogram…) is drawn as a square □, and Ardoise names it under the frame
   while you type.
-- **αβγ** (Greek alphabet): opens a palette under the toolbar, with the lower case letters (and the final sigma ς), the upper
-  case letters, the variants ϵ ϑ ϕ ϖ ϱ, symbols, superscripts and subscripts. First touch the page to type a text, then touch a
-  letter: it is added at the frame's cursor (in place of the selected text), and the cursor stays in the frame; the palette
-  stays open for several letters. `Esc` closes it (a second `Esc` ends the typing), as do its button and another tool. With the
-  keyboard: `Tab` to the palette, the arrows, then `Enter`.
+- **αβγ** (Greek alphabet): opens the **Characters** tab of the side panel (unfolding the panel if it is collapsed), beside
+  the page, hiding nothing of it: the lower case letters (and the final sigma ς), the upper case letters, the variants
+  ϵ ϑ ϕ ϖ ϱ, symbols, superscripts and subscripts. First touch the page to type a text, then touch a letter: it is added at
+  the frame's cursor (in place of the selected text), and the cursor stays in the frame. Pressing **αβγ** again goes back to
+  the tab open before (and collapses the panel again if it was). `Esc` ends the typing; the tab stays open. With the keyboard:
+  `Tab` to the letters, the arrows, then `Enter` (the cursor goes back to the frame).
 - **Size**: **Small** (4 mm), **Medium** (6 mm) or **Large** (9 mm).
 - **Bold**.
 - The colour is the tool's: choose it among the toolbar's colours.
@@ -1425,7 +1453,7 @@ Under the toolbar, with the **Text** tool or when texts are selected:
 These settings apply to the whole frame (no formatting inside a frame): to the frame you are typing, else to the selected
 texts, and to the next frames. Clicking these buttons does not end the typing.
 
-A text lives with the strokes: it is selected with the lasso, moved, resized (it grows or shrinks with the strokes; choosing a
+A text lives with the strokes: it is selected with the rectangle or the lasso, moved, resized (it grows or shrinks with the strokes; choosing a
 size gives it that size again), duplicated, copied and pasted, deleted, turned with the page, put on the chosen layer and
 follows its layer. The eraser does not erase it: select it and delete it. It appears at once in the replay and in videos, at
 the moment it was put down, and is in every export (images, SVG, PDF, clipboard, printing, projection, network share; in the
@@ -1600,7 +1628,7 @@ The **Layers** zone, in the **Layers** tab of the side panel (open at the start)
 transparent sheet laid over the others: a tablet's writing, your annotations, a correction.
 
 - **Choosing a layer**: click its row, which gets a frame. **The pen, the eraser and the selection act only on the
-  chosen layer**: the lasso, the click, `Ctrl + A` (**Select everything**) and the eraser take only its strokes, and what
+  chosen layer**: the rectangle, the lasso, the click, `Ctrl + A` (**Select everything**) and the eraser take only its strokes, and what
   you draw, paste or duplicate goes onto it. To touch the ink of another layer, choose it first. Choosing another layer
   clears the selection. When a note opens, the chosen layer is the highest of the shown layers.
 - **Showing or hiding**: the *eye* at the start of the row; it is *crossed* when the layer is hidden, and its name turns
@@ -1982,7 +2010,7 @@ presentation can be used with the pen or a finger.
 - The stroke *gets thicker with pressure*.
 - The *back of the pen* (the eraser) *erases*, with the eraser settings (**Whole strokes** or **Partial**), whatever the
   tool chosen. An eraser circle appears when it hovers over the page.
-- The pen's *button* draws a *selection lasso*, whatever the tool. Afterwards, the pen's *tip* (like a finger) grabs the
+- The pen's *button* draws a *selection lasso*, whatever the tool (even when the **Select** tool is in rectangle mode). Afterwards, the pen's *tip* (like a finger) grabs the
   selection instead of drawing: put down inside the frame, it moves it; put down on a handle, it resizes it (with the
   **Pen** and **Eraser** tools). Outside the frame, it draws as usual.
 - A *palm* resting on the screen is ignored while the pen is in use or near the screen.
@@ -2166,7 +2194,7 @@ keys stay as described in this chapter.
 | `Esc` | Deselect |
 | `F2` | Rename the note |
 | `Delete` | Move the note (or the selection) to the trash |
-| `Ctrl + Z` | Undo the last action: move to trash, **Duplicate**, **Change the date…**, **Turn**, deleting a binder, arranging the cards of a binder (several arrangements, one by one); a message says what was undone |
+| `Ctrl + Z` | Undo the last action: move to trash, **Duplicate**, **Change the date…**, **Turn**, deleting a binder, arranging the cards of a binder (several arrangements, one by one), moving notes to another binder, dropping onto **Favourites** or a tag; a message says what was undone |
 | `Alt + ←`, `Alt + →`, `Alt + Home`, `Alt + End` | In a binder sorted by **Binder order**: move the card (or the selection) one place, or to the start, or to the end |
 
 ### Editor
@@ -2183,7 +2211,7 @@ keys stay as described in this chapter.
 | `Esc` | In steps, one press per step: drop the gesture under way, end the typing of a text or an equation (what is written stays; an equation with incorrect code stays in its panel); close the split, the replay, the crop or the **Straighten shapes** setting; deselect; go back to the library, asking whether to save if there are changes (never while a narration is being recorded) |
 | `Shift`, `Alt` (held while drawing a shape) | Invert **Regular shape** (`Shift`) or **From the centre** (`Alt`) for that stroke |
 | `Alt + ←`, `Alt + →` | **Previous page**, **Next page** (the note before, the note after in the library) |
-| `V`, `P`, `E`, `T`, `M`, `B`, `H` | Tools **Select**, **Pen**, **Eraser**, **Text**, **Equation**, **Bookmark**, **Move the page** |
+| `V`, `P`, `E`, `T`, `M`, `B`, `H` | Tools **Select**, **Pen**, **Eraser**, **Text**, **Equation**, **Bookmark**, **Move the page** (`V` when **Select** is already the tool: switches from the rectangle to the lasso, and back; the tool comes back in the way used last) |
 | `Space` (held) | Move the page (unless a button has the focus: `Space` then works that button, a rail icon included) |
 | `F` | **Straighten shapes** |
 | `R` | **Replay** |
@@ -2219,7 +2247,7 @@ window has no other key.
 | `W` | **Width** |
 | `Shift + arrows` | Move the projected area |
 | `Delete` or `Backspace` | Control window, **with strokes chosen**: delete them (with nothing chosen, nothing happens). Projected window: clear the marks written over the presentation |
-| `V` | **Select** tool (control window): lasso or click a stroke of the chosen layer |
+| `V` | **Select** tool (control window): rectangle, lasso or click a stroke of the chosen layer; pressing it again switches between the rectangle and the lasso (you leave the tool by choosing **Pen**, `P`) |
 | `P` | **Pen** tool (control window): write with the computer's pen or mouse on the chosen layer |
 | `Ctrl + Z` | Undo a stroke or an erasing of the computer, a deletion, a change of colour or **Clear the page** (control window) |
 | `Ctrl + Y` or `Ctrl + Shift + Z` | Redo (control window) |

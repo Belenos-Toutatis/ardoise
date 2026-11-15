@@ -7,6 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { chooseSelect, rectangleDrag } from './select-way.mjs';
 
 const locales = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'src', 'locales');
 const catalogs = {
@@ -47,6 +48,7 @@ export const editorLayersJourneys = [
     name: 'éditeur : la sélection, Ctrl+A et la gomme ne prennent que le calque choisi',
     async run(app, check) {
       const l = (key) => text(app.language, key);
+      // The selection tool is chosen with `chooseSelect` (its button's title says its way).
       const tool = (mode) => `.toolbar button[title="${l(`editor.modes.${mode}`)}"]`;
       const action = (name) => `${ZONE} [data-action="${name}"]`;
       const inRow = (index, name) => `${ZONE} li.layer[data-layer="${index}"] [data-action="${name}"]`;
@@ -56,6 +58,8 @@ export const editorLayersJourneys = [
       /** A lasso around the middle of the page, which holds every stroke the journey draws. */
       const lasso = () =>
         app.drag([at(0.08, 0.08), at(0.9, 0.08), at(0.9, 0.92), at(0.08, 0.92), at(0.08, 0.1)]);
+      /** The same area as a rectangle, from one corner to the opposite one. */
+      const rectangle = () => app.drag(rectangleDrag(at(0.08, 0.08), at(0.9, 0.92)));
       let layers0;
 
       await check('une nouvelle note : la zone des calques remplace l’ancien panneau, un calque choisi', async () => {
@@ -98,7 +102,7 @@ export const editorLayersJourneys = [
       });
 
       await check('un lasso autour de tout : seuls les deux traits du calque choisi sont sélectionnés', async () => {
-        await app.click(tool('select'));
+        await chooseSelect(app, 'lasso');
         await lasso();
         await app.waitFor(`${selectedCount(l)} === 2`, 'the selection of the chosen layer');
       });
@@ -130,9 +134,9 @@ export const editorLayersJourneys = [
         await app.waitFor(`document.querySelector('.editor svg.canvas rect.selection') === null`, 'no selection frame');
       });
 
-      await check('un lasso autour de tout prend maintenant les traits du premier calque', async () => {
-        await app.click(tool('select'));
-        await lasso();
+      await check('un rectangle autour de tout prend maintenant les traits du premier calque', async () => {
+        await chooseSelect(app, 'rectangle');
+        await rectangle();
         await app.waitFor(`${selectedCount(l)} === 2`, 'the strokes of the first layer');
         await app.key('Escape');
       });

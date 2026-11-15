@@ -25,6 +25,7 @@ import {
   initialState,
   mergeDown,
   moveLayer,
+  nextSelectWay,
   paste,
   pasteStrokes,
   rotate,
@@ -35,6 +36,7 @@ import {
   setActiveLayer,
   setLayerVisible,
   transformSelection,
+  DEFAULT_TOOLS,
   type Doc,
 } from './state';
 import { RED, hline, note } from './test-fixtures';
@@ -329,5 +331,19 @@ describe('pasteStrokes at a time (M17)', () => {
     // Without a time: after the note's ink, as before.
     const after = pasteStrokes(doc, copied);
     expect(after.note.strokes[1].points[0].t).toBe(doc.note.strokes[0].points.at(-1)!.t + 500);
+  });
+});
+
+describe('the selection tool way', () => {
+  it('turns from one to the other', () => {
+    expect(nextSelectWay('rectangle')).toBe('lasso');
+    expect(nextSelectWay('lasso')).toBe('rectangle');
+  });
+
+  it('is not part of the document or of the tool settings: a selection change or an edit never touches it', () => {
+    const doc = docFromNote(note([hline(0, 1000, 0)]));
+    expect(Object.keys(doc)).not.toContain('select');
+    expect(Object.keys(selectAll(doc))).not.toContain('select');
+    expect(Object.keys(DEFAULT_TOOLS)).not.toContain('select');
   });
 });

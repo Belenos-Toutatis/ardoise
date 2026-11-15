@@ -9,7 +9,7 @@
 //
 // The third journey: a long sentence typed in a new frame wraps at the page's right edge, the field showing the frame's
 // lines (a line break of its own where the frame wraps) with the browser's advances equal to the layout's, Greek typed
-// from the Greek palette is drawn (no character named as missing) and kept in the file and the SVG, and the Markdown
+// from the side panel's « Caractères » tab is drawn (no character named as missing) and kept in the file and the SVG, and the Markdown
 // export holds the typed text at its place among the page's text (format 1.7, docs/design/page-objects.md §4).
 //
 // Not driven here: the OS's on-screen keyboard of a touch screen (a finger's tap on the page is a component test,
@@ -20,6 +20,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
 import { noteOnDisk } from './m17-helpers.mjs';
+import { chooseSelect } from './select-way.mjs';
 
 const locales = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'src', 'locales');
 const catalogs = {
@@ -118,7 +119,7 @@ async function exportAs(app, format, path) {
  * measures it would join them). */
 const LONG =
   'La lumière se propage en ligne droite dans un milieu transparent et homogène, et sa vitesse dans le vide vaut trois cent mille kilomètres par seconde.';
-/** Greek typed from the palette, on its own line. */
+/** Greek typed from the « Caractères » tab, on its own line. */
 const GREEK = 'αΔϵντΣ';
 
 export const textJourneys = [
@@ -225,7 +226,7 @@ export const textJourneys = [
         await openNote(app, NOTE);
         await app.waitFor(`document.querySelectorAll(${j(FRAMES)}).length === ${DEMO_FRAMES}`, 'the demo frames');
         before = (await onDisk(app)).note.objects;
-        await app.click('.toolbar .tool', l('editor.modes.select'));
+        await chooseSelect(app, 'rectangle');
         // The focus on the page, not on the tool's button (Ctrl + A selects in a field).
         await app.evaluate(`document.activeElement?.blur(), true`);
         await app.key('a', { ctrl: true });
@@ -273,7 +274,7 @@ export const textJourneys = [
     },
   },
   {
-    name: 'outil Texte : une longue phrase revient à la ligne, le grec de la palette s’affiche, l’export Markdown reprend le texte tapé',
+    name: 'outil Texte : une longue phrase revient à la ligne, le grec de l’onglet Caractères s’affiche, l’export Markdown reprend le texte tapé',
     async run(app, check) {
       const l = (key) => text(app.language, key);
       let measured;
@@ -327,13 +328,27 @@ export const textJourneys = [
         if (measured.lines.slice(0, -1).some((line) => !line.endsWith(' '))) throw new Error(`a wrapped line does not end with its space: ${j(measured.lines)}`);
       });
 
-      await check(`la palette « ${l('editor.text.greek.button')} » : une nouvelle ligne, puis α Δ ϵ ν τ Σ touchés, le curseur reste dans le cadre`, async () => {
+      await check(`« ${l('editor.text.greek.button')} » montre l’onglet « ${l('side.tabs.characters')} » : une nouvelle ligne, puis α Δ ϵ ν τ Σ touchés, le curseur reste dans le cadre`, async () => {
         // A line break of the text (the protocol's Enter key carries no text: the field would get nothing).
         await app.type('\n');
         await app.waitFor(`document.querySelector(${j(FIELD)})?.value.endsWith('\\n')`, 'the line break typed');
         await app.click('[data-action="text-greek"]');
-        await app.waitFor(`document.querySelector('[data-slot="greek-palette"]') !== null`, 'the Greek palette');
-        for (const c of GREEK) await app.click(`[data-slot="greek-palette"] button[data-char="${c}"]`);
+        await app.waitFor(
+          `document.querySelector('.editor-side .side-panel')?.dataset.tab === 'characters' && document.querySelector('.editor-side [data-tab-panel="characters"]')?.hidden === false`,
+          'the Characters tab shown',
+        );
+        if ((await app.evaluate(`document.querySelector('[data-action="text-greek"]')?.getAttribute('aria-pressed')`)) !== 'true') {
+          throw new Error('« αβγ » is not pressed with the Characters tab shown');
+        }
+        // The tab is in the side panel, beside the page: it covers nothing of the frame being typed.
+        const apart = await app.evaluate(`(() => {
+          const pane = document.querySelector('.editor-side .side-pane').getBoundingClientRect();
+          const field = document.querySelector(${j(FIELD)}).getBoundingClientRect();
+          const stage = document.querySelector('.editor .stage').getBoundingClientRect();
+          return pane.left >= stage.right - 1 && field.right <= stage.right + 1;
+        })()`);
+        if (!apart) throw new Error('the Characters tab overlaps the page');
+        for (const c of GREEK) await app.click(`.editor-side [data-tab-panel="characters"] button[data-char="${c}"]`);
         try {
           await app.waitFor(`document.querySelector(${j(FIELD)})?.value.endsWith(${j(`\n${GREEK}`)})`, 'the Greek letters typed');
         } catch (error) {
@@ -342,12 +357,15 @@ export const textJourneys = [
         }
         if (!(await app.evaluate(`document.activeElement?.matches(${j(FIELD)}) === true`))) throw new Error('the field lost the focus');
         if (await app.evaluate(`document.querySelector('[data-slot="text-missing"]') !== null`)) throw new Error('a Greek letter is named as missing');
-        // Escape closes the palette, the typing goes on; the next one ends it.
-        await app.key('Escape');
-        await app.waitFor(`document.querySelector('[data-slot="greek-palette"]') === null`, 'the palette closed');
-        if (await app.evaluate(`document.querySelector(${j(FIELD)}) === null`)) throw new Error('Escape ended the typing with the palette open');
+        // Escape ends the typing at once; the tab stays shown (it is no pop-up to close first).
         await app.key('Escape');
         await app.waitFor(`document.querySelector(${j(FIELD)}) === null`, 'the field gone');
+        if ((await app.evaluate(`document.querySelector('.editor-side .side-panel')?.dataset.tab`)) !== 'characters') {
+          throw new Error('Escape changed the tab of the side panel');
+        }
+        // « αβγ » again: back to the tab shown before (Calques, the panel's default).
+        await app.click('[data-action="text-greek"]');
+        await app.waitFor(`document.querySelector('.editor-side .side-panel')?.dataset.tab === 'layers'`, 'the Layers tab back');
       });
 
       await check('Ctrl + S : le cadre (format 1.7) garde sa largeur de retour à la ligne, son texte sans coupure, et les largeurs du navigateur sont celles du cadre', async () => {

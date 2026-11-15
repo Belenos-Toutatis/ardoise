@@ -29,7 +29,7 @@ describe('the remembered view', () => {
     expect(sideStorageKey('live')).toBe('ardoise.sidePanel.live');
     expect(SIDE_DEFAULTS.editor).toEqual({ tab: 'layers', collapsed: false });
     expect(SIDE_DEFAULTS.live).toEqual({ tab: 'layers', collapsed: false });
-    expect(SIDE_TABS).toEqual(['layers', 'page', 'background', 'sound', 'projection', 'help']);
+    expect(SIDE_TABS).toEqual(['layers', 'page', 'background', 'sound', 'projection', 'characters', 'help']);
   });
 
   it('is read field by field', () => {

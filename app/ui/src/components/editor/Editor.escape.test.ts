@@ -10,6 +10,7 @@ import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, type AppState } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
+import { selectPrefs } from '../../lib/select-prefs.svelte';
 import { openPdfPreviews } from '../../lib/mock-background';
 import { mockLibrary, resetMockLibrary } from '../../lib/mock-data';
 import { mockNarration, resetMockNarration, setMockNarration } from '../../lib/mock-narration';
@@ -64,6 +65,8 @@ function slowStroke(y: number, t0: number, t1: number): Stroke {
 let cleanup: (() => void) | null = null;
 
 beforeEach(() => {
+  // The selection tool's way is the computer's preference: each test starts with the first-time rectangle.
+  selectPrefs.reset();
   resetMockLibrary();
   resetMockNarration();
   resetMockShare();
@@ -173,9 +176,29 @@ describe('step 1: the action in progress', () => {
     expect(onclose).not.toHaveBeenCalled();
   });
 
+  it('drops a rectangle being drawn without selecting anything', async () => {
+    const { pointer, escape, tool, selected, onclose } = await render();
+    tool('Sélection : rectangle').click();
+    await tick();
+    const marquee = () => document.querySelectorAll('svg.canvas rect.marquee').length;
+    pointer('pointerdown', 1000, 1000);
+    pointer('pointermove', 29_000, 20_000);
+    await tick();
+    expect(marquee()).toBe(1);
+    await escape();
+    expect(marquee()).toBe(0);
+    pointer('pointerup', 29_000, 20_000);
+    await tick();
+    expect(selected()).toBe(false);
+    expect(onclose).not.toHaveBeenCalled();
+  });
+
   it('drops a lasso being drawn without selecting anything', async () => {
     const { pointer, escape, tool, selected, onclose } = await render();
-    tool('Sélection').click();
+    tool('Sélection : rectangle').click();
+    await tick();
+    // A second click on the tool: the lasso.
+    tool('Sélection : rectangle').click();
     await tick();
     const lasso = () => document.querySelectorAll('svg.canvas polyline.lasso').length;
     pointer('pointerdown', 1000, 1000);
@@ -268,14 +291,14 @@ describe('step 2: the panel or the tool mode that is open', () => {
     expect(action('manual-crop')!.getAttribute('aria-pressed')).toBe('true');
     await escape();
     expect(action('manual-crop')!.getAttribute('aria-pressed')).toBe('false');
-    expect(mode()).toBe('Sélection');
+    expect(mode()).toBe('Sélection : rectangle');
     expect(onclose).not.toHaveBeenCalled();
   });
 
   it('closes the setting of « Redresser les formes » before the selection', async () => {
     const { q, action, tool, selectAll, escape, selected, onclose } = await render();
     // The setting belongs to the selection tool.
-    tool('Sélection').click();
+    tool('Sélection : rectangle').click();
     await tick();
     await selectAll();
     action('straighten-settings')!.click();
@@ -304,7 +327,7 @@ describe('step 2: the panel or the tool mode that is open', () => {
 
   it('goes by the order: the setting, then the selection, then the library', async () => {
     const { q, action, tool, selectAll, escape, selected, onclose } = await render();
-    tool('Sélection').click();
+    tool('Sélection : rectangle').click();
     await tick();
     await selectAll();
     action('straighten-settings')!.click();

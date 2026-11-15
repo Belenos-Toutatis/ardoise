@@ -19,6 +19,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
 import { noteOnDisk } from './m17-helpers.mjs';
+import { chooseSelect } from './select-way.mjs';
 
 const locales = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'src', 'locales');
 const catalogs = {
@@ -282,7 +283,7 @@ export const equationJourneys = [
       });
 
       await check('un double-clic avec la sélection rouvre son code ; une pastille la recolore, le focus reste ; Mettre à jour la redessine au même endroit', async () => {
-        await app.click('.toolbar .tool', l('editor.modes.select'));
+        await chooseSelect(app, 'rectangle');
         const at = await pagePoint(app, first.x + (first.width * first.scale) / 2, first.y + (first.height * first.scale) / 2);
         await app.mouse('mouseMoved', at.x, at.y);
         await app.mouse('mousePressed', at.x, at.y, { clickCount: 1 });
@@ -327,7 +328,7 @@ export const equationJourneys = [
 
       await check('outil Sélection, Ctrl + A puis une pastille : traits, textes et équation prennent la couleur ; un Ctrl + Z la leur rend', async () => {
         const before = await onDisk(app);
-        await app.click('.toolbar .tool', l('editor.modes.select'));
+        await chooseSelect(app, 'rectangle');
         await app.key('a', { ctrl: true });
         await app.waitFor(`document.querySelector('[data-section="selection"] .pane-help') !== null`, 'the selection');
         await app.click(swatch('green'));

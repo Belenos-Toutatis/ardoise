@@ -35,6 +35,7 @@
     background,
     sound,
     projection,
+    characters,
     help,
   }: {
     where: SideWhere;
@@ -47,10 +48,12 @@
     background?: Snippet;
     sound?: Snippet;
     projection?: Snippet;
+    /** The editor's Greek letters and symbols (`CharactersTab`); live mode has none. */
+    characters?: Snippet;
     help?: Snippet;
   } = $props();
 
-  const contents = $derived<Record<SideTabId, Snippet | undefined>>({ layers, page, background, sound, projection, help });
+  const contents = $derived<Record<SideTabId, Snippet | undefined>>({ layers, page, background, sound, projection, characters, help });
   /** The tabs this window gives content for, in the rail's order. */
   const available = $derived(SIDE_TABS.filter((id) => contents[id] !== undefined));
   const shown = $derived(panel.shown(available));

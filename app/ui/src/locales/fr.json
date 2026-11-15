@@ -227,6 +227,74 @@
       "undoRefused": "Rangement non annulé : l'ordre du classeur a changé depuis (une note copiée, un autre ordinateur, une synchronisation). Le nouvel ordre est conservé.",
       "undoFailed": "Le rangement n'a pas pu être annulé : {message}"
     },
+    "undoGone": "la note n'est plus dans la bibliothèque (mise à la corbeille ou supprimée) ; elle n'a pas été modifiée.",
+    "move": {
+      "done": {
+        "one": "« {title} » déplacée dans « {binder} ».",
+        "other": "{count} notes déplacées dans « {binder} »."
+      },
+      "failed": {
+        "one": "Une note n'a pas pu être déplacée :",
+        "other": "{count} notes n'ont pas pu être déplacées :"
+      },
+      "undone": {
+        "one": "Déplacement annulé : « {title} » est revenue dans « {binder} ».",
+        "other": "Déplacement annulé : {count} notes sont revenues dans « {binder} »."
+      },
+      "undoneMixed": {
+        "one": "Déplacement annulé : {count} note est revenue dans son classeur d'origine.",
+        "other": "Déplacement annulé : {count} notes sont revenues dans leur classeur d'origine."
+      },
+      "atEnd": {
+        "one": "L'ordre du classeur a changé depuis : elle a été placée à la fin.",
+        "other": "L'ordre du classeur a changé depuis : elles ont été placées à la fin."
+      },
+      "renamed": {
+        "one": "Son nom de fichier étant déjà pris dans ce classeur, elle s'appelle maintenant « {name} ».",
+        "other": "Leur nom de fichier étant déjà pris dans ce classeur, {count} notes ont reçu un numéro."
+      },
+      "recreated": {
+        "one": "Le classeur « {binder} » n'existait plus : il a été recréé.",
+        "other": "{count} classeurs n'existaient plus : ils ont été recréés."
+      },
+      "undoFailed": {
+        "one": "Une note n'a pas pu être remise dans son classeur :",
+        "other": "{count} notes n'ont pas pu être remises dans leur classeur :"
+      },
+      "changed": "elle a été modifiée depuis ; elle reste où elle est.",
+      "gone": "elle n'est plus à cet endroit (déplacée de nouveau, renommée, mise à la corbeille ou supprimée).",
+      "undoError": "Le déplacement n'a pas pu être annulé : {message}"
+    },
+    "favoriteDrop": {
+      "done": {
+        "one": "« {title} » ajoutée aux favoris.",
+        "other": "{count} notes ajoutées aux favoris."
+      },
+      "undone": {
+        "one": "Ajout aux favoris annulé : « {title} » n'est plus un favori.",
+        "other": "Ajout aux favoris annulé : {count} notes ne sont plus des favoris."
+      },
+      "undoFailed": {
+        "one": "Une note n'a pas pu être retirée des favoris :",
+        "other": "{count} notes n'ont pas pu être retirées des favoris :"
+      },
+      "undoError": "L'ajout aux favoris n'a pas pu être annulé : {message}"
+    },
+    "tagDrop": {
+      "done": {
+        "one": "Étiquette « {tag} » ajoutée à « {title} ».",
+        "other": "Étiquette « {tag} » ajoutée à {count} notes."
+      },
+      "undone": {
+        "one": "Étiquette annulée : « {title} » n'a plus l'étiquette « {tag} ».",
+        "other": "Étiquette annulée : {count} notes n'ont plus l'étiquette « {tag} »."
+      },
+      "undoFailed": {
+        "one": "Une note n'a pas pu perdre l'étiquette :",
+        "other": "{count} notes n'ont pas pu perdre l'étiquette :"
+      },
+      "undoError": "L'étiquette n'a pas pu être retirée : {message}"
+    },
     "turn": {
       "button": "Tourner",
       "panel": "Tourner les notes sélectionnées",
@@ -1028,6 +1096,8 @@
     "modes": {
       "label": "Outil",
       "select": "Sélection",
+      "selectRectangle": "Sélection : rectangle",
+      "selectLasso": "Sélection : lasso",
       "pen": "Stylo",
       "line": "Ligne",
       "rectangle": "Rectangle",
@@ -1073,9 +1143,9 @@
       "missingMany": "Ces caractères n'existent dans aucune police d'Ardoise : {chars}. Ils sont dessinés comme des carrés.",
       "greek": {
         "button": "Alphabet grec",
-        "buttonHint": "Alphabet grec et symboles : une lettre touchée s’ajoute au texte tapé",
-        "label": "Alphabet grec et symboles",
-        "inactive": "Touchez d'abord la page pour taper un texte",
+        "buttonHint": "Alphabet grec et symboles, dans l’onglet « Caractères » du panneau de côté : une lettre touchée s’ajoute au texte tapé",
+        "inactive": "Touchez d'abord la page avec l'outil Texte pour taper un texte",
+        "textTool": "Outil Texte",
         "groups": {
           "lower": "Minuscules",
           "upper": "Majuscules",
@@ -1247,7 +1317,8 @@
       "tool": "Encre",
       "width": "Épaisseur"
     },
-    "selectHelp": "Lasso : sélectionner · Maj+lasso : ajouter · Ctrl+lasso : retirer · Double-clic sur un texte ou une équation : le modifier · F : redresser les formes · Échap : tout désélectionner",
+    "selectHelpRectangle": "Rectangle : tracez un rectangle pour sélectionner · Maj+rectangle : ajouter · Ctrl+rectangle : retirer · Un nouveau clic sur le bouton (ou V) : lasso · Double-clic sur un texte ou une équation : le modifier · F : redresser les formes · Échap : tout désélectionner",
+    "selectHelpLasso": "Lasso : tracez un contour pour sélectionner · Maj+lasso : ajouter · Ctrl+lasso : retirer · Un nouveau clic sur le bouton (ou V) : rectangle · Double-clic sur un texte ou une équation : le modifier · F : redresser les formes · Échap : tout désélectionner",
     "selection": {
       "label": "Sélection",
       "count": "Traits sélectionnés : {count}",
@@ -1266,7 +1337,7 @@
     "straighten": {
       "button": "Redresser les formes",
       "hint": "Transforme les traits sélectionnés qui ressemblent à une droite, un cercle, une ellipse, un rectangle ou une flèche en formes nettes (touche F). Les autres traits, dont l'écriture, ne changent pas.",
-      "disabledHint": "Sélectionnez d'abord des traits avec le lasso, puis redressez-les.",
+      "disabledHint": "Sélectionnez d'abord des traits, puis redressez-les.",
       "doneOne": "1 forme redressée (Ctrl+Z pour annuler).",
       "doneMany": "{count} formes redressées (Ctrl+Z pour annuler).",
       "none": "Aucune forme reconnue dans la sélection. Ardoise redresse les droites et les flèches d'au moins {line} mm, les cercles, ellipses et rectangles d'au moins {closed} mm, tracés assez nettement (réglage : le petit bouton à droite du bouton). Sélectionnez les dessins plutôt que le texte : un petit ovale debout (moins de 2,5 cm) ressemble à un O ou à un 0 et ne change pas, comme tout ce qui n'est pas une forme nette.",
@@ -1274,7 +1345,7 @@
         "button": "Réglage du redressement",
         "title": "Redresser les formes",
         "count": {
-          "noSelection": "Sélectionnez des traits avec le lasso pour voir ce qui serait redressé.",
+          "noSelection": "Sélectionnez des traits pour voir ce qui serait redressé.",
           "none": "Avec ces valeurs, aucune forme n'est reconnue dans la sélection.",
           "some": "Avec ces valeurs : {shapes} sur {strokes}.",
           "shapes": {
@@ -1478,7 +1549,7 @@
     "backgroundLoadFailed": "L'image de fond de cette note n'a pas pu être chargée ({message}). La note s'ouvre sans elle ; l'image reste dans le fichier tant que vous ne la retirez pas.",
     "keys": {
       "list": {
-        "select": "Outil Sélection",
+        "select": "Outil Sélection (une nouvelle pression : rectangle ou lasso)",
         "pen": "Outil Stylo",
         "eraser": "Outil Gomme",
         "text": "Outil Texte",
@@ -1536,6 +1607,7 @@
       "background": "Fond",
       "sound": "Son",
       "projection": "Projection",
+      "characters": "Caractères",
       "help": "Aide"
     },
     "openTitle": "{tab} (cliquer pour replier)",
@@ -2124,8 +2196,11 @@
     },
     "select": {
       "toggle": "Sélection",
-      "hint": "Sélectionner des traits au lasso ou d'un clic pour les supprimer, changer leur couleur, les déplacer ou les redimensionner (V)",
-      "help": "Lasso : sélectionner · clic : un trait · Maj : ajouter · Ctrl : retirer · Échap : désélectionner. Glissez dans le cadre pour déplacer la sélection, par un coin pour la redimensionner (stylet, doigt ou souris). Les pastilles de couleur changent la couleur de la sélection. Seuls les traits du calque choisi sont pris.",
+      "rectangle": "Sélection : rectangle",
+      "lasso": "Sélection : lasso",
+      "hint": "Sélectionner des traits au rectangle, au lasso ou d'un clic pour les supprimer, changer leur couleur, les déplacer ou les redimensionner (V ; un nouvel appui passe du rectangle au lasso)",
+      "helpRectangle": "Rectangle : tracez un rectangle pour sélectionner · clic : un trait · Maj : ajouter · Ctrl : retirer · Échap : désélectionner · un nouveau clic sur le bouton (ou V) : lasso. Glissez dans le cadre pour déplacer la sélection, par un coin pour la redimensionner (stylet, doigt ou souris). Les pastilles de couleur changent la couleur de la sélection. Seuls les traits du calque choisi sont pris.",
+      "helpLasso": "Lasso : tracez un contour pour sélectionner · clic : un trait · Maj : ajouter · Ctrl : retirer · Échap : désélectionner · un nouveau clic sur le bouton (ou V) : rectangle. Glissez dans le cadre pour déplacer la sélection, par un coin pour la redimensionner (stylet, doigt ou souris). Les pastilles de couleur changent la couleur de la sélection. Seuls les traits du calque choisi sont pris.",
       "bar": "Retoucher la sélection",
       "count": "Traits sélectionnés : {count}",
       "delete": "Supprimer",
@@ -2219,7 +2294,7 @@
           "action": "Outil Stylo : écrire avec le stylet ou la souris de l'ordinateur"
         },
         "select": {
-          "action": "Outil Sélection (lasso ou clic sur un trait ; glisser dans le cadre pour déplacer, par un coin pour redimensionner)"
+          "action": "Outil Sélection (rectangle ou lasso, ou clic sur un trait ; un nouvel appui sur V passe de l'un à l'autre ; glisser dans le cadre pour déplacer, par un coin pour redimensionner)"
         },
         "delete": {
           "action": "Supprimer la sélection"

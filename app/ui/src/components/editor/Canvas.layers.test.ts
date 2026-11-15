@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 /// <reference types="node" />
-// M14: the lasso, the click, the barrel button's lasso and the eraser (tool and back of the pen) act on the chosen layer only.
+// M14: the lasso and the rectangle, the click, the barrel button's lasso and the eraser (tool and back of the pen) act on the chosen layer only.
 import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_TOOLS, docFromNote, setActiveLayer, setLayerVisible, type Doc, type ToolSettings } from '../../lib/editor/state';
 import { hline, note } from '../../lib/editor/test-fixtures';
 import { instantiateInk, type Ink } from '../../lib/ink';
+import { selectPrefs } from '../../lib/select-prefs.svelte';
 import Canvas from './Canvas.svelte';
 
 let ink: Ink;
@@ -19,6 +20,7 @@ let cleanup: (() => void) | null = null;
 afterEach(() => {
   cleanup?.();
   cleanup = null;
+  selectPrefs.reset();
 });
 
 /**
@@ -34,6 +36,11 @@ const around: [number, number][] = [
   [5500, 7000],
   [500, 7000],
   [500, 2100],
+];
+/** The same area as a rectangle: from one corner to the opposite one. */
+const aroundBox: [number, number][] = [
+  [500, 2000],
+  [5500, 7000],
 ];
 
 async function render(doc: Doc, tools: Partial<ToolSettings> = {}) {
@@ -74,23 +81,29 @@ async function render(doc: Doc, tools: Partial<ToolSettings> = {}) {
 
 const across = (y: number): [number, number][] => Array.from({ length: 9 }, (_, i) => [900 + (4300 * i) / 8, y]);
 
-describe('the lasso takes the chosen layer only', () => {
+describe.each([
+  ['lasso', 'lasso', around],
+  ['rectangle', 'rectangle', aroundBox],
+] as const)('the %s takes the chosen layer only', (_name, select, drag) => {
   it('the top layer', async () => {
+    selectPrefs.set(select);
     const c = await render(crossing(), { mode: 'select' });
-    await c.stroke(around);
+    await c.stroke([...drag]);
     expect(c.onselect).toHaveBeenCalledTimes(1);
     expect(c.onselect.mock.calls[0][0].selection).toEqual([1]);
   });
 
   it('the bottom layer, although another one is drawn over its stroke', async () => {
+    selectPrefs.set(select);
     const c = await render(setActiveLayer(crossing(), 0), { mode: 'select' });
-    await c.stroke(around);
+    await c.stroke([...drag]);
     expect(c.onselect.mock.calls[0][0].selection).toEqual([0, 2]);
   });
 
   it('nothing while the chosen layer is hidden', async () => {
+    selectPrefs.set(select);
     const c = await render(setLayerVisible(crossing(), 1, false), { mode: 'select' });
-    await c.stroke(around);
+    await c.stroke([...drag]);
     expect(c.onselect.mock.calls[0][0].selection).toEqual([]);
   });
 });

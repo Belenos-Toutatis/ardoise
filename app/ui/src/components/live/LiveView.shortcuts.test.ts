@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../../App.svelte';
 import { api, type AppState } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
+import { selectPrefs } from '../../lib/select-prefs.svelte';
 import { FakeContext } from '../../lib/live-fake-canvas';
 import { LIVE_SHORTCUTS } from '../../lib/live-shortcuts';
 import { fitTransform, pageToScreen } from '../../lib/live-view';
@@ -52,6 +53,8 @@ const app: AppState = {
 let cleanup: (() => void) | null = null;
 
 beforeEach(() => {
+  // These tests draw lassos round what they select (the rectangle is `LiveView.select.test.ts`'s): the lasso is the way.
+  selectPrefs.set('lasso');
   resetMockLive();
   resetMockTablet();
   resetMockNarration();

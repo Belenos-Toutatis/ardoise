@@ -3,21 +3,22 @@
    * Tools and style: mode (select, pen, the shape tools, eraser, move the page), ink tool, colour (Inkspace palette +
    * custom colours), width, eraser. With a shape tool, three toggles (`shapePrefs`): regular, from the centre, snap to
    * the page's template (docs/design/shape-tools.md). With the text tool (or text frames selected), the family, the size
-   * and bold (docs/design/page-objects.md §4), and with the text tool the Greek palette (`GreekPalette`); their buttons
+   * and bold (docs/design/page-objects.md §4), and with the text tool « αβγ », which shows the side panel's « Caractères »
+   * tab (Greek letters and symbols to insert, `CharactersTab`) and goes back to the tab shown before; their buttons
    * and the colours do not take the focus from the frame being typed (`keepFocus`). With the equation tool (or equations selected), the size (docs/design/equations.md).
    */
   import { INKSPACE_COLOR_NAMES, sameColor, toHex, fromHex } from '../../lib/editor/colors';
   import WidthControl from '../WidthControl.svelte';
   import { shapePrefs, type ShapeToggle } from '../../lib/editor/shape-prefs.svelte';
+  import { selectPrefs } from '../../lib/select-prefs.svelte';
   import { isShapeKind } from '../../lib/editor/shape-tools';
   import { equationToolSize, textSettings, type EraserMode, type Mode, type TextSettings, type ToolSettings } from '../../lib/editor/state';
-  import { CSS_FAMILY, TEXT_SIZES, TEXT_SIZE_NAMES } from '../../lib/text';
+  import { CSS_FAMILY, TEXT_SIZES, TEXT_SIZE_NAMES, cssFamilies } from '../../lib/text';
   import { FONT_FAMILIES } from '../../lib/note';
   import { t } from '../../lib/i18n.svelte';
   import { TOOLS, type Tool } from '../../lib/ink';
   import { INKSPACE_COLORS, cssColor, type Rgba, type ShapeSettings } from '../../lib/note';
   import StraightenPanel from './StraightenPanel.svelte';
-  import GreekPalette from './GreekPalette.svelte';
 
   let {
     tools,
@@ -31,6 +32,8 @@
     oneraser,
     ontext,
     textTargets = 0,
+    charactersShown = false,
+    oncharacters,
     onequationsize,
     equationTargets = 0,
     onapplyall,
@@ -70,6 +73,10 @@
     oneraser: (change: { mode?: EraserMode; radius?: number }) => void;
     /** The text tool's family, size or bold changed (the frame typed in, or the selected frames, take it too). */
     ontext?: (change: Partial<TextSettings>) => void;
+    /** The side panel shows its « Caractères » tab (« αβγ » is pressed). */
+    charactersShown?: boolean;
+    /** « αβγ »: show the « Caractères » tab of the side panel, or go back to the tab shown before. */
+    oncharacters?: () => void;
     /** How many text frames the text options act on now (the one typed in, or the selected ones). */
     textTargets?: number;
     /** The equation tool's size changed (the selected equations take it too). */
@@ -134,9 +141,9 @@
     return () => window.removeEventListener('pointerdown', away, true);
   });
 
-  /** `icon`: a glyph; the shape tools have a drawn one (`ShapeIcon`). */
+  /** `icon`: a glyph; the selection and the shape tools have a drawn one. */
   const MODES: { mode: Mode; icon?: string }[] = [
-    { mode: 'select', icon: '⬚' },
+    { mode: 'select' },
     { mode: 'pen', icon: '✎' },
     { mode: 'line' },
     { mode: 'rectangle' },
@@ -147,6 +154,18 @@
     { mode: 'eraser', icon: '⌫' },
     { mode: 'pan', icon: '✋' },
   ];
+
+  /**
+   * The selection tool's way (rectangle or lasso), shared with live mode: its icon says which, and the next click on it
+   * turns to the other; from another tool, a click gives the way used last, which is the one shown.
+   */
+  const way = $derived(selectPrefs.way);
+
+  /**
+   * The name and the tooltip of a tool's button: the selection tool's says how it selects (its visible label stays short so that
+   * the button keeps its height when the way turns; the help line says that another click changes it).
+   */
+  const modeLabel = (mode: Mode) => (mode === 'select' ? t(way === 'lasso' ? 'editor.modes.selectLasso' : 'editor.modes.selectRectangle') : t(`editor.modes.${mode}`));
 
   const text = $derived(textSettings(tools));
   /** The text options show with the text tool, or when text frames are selected. */
@@ -176,7 +195,7 @@
 </script>
 
 <div class="toolbar" role="toolbar" aria-label={t('editor.toolbar')}>
-  <div class="group" role="group" aria-label={t('editor.modes.label')}>
+  <div class="group modes" role="group" aria-label={t('editor.modes.label')}>
     {#each MODES as { mode, icon }}
       <button
         type="button"
@@ -184,14 +203,21 @@
         class:active={tools.mode === mode}
         aria-pressed={tools.mode === mode}
         disabled={locked}
-        title={t(`editor.modes.${mode}`)}
+        title={modeLabel(mode)}
+        aria-label={mode === 'select' ? modeLabel(mode) : undefined}
+        data-way={mode === 'select' ? way : undefined}
         onclick={() => onmode(mode)}
       >
         {#if icon}
           <span aria-hidden="true">{icon}</span>
         {:else}
           <svg class="shape-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-            {#if mode === 'line'}
+            {#if mode === 'select' && way === 'rectangle'}
+              <rect x="4" y="6" width="16" height="12" stroke-dasharray="3 2.5" />
+            {:else if mode === 'select'}
+              <path d="M12 5C7.6 5 4 7.2 4 10s3.6 5 8 5 8-2.2 8-5-3.6-5-8-5z" stroke-dasharray="3 2.5" />
+              <path d="M9.5 14.6C9 17 8 18.5 6 19.5" />
+            {:else if mode === 'line'}
               <path d="M5 19 19 5" />
             {:else if mode === 'rectangle'}
               <rect x="4" y="6" width="16" height="12" rx="1" />
@@ -289,7 +315,19 @@
         {t('editor.text.bold')}
       </button>
       {#if tools.mode === 'text'}
-        <GreekPalette font={text.font} bold={text.bold} disabled={locked} />
+        <button
+          type="button"
+          class="button small-button toggle greek"
+          class:active={charactersShown}
+          aria-pressed={charactersShown}
+          aria-controls="side-tabpanel-editor-characters"
+          aria-label={t('editor.text.greek.button')}
+          title={t('editor.text.greek.buttonHint')}
+          data-action="text-greek"
+          style:font-family={cssFamilies(text.font)}
+          onpointerdown={keepFocus}
+          onclick={() => oncharacters?.()}>αβγ</button
+        >
       {/if}
       {#if tools.mode === 'text'}
         <span class="label text-help" data-slot="text-help">{t('editor.text.help')}</span>
@@ -471,7 +509,7 @@
           {/if}
         </div>
       </div>
-      <p class="group label select-help">{t('editor.selectHelp')}</p>
+      <p class="group label select-help">{t(way === 'lasso' ? 'editor.selectHelpLasso' : 'editor.selectHelpRectangle')}</p>
     {/if}
   {/if}
 
@@ -560,6 +598,11 @@
 
   .tool {
     padding: 0.35rem 0.6rem;
+  }
+
+  /* The tool buttons are as tall as the tallest of them (a drawn icon is shorter than a glyph), whatever way the selection tool is in. */
+  .modes {
+    align-items: stretch;
   }
 
   .toolbar .tool.active,

@@ -7,6 +7,7 @@ import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, type AppState } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
+import { selectPrefs } from '../../lib/select-prefs.svelte';
 import { FakeContext } from '../../lib/live-fake-canvas';
 import type { LiveSnapshot } from '../../lib/live';
 import { fitTransform, pageToScreen } from '../../lib/live-view';
@@ -45,6 +46,8 @@ const app: AppState = {
 let cleanup: (() => void) | null = null;
 
 beforeEach(() => {
+  // These tests draw lassos round what they select (the rectangle is `LiveView.select.test.ts`'s): the lasso is the way.
+  selectPrefs.set('lasso');
   resetMockLive();
   resetMockTablet();
   resetMockNarration();
@@ -244,12 +247,12 @@ describe('moving the selection in the control window', () => {
     await vi.waitFor(() => expect(view.bar()).toBeNull());
   });
 
-  it('turning the tool off (V) drops the drag under way', async () => {
+  it('leaving the tool (the Pen tool, P) drops the drag under way', async () => {
     const edit = vi.spyOn(api, 'liveEditStrokes');
     const { view, frame } = await selected();
     view.fire('pointerdown', { x: frame.cx, y: frame.cy });
     view.fire('pointermove', { x: frame.cx + 60, y: frame.cy + 30 });
-    press('v');
+    press('p');
     await tick();
     view.fire('pointermove', { x: frame.cx + 90, y: frame.cy + 30 });
     view.fire('pointerup', { x: frame.cx + 90, y: frame.cy + 30 });

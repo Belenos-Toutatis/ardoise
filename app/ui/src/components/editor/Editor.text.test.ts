@@ -252,7 +252,7 @@ describe('the text tool', () => {
     await v.type('Bonjour à tous');
     await v.key('Escape', {}, v.field()!);
     expect(v.frames()).toHaveLength(1);
-    v.tool('Sélection').click();
+    v.tool('Sélection : rectangle').click();
     await tick();
     const at = { x: 6100, y: 9000 };
     v.pointer('dblclick', at.x, at.y);
@@ -318,7 +318,7 @@ describe('the text tool', () => {
     await v.tap(6000, 9000);
     await v.type('Bonjour');
     await v.key('Escape', {}, v.field()!);
-    v.tool('Sélection').click();
+    v.tool('Sélection : rectangle').click();
     await tick();
     await v.key('a', { ctrlKey: true });
     expect(v.count()).toBe('Traits sélectionnés : 1 — textes, équations et signets : 1');

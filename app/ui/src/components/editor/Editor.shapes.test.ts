@@ -278,7 +278,7 @@ describe('the count and the preview', () => {
     const { key, openPanel, count, action } = await render();
     await key('v');
     await openPanel();
-    expect(count()).toBe('Sélectionnez des traits avec le lasso pour voir ce qui serait redressé.');
+    expect(count()).toBe('Sélectionnez des traits pour voir ce qui serait redressé.');
     expect(action('straighten-apply').disabled).toBe(true);
   });
 

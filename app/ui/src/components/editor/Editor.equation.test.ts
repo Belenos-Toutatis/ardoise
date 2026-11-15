@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppState } from '../../lib/api';
 import { readEquationPath } from '../../lib/equation-path';
 import { setLocale } from '../../lib/i18n.svelte';
+import { selectPrefs } from '../../lib/select-prefs.svelte';
 import { mockLibrary, resetMockLibrary } from '../../lib/mock-data';
 import type { EquationObject, PageObject } from '../../lib/note';
 import Editor from './Editor.svelte';
@@ -51,6 +52,8 @@ const TITLE = 'Liste de courses';
 let cleanup: (() => void) | null = null;
 
 beforeEach(() => {
+  // The selection tool's way is the computer's preference: each test starts with the first-time rectangle.
+  selectPrefs.reset();
   resetMockLibrary();
   setLocale('fr');
   try {
@@ -387,7 +390,7 @@ describe('the equation tool', () => {
     await placeAt(v, 6000, 9000, 'v = \\dfrac{d}{t}');
     const before = (await v.saved()).find((o) => o.kind === 'equation') as EquationObject;
     const box = { x: before.x, y: before.y, w: before.width * before.scale, h: before.height * before.scale };
-    v.tool('Sélection').click();
+    v.tool('Sélection : rectangle').click();
     await tick();
     await v.dblclick(box.x + box.w / 2, box.y + box.h / 2);
     expect(v.mode()).toBe('Équation');
@@ -473,7 +476,7 @@ describe('the equation tool', () => {
     const v = await render();
     await placeAt(v, 6000, 9000, 'E = mc^2');
     const first = (await v.saved()).find((o) => o.kind === 'equation') as EquationObject;
-    v.tool('Sélection').click();
+    v.tool('Sélection : rectangle').click();
     await tick();
     await v.dblclick(first.x + (first.width * first.scale) / 2, first.y + (first.height * first.scale) / 2);
     await v.drawn();
@@ -496,23 +499,20 @@ describe('the equation tool', () => {
     expect(back.latex).toBe('E = mc^2');
   });
 
-  it('colours an equation selected with the lasso, alone or with strokes and texts, each colour one step', async () => {
+  it('colours an equation selected with the rectangle, alone, or with the lasso, with strokes and texts, each colour one step', async () => {
     const v = await render('Réunion parents');
     await placeAt(v, 16000, 16000, '\\ce{H2O}');
     const placed = (await v.saved()).find((o) => o.kind === 'equation') as EquationObject;
     const box = { x: placed.x, y: placed.y, w: placed.width * placed.scale, h: placed.height * placed.scale };
-    v.tool('Sélection').click();
+    v.tool('Sélection : rectangle').click();
     await tick();
     await v.key('Escape');
     expect(v.count()).toBeNull();
-    // A lasso round the equation alone.
+    // A rectangle round the equation alone.
     const m = 400;
     await v.drag([
       [box.x - m, box.y - m],
-      [box.x + box.w + m, box.y - m],
       [box.x + box.w + m, box.y + box.h + m],
-      [box.x - m, box.y + box.h + m],
-      [box.x - m, box.y - m],
     ]);
     expect(v.count()).toBe('Traits sélectionnés : 0 — textes, équations et signets : 1');
     v.swatch('Vert').click();
@@ -525,8 +525,12 @@ describe('the equation tool', () => {
       green,
     ]);
     expect(before.strokes.map((s) => s.color)).toEqual([{ r: 0, g: 0, b: 0, a: 255 }]);
-    // A lasso round the whole page: the stroke, the two texts and the equation take the custom colour together.
+    // A lasso round the whole page (a second click on the tool turns to it): the stroke, the two texts and the equation take
+    // the custom colour together.
     await v.key('Escape');
+    v.tool('Sélection : rectangle').click();
+    await tick();
+    expect(v.tool('Sélection : lasso')).toBeTruthy();
     await v.drag([
       [200, 200],
       [29500, 200],
@@ -575,7 +579,7 @@ describe('the equation tool', () => {
     v.q<HTMLButtonElement>('.swatch[aria-label="Rouge"]')!.click();
     await tick();
     const before = (await v.saved()).find((o) => o.kind === 'equation') as EquationObject;
-    v.tool('Sélection').click();
+    v.tool('Sélection : rectangle').click();
     await tick();
     await v.dblclick(before.x + 10, before.y + (before.height * before.scale) / 2);
     expect(v.field()!.value).toBe('x^2');

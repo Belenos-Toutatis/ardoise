@@ -737,12 +737,19 @@ ni d'ouvrir l'éditeur. Vous retouchez dans la fenêtre de commande, et **la tab
 
 **Choisir des traits**
 
-- Cliquez sur **Sélection** (groupe **Ordinateur**) dans la barre d'outils, ou appuyez sur `V`. Un second appui quitte
-  l'outil. **Sélection** et **Stylo** (voir **Corriger pendant le direct**) s'excluent : choisir l'un quitte l'autre.
-- **Lasso** : dans l'aperçu, appuyez avec la souris et entourez les traits, puis relâchez. Un trait est choisi quand la
-  moitié au moins de ses points est dans le lasso.
+- Cliquez sur **Sélection** (groupe **Ordinateur**) dans la barre d'outils, ou appuyez sur `V`. **Sélection** et **Stylo**
+  (voir **Corriger pendant le direct**) s'excluent : choisir l'un quitte l'autre. **On quitte l'outil Sélection en
+  choisissant Stylo** (le bouton, ou `P`) : un nouveau clic sur **Sélection**, ou un nouvel appui sur `V`, ne le quitte plus,
+  il change la façon de choisir. `Échap` enlève la sélection, sans quitter l'outil ; sans sélection, il demande de terminer
+  le mode direct, comme avant.
+- **Façon de choisir**, la même que dans l'éditeur : un **rectangle** (appuyez avec la souris sur un coin de l'aperçu,
+  glissez jusqu'au coin opposé, puis relâchez ; un cadre en pointillés montre la zone) ou un **lasso** (entourez les traits à
+  main levée). Un nouveau clic sur **Sélection** (ou un nouvel appui sur `V`) passe de l'un à l'autre ; le bouton (« Sélection :
+  rectangle » ou « Sélection : lasso »), son icône et la ligne d'aide le disent. Revenir à **Sélection** depuis **Stylo**
+  redonne la dernière façon utilisée, dans le direct comme dans l'éditeur. La première fois, c'est le rectangle. Un trait est
+  choisi quand la moitié au moins de ses points est dans la zone, rectangle ou lasso.
 - **Clic** : cliquez sur un trait pour le choisir seul. Cliquez sur l'encre elle-même, pas à côté.
-- `Maj` + lasso ou clic ajoute des traits à ceux déjà choisis. `Ctrl` + lasso ou clic en retire.
+- `Maj` + rectangle, lasso ou clic ajoute des traits à ceux déjà choisis. `Ctrl` + rectangle, lasso ou clic en retire.
 - Un geste dans le vide, ou `Échap`, enlève la sélection. `Échap` ne ferme rien d'autre tant que des traits sont choisis.
 - Un doigt hors du cadre de la sélection et la molette continuent de déplacer et de zoomer l'aperçu.
 - Les traits choisis sont entourés de bleu dans l'aperçu. La barre de la sélection, au-dessus de l'onglet ouvert du
@@ -761,8 +768,8 @@ de ses quatre coins.
   et au doigt. Glissez le long de la diagonale. Le coin opposé ne bouge pas ; l'épaisseur du trait
   suit la taille. On ne peut pas descendre sous un vingtième de la taille, ni dépasser vingt fois.
 - Un simple appui dans le cadre, sans glisser, ne change rien : il ne refait pas de sélection. Avec `Maj` ou `Ctrl`,
-  un geste est toujours un lasso, même sur le cadre. Hors du cadre, la souris et le stylet entourent comme avant et un doigt
-  déplace l'aperçu.
+  un geste choisit toujours (un rectangle ou un lasso, selon la façon), même sur le cadre. Hors du cadre, la souris et le stylet
+  choisissent comme avant et un doigt déplace l'aperçu.
 - Pendant le geste, les traits se voient soulevés, à la place où vous les menez, et l'endroit qu'ils quittent est vide. `Échap`
   (ou un deuxième doigt, qui prend le geste pour un zoom) abandonne le geste : les traits restent où ils étaient et rien n'est
   envoyé.
@@ -791,7 +798,7 @@ sa couleur. Sans sélection, une pastille règle la couleur du stylo, comme avan
   `Ctrl + Z` annule encore ses retouches. Les listes disparaissent quand vous terminez le mode direct.
 - Les boutons **Annuler** et **Rétablir** sont grisés quand il n'y a rien à faire.
 
-**Le vidéoprojecteur et l'autre écran du réseau ne voient que le résultat.** Jamais le contour bleu ni le lasso : un
+**Le vidéoprojecteur et l'autre écran du réseau ne voient que le résultat.** Jamais le contour bleu, ni le rectangle de sélection, ni le lasso : un
 trait supprimé disparaît, un trait recoloré change de couleur, un trait déplacé ou redimensionné apparaît à sa nouvelle place. Les annotations tracées sur la présentation ne sont pas
 des traits de la page : on ne les choisit pas.
 
@@ -844,7 +851,7 @@ mélanger à son écriture.
    **Sélection**.
 
 **Ce que montrent le vidéoprojecteur et le partage.** Les deux calques, mêlés, comme à l'écran, sauf les calques
-masqués, qu'ils ne montrent jamais. Ni le cadre, ni le lasso, ni le cercle de la gomme ne sont projetés.
+masqués, qu'ils ne montrent jamais. Ni le cadre, ni le rectangle de sélection, ni le lasso, ni le cercle de la gomme ne sont projetés.
 
 **Annuler avec `Ctrl + Z`.** Il annule les actions de l'*ordinateur* : un trait, un coup de gomme, une retouche,
 **Effacer la page** (voir **Retoucher pendant le direct**). Jamais l'écriture de la tablette. Les opérations sur les
@@ -1124,6 +1131,19 @@ Un classeur est un simple *sous-dossier* de la bibliothèque. Cliquez sur l'icô
 ranger des notes, glissez-les sur un classeur de la barre latérale, ou sélectionnez-les puis **Déplacer vers…**
 (**Bibliothèque (racine)** ramène à la racine).
 
+**Un classement par erreur s'annule.** Après chaque déplacement, un message dit où sont allées les notes (« « Liste de courses »
+déplacée dans « Perso ». », « 3 notes déplacées dans « Classe/3e B ». ») et propose **Annuler** ; `Ctrl + Z` fait la même chose,
+**même quand la carte a quitté le classeur affiché, quand le message a disparu et quand vous avez changé de classeur entre-temps**
+(allez regarder dans le classeur d'arrivée, puis `Ctrl + Z`). Chaque note retourne dans le classeur d'où elle venait (les notes d'une
+sélection peuvent venir de classeurs différents), sous son nom de fichier d'origine, et reprend sa place dans l'ordre de ce classeur :
+« Déplacement annulé : « Liste de courses » est revenue dans « Bibliothèque (racine) ». » Ardoise ne fait rien à l'aveugle : une note
+**modifiée**, **déplacée de nouveau**, **mise à la corbeille** ou **supprimée** depuis reste où elle est et est listée avec la raison
+(les autres notes du même déplacement retournent quand même, et le message dit combien) ; un nom de fichier déjà pris dans le classeur
+d'origine donne un nom numéroté, et le message le dit ; un classeur d'origine supprimé entre-temps est recréé, et le message le dit.
+Si l'ordre du classeur d'origine a été réarrangé depuis, la note revient **à la fin** du classeur et le message le dit. Déposer des
+notes sur **Favoris** ou sur une étiquette s'annule de la même façon (« Ajout aux favoris annulé : … », « Étiquette annulée : … ») :
+seules les notes qui n'étaient pas déjà favorites, ou qui n'avaient pas l'étiquette, la perdent.
+
 Sous la date, chaque carte indique le classeur de la note, avec son chemin complet s'il est dans un autre classeur
 (par exemple `Classe/3e B`). Une note qui n'est dans aucun classeur, donc à la racine de la bibliothèque, porte la
 mention **Non classée** : vous voyez d'un coup d'œil ce qu'il reste à ranger. Une note étant un fichier, elle est dans un
@@ -1158,7 +1178,8 @@ la plus récente d'abord ; votre choix revient dès que vous rouvrez un classeur
 - **Annuler un rangement** : `Ctrl + Z` (ou le bouton **Annuler** du message qui s'affiche après le rangement) remet l'ordre
   précédent et dit ce qui est revenu : « Rangement annulé : « Beta » est revenue à sa place. » (ou « Rangement annulé : 3 notes sont
   revenues à leur place. »). Plusieurs rangements s'annulent un par un, dans l'ordre inverse, même quand leurs messages ont
-  disparu ; la liste est vidée quand vous quittez le classeur ou changez le tri. Ardoise **n'écrase jamais un ordre plus récent** :
+  disparu ; la liste est vidée quand vous quittez le classeur ou changez le tri (ce n'est pas le cas des déplacements vers un autre
+  classeur, voir « Classeurs »). Ardoise **n'écrase jamais un ordre plus récent** :
   si l'ordre du classeur a changé depuis (un autre ordinateur, la synchronisation, une note copiée), elle ne fait rien et le dit :
   « Rangement non annulé : l'ordre du classeur a changé depuis… Le nouvel ordre est conservé. »
 - **Le classeur parent** montre ses propres notes d'abord, puis celles de chaque sous-classeur, dans l'ordre de ce
@@ -1304,7 +1325,8 @@ bas de la bibliothèque (« 3 notes mises à la corbeille. ») avec un bouton **
 quelques secondes (8), et tant que la souris ou le clavier est dessus. `Ctrl + Z` fait la même chose depuis la
 bibliothèque (hors d'un champ de texte, et pas dans l'éditeur, qui a son propre **Annuler**). Les messages **Annuler**
 de **Tourner**, de **Dupliquer**, de **Changer la date…** et de la suppression d'un classeur marchent de la même façon, et
-`Ctrl + Z` annule la plus récente de ces actions ; le rangement des cartes d'un classeur s'annule aussi (voir « Ordre du classeur »).
+`Ctrl + Z` annule la plus récente de ces actions ; le rangement des cartes d'un classeur et le déplacement de notes vers un autre
+classeur (ou sur **Favoris** ou une étiquette) s'annulent aussi (voir « Ordre du classeur » et « Classeurs »).
 **Chaque annulation est suivie d'un message qui dit ce qui a été annulé** (« Mise à la corbeille annulée : « Liste de courses »
 est de retour dans son classeur. », « Copie annulée : « Cours (copie) » est à la corbeille. », « Changement de date annulé : … »),
 lu à voix haute par un lecteur d'écran et qui disparaît seul au bout de quelques secondes. Si une note ne peut pas aller à la corbeille (elle a été supprimée entre-temps sur un autre ordinateur,
@@ -1394,6 +1416,9 @@ prend toute la largeur et le rail reste. Les onglets, de haut en bas :
 - **Projection** : le **Vidéoprojecteur** (l'écran de projection, **Projeter**, **Arrêter la projection**), la **Zone
   projetée** (zoom, **Page entière**, **Largeur**) et **Partager sur le réseau** (le bouton n'est plus dans la barre
   d'outils ; voir la fin du chapitre 6). Voir **Projeter la note au vidéoprojecteur** plus bas.
+- **Caractères** : l'alphabet grec et les symboles à ajouter au texte tapé, avec n'importe quel outil (voir **Taper du
+  texte** plus bas ; le bouton **αβγ** de l'outil **Texte** ouvre cet onglet). Sans texte en cours de saisie, les lettres
+  sont grisées et l'onglet propose **Outil Texte**.
 - **Aide** : les raccourcis clavier de l'éditeur (voir le chapitre 17).
 
 Ardoise retient l'onglet ouvert et l'état replié de l'éditeur, sur ce PC, et les retrouve quand vous ouvrez une autre
@@ -1433,8 +1458,16 @@ La barre d'outils propose les outils suivants (**Outil**) :
   plus bas).
 - **Gomme** : **Traits entiers** ou **Partielle**, avec sa **Taille**. Elle n'efface que sur le calque choisi (voir
   **Calques**).
-- **Sélection** (le lasso) : entourez des traits et des textes du calque choisi pour les sélectionner (un texte est pris quand
-  son milieu est dans le lasso ; un clic sur un texte le prend seul) ; `Maj` + lasso ajoute, `Ctrl` + lasso retire. Le
+- **Sélection** : un **rectangle** ou un **lasso**, au choix, sur les traits et les textes du calque choisi. La première
+  fois, un clic sur **Sélection** donne le **rectangle** : faites glisser d'un coin à l'autre pour sélectionner ce qu'il
+  contient. Un nouveau clic sur le bouton, ou un nouvel appui sur `V`, passe au **lasso** : entourez les éléments à main levée ;
+  un autre clic revient au rectangle, et ainsi de suite. Le bouton garde son nom court (« Sélection ») : son icône, son
+  infobulle (« Sélection : rectangle » ou « Sélection : lasso ») et la ligne d'aide dessous disent lequel des deux est actif. Les deux prennent la même chose pour la même zone :
+  un trait quand la moitié au moins de ses points est dedans, un texte, une équation ou un signet quand son milieu est dedans.
+  Un clic sur un trait ou sur un texte le prend seul, un clic sur la page vide désélectionne ; `Maj` + rectangle (ou lasso)
+  ajoute, `Ctrl` + rectangle (ou lasso) retire. Revenir à **Sélection** depuis un autre outil redonne **la dernière façon
+  utilisée**, et cette façon est la même dans l'éditeur et dans le mode direct : elle est retenue sur cet ordinateur, même
+  après avoir fermé Ardoise. Le
   bloc **Sélection**, au-dessus de l'onglet ouvert du panneau de côté, propose **Copier**, **Couper**, **Coller**,
   **Dupliquer**, **Redresser les formes**, **Supprimer**.
   Les changements de couleur, d'encre et d'épaisseur s'appliquent alors à la sélection ; on la déplace (en la saisissant
@@ -1509,11 +1542,12 @@ Sous la barre d'outils, avec l'outil **Texte** ou quand des textes sont sélecti
   ∂ ∝ ‰ ′ ″, exposants ⁰…⁹ ⁺ ⁻ et indices ₀…₉) s'écrivent dans les deux polices, en gras aussi : ils viennent de Latin Modern
   Math, la police de mathématiques de la même famille. Un caractère qu'aucune police d'Ardoise ne contient (un émoji, un
   idéogramme…) est dessiné comme un carré □, et Ardoise le nomme sous le cadre pendant la saisie.
-- **αβγ** (alphabet grec) : ouvre une palette sous la barre, avec les minuscules (et le sigma final ς), les majuscules, les
-  variantes ϵ ϑ ϕ ϖ ϱ, des symboles, les exposants et les indices. Touchez d'abord la page pour taper un texte, puis touchez une
-  lettre : elle s'ajoute au curseur du cadre (à la place du texte sélectionné), et le curseur reste dans le cadre ; la palette
-  reste ouverte pour plusieurs lettres. `Échap` la ferme (un second `Échap` termine la saisie), comme son bouton ou un autre
-  outil. Au clavier : `Tab` jusqu'à la palette, les flèches, puis `Entrée`.
+- **αβγ** (alphabet grec) : ouvre l'onglet **Caractères** du panneau de côté (en dépliant le panneau s'il est replié),
+  à côté de la page, sans rien en cacher : les minuscules (et le sigma final ς), les majuscules, les variantes ϵ ϑ ϕ ϖ ϱ, des
+  symboles, les exposants et les indices. Touchez d'abord la page pour taper un texte, puis touchez une lettre : elle
+  s'ajoute au curseur du cadre (à la place du texte sélectionné), et le curseur reste dans le cadre. Un second appui sur
+  **αβγ** revient à l'onglet ouvert avant (et replie le panneau s'il l'était). `Échap` termine la saisie, l'onglet reste
+  ouvert. Au clavier : `Tab` jusqu'aux lettres, les flèches, puis `Entrée` (le curseur revient dans le cadre).
 - **Taille** : **Petit** (4 mm), **Moyen** (6 mm) ou **Grand** (9 mm).
 - **Gras**.
 - La couleur est celle de l'outil : choisissez-la dans les couleurs de la barre.
@@ -1521,7 +1555,7 @@ Sous la barre d'outils, avec l'outil **Texte** ou quand des textes sont sélecti
 Ces réglages s'appliquent à tout le cadre (pas de mise en forme à l'intérieur d'un cadre) : au cadre que vous tapez, sinon aux
 textes sélectionnés, et aux prochains cadres. Un clic sur ces boutons ne fait pas quitter la saisie.
 
-Un texte vit avec les traits : il se sélectionne au lasso, se déplace, se redimensionne (il grandit ou rapetisse avec les
+Un texte vit avec les traits : il se sélectionne au rectangle ou au lasso, se déplace, se redimensionne (il grandit ou rapetisse avec les
 traits ; choisir une taille lui rend cette taille), se duplique, se copie et se colle, se supprime, tourne avec la page, va sur
 le calque choisi et suit son calque. La gomme ne l'efface pas : sélectionnez-le et supprimez-le. Il apparaît d'un coup dans la
 relecture et dans les vidéos, au moment où il a été posé, et figure dans tous les exports (images, SVG, PDF, presse-papiers,
@@ -1706,7 +1740,7 @@ La zone **Calques**, dans l'onglet **Calques** du panneau de côté (ouvert au d
 une feuille transparente superposée aux autres : l'écriture d'une tablette, vos annotations, une correction.
 
 - **Choisir un calque** : cliquez sur sa ligne, qui s'entoure d'un cadre. **Le stylo, la gomme et la sélection n'agissent
-  que sur le calque choisi** : le lasso, le clic, `Ctrl + A` (**Tout sélectionner**) et la gomme ne prennent que ses
+  que sur le calque choisi** : le rectangle, le lasso, le clic, `Ctrl + A` (**Tout sélectionner**) et la gomme ne prennent que ses
   traits, et ce que vous dessinez, collez ou dupliquez y va. Pour toucher à l'encre d'un autre calque, choisissez-le
   d'abord. Changer de calque choisi enlève la sélection. À l'ouverture d'une note, le calque choisi est le plus haut des
   calques affichés.
@@ -2106,7 +2140,8 @@ présentation s'utilisent au stylet ou au doigt.
 - Le trait *s'épaissit avec la pression*.
 - Le *dos du stylet* (la gomme) *efface*, avec les réglages de la gomme (**Traits entiers** ou **Partielle**), quel que
   soit l'outil choisi. Un cercle de gomme apparaît quand il survole la page.
-- Le *bouton du stylet* trace un *lasso de sélection*, quel que soit l'outil. Ensuite, la *pointe* du stylet (comme un
+- Le *bouton du stylet* trace un *lasso de sélection*, quel que soit l'outil (même quand l'outil **Sélection** est en mode
+  rectangle). Ensuite, la *pointe* du stylet (comme un
   doigt) saisit la sélection au lieu de dessiner : posée dans le cadre, elle la déplace ; posée sur une poignée, elle la
   redimensionne (avec les outils **Stylo** et **Gomme**). Hors du cadre, elle dessine comme d'habitude.
 - La *paume* posée sur l'écran est ignorée tant que le stylet est utilisé ou proche de l'écran.
@@ -2296,7 +2331,7 @@ l'impression d'Ardoise (jamais l'impression de la fenêtre comme une page web). 
 | `Échap` | Désélectionner |
 | `F2` | Renommer la note |
 | `Suppr` | Mettre la note (ou la sélection) à la corbeille |
-| `Ctrl + Z` | Annuler la dernière action : mise à la corbeille, **Dupliquer**, **Changer la date…**, **Tourner**, suppression d'un classeur, rangement des cartes d'un classeur (plusieurs rangements, un par un) ; un message dit ce qui a été annulé |
+| `Ctrl + Z` | Annuler la dernière action : mise à la corbeille, **Dupliquer**, **Changer la date…**, **Tourner**, suppression d'un classeur, rangement des cartes d'un classeur (plusieurs rangements, un par un), déplacement de notes vers un autre classeur, dépôt sur **Favoris** ou sur une étiquette ; un message dit ce qui a été annulé |
 | `Alt + ←`, `Alt + →`, `Alt + Début`, `Alt + Fin` | Dans un classeur trié par **Ordre du classeur** : déplacer la carte (ou la sélection) d'une place, ou au début, ou à la fin |
 
 ### Éditeur
@@ -2313,7 +2348,7 @@ l'impression d'Ardoise (jamais l'impression de la fenêtre comme une page web). 
 | `Échap` | Par étapes, un appui par étape : abandonner le geste en cours, terminer la saisie d'un texte ou d'une équation (ce qui est écrit reste ; une équation au code incorrect reste dans son panneau) ; fermer la découpe, la relecture, le recadrage ou le réglage de **Redresser les formes** ; désélectionner ; revenir à la bibliothèque, en demandant d'enregistrer s'il y a des modifications (jamais pendant l'enregistrement d'une narration) |
 | `Maj`, `Alt` (tenues pendant le tracé d'une forme) | Inverser **Forme régulière** (`Maj`) ou **Depuis le centre** (`Alt`) pour ce tracé |
 | `Alt + ←`, `Alt + →` | **Page précédente**, **Page suivante** (la note d'avant, la note d'après dans la bibliothèque) |
-| `V`, `P`, `E`, `T`, `M`, `B`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Texte**, **Équation**, **Signet**, **Déplacer la page** |
+| `V`, `P`, `E`, `T`, `M`, `B`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Texte**, **Équation**, **Signet**, **Déplacer la page** (`V` quand **Sélection** est déjà l'outil : passe du rectangle au lasso, et inversement ; l'outil revient dans la dernière façon utilisée) |
 | `Espace` (maintenu) | Déplacer la page (sauf si un bouton a le focus : `Espace` agit alors sur ce bouton, y compris une icône du rail) |
 | `F` | **Redresser les formes** |
 | `R` | **Relecture** |
@@ -2349,7 +2384,7 @@ projection ; la fenêtre n'a pas d'autre touche.
 | `W` | **Largeur** |
 | `Maj + flèches` | Déplacer la zone projetée |
 | `Suppr` ou `Retour arrière` | Fenêtre de commande, **avec des traits choisis** : les supprimer (sans sélection, rien). Fenêtre projetée : effacer les annotations écrites sur la présentation |
-| `V` | Outil **Sélection** (fenêtre de commande) : lasso ou clic sur un trait du calque choisi |
+| `V` | Outil **Sélection** (fenêtre de commande) : rectangle, lasso ou clic sur un trait du calque choisi ; un nouvel appui passe du rectangle au lasso et inversement (on quitte l'outil en choisissant **Stylo**, `P`) |
 | `P` | Outil **Stylo** (fenêtre de commande) : écrire avec le stylet ou la souris de l'ordinateur sur le calque choisi |
 | `Ctrl + Z` | Annuler un trait ou un coup de gomme de l'ordinateur, une suppression, un changement de couleur ou **Effacer la page** (fenêtre de commande) |
 | `Ctrl + Y` ou `Ctrl + Maj + Z` | Rétablir (fenêtre de commande) |

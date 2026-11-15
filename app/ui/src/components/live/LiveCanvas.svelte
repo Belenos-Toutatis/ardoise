@@ -32,7 +32,7 @@
    * contact or hovering (palm rejection). `onmarkschange` reports every change of the marks, the
    * one in progress included, for the window to pass them on to the viewers of the share.
    *
-   * Selecting (M12, control window only, `tool` = `select`): the mouse and the pen draw a lasso, or click a
+   * Selecting (M12, control window only, `tool` = `select`): the mouse and the pen draw a rectangle or a lasso (`way`), or click a
    * stroke (`lib/live-select.svelte.ts`), instead of dragging the projected area; Shift adds to the
    * selection and Ctrl removes from it. Only strokes of the chosen layer are picked (M14). A finger and the
    * wheel keep navigating. The result goes to `onselect`; the chosen strokes (`selection`, indices of the
@@ -62,7 +62,7 @@
    */
   import { untrack } from 'svelte';
   import { api } from '../../lib/api';
-  import type { Rect, Vec } from '../../lib/editor/geometry';
+  import { boundsOfPoints, type Rect, type Vec } from '../../lib/editor/geometry';
   import { onLayer } from '../../lib/editor/hit';
   import { PenPresence, TouchGestures, inkPressure, pointerKind, type PointerKind, type TouchAction } from '../../lib/gestures';
   import type { Ink, InkPoint } from '../../lib/ink';
@@ -82,9 +82,11 @@
   import type { LiveState } from '../../lib/live-state.svelte';
   import { MARK_ERASER_PX, eraseMarks, markStyle, newMark } from '../../lib/live-marks';
   import { CLICK_PX, pickStrokes, type Combine } from '../../lib/live-select.svelte';
+  import type { SelectWay } from '../../lib/editor/state';
   import { exposeRepaints, noteLiveRedraw } from '../../lib/perf';
   import {
     MAX_SCALE,
+    corners,
     grabAt,
     isNoTransform,
     moveTransform,
@@ -119,6 +121,7 @@
     onmarks,
     onmarkschange,
     tool = 'none',
+    way = 'lasso',
     selection = [],
     onselect,
     ontransform,
@@ -150,6 +153,12 @@
      * chosen layer; `none`: they move the projected area.
      */
     tool?: 'none' | 'select' | 'pen';
+    /**
+     * Preview, `select`: how a drag chooses strokes: a rectangle (from one corner to the opposite one) or a lasso (a free
+     * outline). Both are drawn by the lasso's overlay (a rectangle is its closed outline) and take what a lasso along
+     * the rectangle would (`pickStrokes`).
+     */
+    way?: SelectWay;
     /** Preview: the chosen strokes (indices of the finished strokes; a new array at each change). */
     selection?: readonly number[];
     /** Preview: a lasso or a click ended; `picked` is empty when it found nothing. */
@@ -202,8 +211,11 @@
   let marks: readonly Stroke[] = [];
   let markCurrent: Stroke | null = null;
   let markDrag: { id: number; kind: 'write' | 'erase'; t0: number } | null = null;
-  /** The lasso being drawn with the mouse or the pen (page units; the points grow in place). */
-  let lassoDrag: { id: number; points: Vec[]; combine: Combine } | null = null;
+  /**
+   * The lasso being drawn with the mouse or the pen (page units; the points grow in place). `box`: a rectangle, whose
+   * `points` are the two corners (the press, and where the pointer is now).
+   */
+  let lassoDrag: { id: number; points: Vec[]; combine: Combine; box: boolean } | null = null;
   /** The selection taken hold of: what it took (`grab`), where the press was, and the map the drag has made so far. */
   let grabDrag: {
     id: number;
@@ -321,7 +333,7 @@
         marks,
         markCurrent,
         selection,
-        lasso: lassoDrag?.points ?? null,
+        lasso: lassoDrag ? (lassoDrag.box ? boxOutline(lassoDrag.points) : lassoDrag.points) : null,
         lift: liftNow(),
         handles: tool === 'select' && !!ontransform,
         localComputer: computer?.locals(),
@@ -619,15 +631,29 @@
     if (e.button !== 0) return;
     e.preventDefault();
     capture(id);
-    lassoDrag = { id, points: [pagePoint(e)], combine: e.ctrlKey || e.metaKey ? 'remove' : e.shiftKey ? 'add' : 'replace' };
+    lassoDrag = { id, points: [pagePoint(e)], combine: e.ctrlKey || e.metaKey ? 'remove' : e.shiftKey ? 'add' : 'replace', box: way === 'rectangle' };
     schedule();
   }
 
-  /** The lasso (or click) ended: the strokes of the chosen layer it picks go to `onselect`. */
-  function endLasso(drag: { points: Vec[]; combine: Combine }) {
+  /** The outline a rectangle is drawn with: its four corners, closed (the lasso's overlay draws it). */
+  function boxOutline(points: readonly Vec[]): readonly Vec[] {
+    const bounds = points.length > 1 ? boundsOfPoints(points) : null;
+    return bounds ? [...corners(bounds), { x: bounds.x, y: bounds.y }] : points;
+  }
+
+  /**
+   * The lasso, the rectangle or the click ended: the strokes of the chosen layer it picks go to `onselect`. A rectangle
+   * asks what a lasso along its four corners would (a press that goes nowhere stays a click on its first point).
+   */
+  function endLasso(drag: { points: Vec[]; combine: Combine; box: boolean }) {
     const { scale } = sceneTransform(live, { mode, viewport: size });
     const page = onLayer({ strokes: live.strokes, layers: live.layers }, live.computerLayer);
-    onselect?.(pickStrokes(page, drag.points, scale), drag.combine);
+    let gesture: readonly Vec[] = drag.points;
+    if (drag.box) {
+      const bounds = drag.points.length > 1 ? boundsOfPoints(drag.points) : null;
+      gesture = bounds && Math.max(bounds.width, bounds.height) * scale >= CLICK_PX ? corners(bounds) : drag.points.slice(0, 1);
+    }
+    onselect?.(pickStrokes(page, gesture, scale), drag.combine);
   }
 
   /** The selection's frame (page units), or null when none of the chosen strokes shows. */
@@ -945,7 +971,10 @@
       for (const ev of events.length > 0 ? events : [e]) {
         const q = pagePoint(ev);
         const last = lassoDrag.points[lassoDrag.points.length - 1];
-        if (Math.hypot(q.x - last.x, q.y - last.y) * scale >= 0.5) lassoDrag.points.push(q);
+        if (Math.hypot(q.x - last.x, q.y - last.y) * scale < 0.5) continue;
+        // A rectangle keeps its press and the pointer's latest place.
+        if (lassoDrag.box) lassoDrag.points = [lassoDrag.points[0], q];
+        else lassoDrag.points.push(q);
       }
       schedule();
       return;

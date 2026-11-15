@@ -1,5 +1,6 @@
 // Journeys of the library features of 2026-11-13 (Q20): duplicating a note, changing its date, the free order of a binder
-// (keyboard, kept after a reload, followed by the editor's page buttons), exporting a binder as one PDF.
+// (keyboard, kept after a reload, followed by the editor's page buttons), exporting a binder as one PDF. And of 2026-11-15 (Q21): undoing a move to another binder (a drag onto
+// the sidebar, « Déplacer vers… »), checked on the files and on the order file.
 //
 // On the production executable and the demo library, in French and in English; the real window is driven with real clicks
 // (the right click included) and real key events, and the files are read on the disk. Labels come from the translation files.
@@ -515,6 +516,142 @@ export const q20Journeys = [
         const moved = noteFiles(app.library).some((f) => f.startsWith('Perso') && f.endsWith(' Beta.ardoise'));
         if (!moved) throw new Error('Beta is not in the folder of the binder Perso');
         await app.send('Input.setInterceptDrags', { enabled: false });
+      });
+    },
+  },
+  {
+    name: 'Q21 : annuler un déplacement vers un autre classeur (glisser sur la barre latérale, « Déplacer vers… »), fichiers et ordre du classeur',
+    async run(app, check) {
+      const l = (key) => text(app.language, key);
+      const MOVE = 'Essai déplacement';
+      let dragged;
+      let before; // the order file as it was before the move
+      const files = () => noteFiles(app.library);
+      const fileOf = (title) => files().find((f) => f.endsWith(` ${title}.ardoise`));
+      const said = (message) => app.waitFor(`[...document.querySelectorAll('.activity-offer')].some((o) => o.textContent.includes(${j(message)}))`, message);
+      const waitForOrder = async (expected, what) => {
+        for (let i = 0; j(orderFile(app, MOVE)?.notes) !== j(expected); i++) {
+          if (i > 100) throw new Error(`${what}: the order file holds ${j(orderFile(app, MOVE))}, expected ${j(expected)}`);
+          await sleep(100);
+        }
+      };
+      const idsOf = () =>
+        app
+          .evaluate(`window.__TAURI_INTERNALS__.invoke('library_list').then((l) => l.notes.filter((n) => n.binder === ${j(MOVE)}).map((n) => [n.title, n.id]))`)
+          .then(Object.fromEntries);
+      const spot = (title) =>
+        app.evaluate(`(() => {
+          const card = [...document.querySelectorAll('.note-card')].find((c) => c.querySelector('.card-title')?.textContent.trim() === ${j(title)});
+          card.scrollIntoView({ block: 'center' });
+          const r = card.getBoundingClientRect();
+          return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 3) };
+        })()`);
+      const sidebarSpot = (binder) =>
+        app.evaluate(`(() => {
+          const r = document.querySelector('.sidebar [data-binder=${j(binder)}]').getBoundingClientRect();
+          return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+        })()`);
+      const dragEvent = (type, point) => app.send('Input.dispatchDragEvent', { type, x: point.x, y: point.y, data: dragged, modifiers: 0 });
+
+      await check('trois notes dans un classeur, en « Ordre du classeur », « Gamma » mise en tête : le classeur a son fichier d’ordre', async () => {
+        await app.waitFor(`document.querySelectorAll('.note-card').length === 8`, 'the demo notes');
+        for (const title of ['Alpha', 'Beta', 'Gamma']) await createNote(app, MOVE, title);
+        await app.waitFor(`document.querySelector('.sidebar [data-binder=${j(MOVE)}]') !== null`, 'the new binder');
+        await openBinderInOrder(app, MOVE);
+        await waitForTitles(app, ['Alpha', 'Beta', 'Gamma'], 'the notes oldest first');
+        await keyOnCard(app, 'Gamma', 'Home', { alt: true });
+        await waitForTitles(app, ['Gamma', 'Alpha', 'Beta'], 'Gamma first');
+        const ids = await idsOf();
+        before = [ids.Gamma, ids.Alpha, ids.Beta];
+        await waitForOrder(before, 'Gamma first');
+      });
+
+      await check('glisser « Alpha » sur « Perso » avec la souris : elle change de classeur, le message dit où, avec « Annuler »', async () => {
+        const reply = await app.send('Input.setInterceptDrags', { enabled: true });
+        if (reply.error) throw new Error(`setInterceptDrags: ${JSON.stringify(reply.error)}`);
+        const from = await spot('Alpha');
+        const target = await sidebarSpot('Perso');
+        const since = app.eventCount();
+        await app.mouse('mouseMoved', from.x, from.y);
+        await app.mouse('mousePressed', from.x, from.y);
+        for (let step = 1; step <= 12; step++) {
+          await app.mouse('mouseMoved', from.x + ((target.x - from.x) * step) / 12, from.y + ((target.y - from.y) * step) / 12, { buttons: 1, button: 'left' });
+          await sleep(30);
+        }
+        const event = await app.waitForEvent('Input.dragIntercepted', { since, timeout: 4000 });
+        if (!event) throw new Error('no Input.dragIntercepted event');
+        dragged = event.params.data;
+        await dragEvent('dragEnter', target);
+        await dragEvent('dragOver', target);
+        await dragEvent('drop', target);
+        await app.mouse('mouseReleased', target.x, target.y);
+        await app.send('Input.setInterceptDrags', { enabled: false });
+        await waitForTitles(app, ['Gamma', 'Beta'], 'Alpha gone from the binder');
+        if (!files().some((f) => f.startsWith('Perso') && f.endsWith(' Alpha.ardoise'))) throw new Error('Alpha is not in the folder of the binder Perso');
+        await said(fill(l('library.move.done.one'), { title: 'Alpha', binder: 'Perso' }));
+        // The move does not touch the order files: the binder keeps the place of the note.
+        if (j(orderFile(app, MOVE).notes) !== j(before)) throw new Error(`the order file changed: ${j(orderFile(app, MOVE))}`);
+        const undo = await app.evaluate(`document.querySelector('.activity-offer [data-action="undo"]') !== null`);
+        if (!undo) throw new Error('no « Annuler » on the notice');
+      });
+
+      await check('« Beta » mise en tête pendant que « Alpha » est ailleurs : le fichier d’ordre est réécrit sans « Alpha »', async () => {
+        await keyOnCard(app, 'Beta', 'Home', { alt: true });
+        await waitForTitles(app, ['Beta', 'Gamma'], 'Beta first');
+        await waitForOrder([before[2], before[0]], 'Beta first, Alpha away');
+      });
+
+      await check('Ctrl + Z deux fois : le rangement, puis le déplacement ; « Alpha » retrouve son dossier, son nom de fichier et sa place (après « Gamma »)', async () => {
+        const name = fileOf('Alpha').split(/[\\/]/).pop();
+        await app.key('z', { ctrl: true });
+        await waitForTitles(app, ['Gamma', 'Beta'], 'the rearrangement undone');
+        await waitForOrder([before[0], before[2]], 'the rearrangement undone');
+        await app.key('z', { ctrl: true });
+        await waitForTitles(app, ['Gamma', 'Alpha', 'Beta'], 'Alpha back in its place');
+        await said(fill(l('library.move.undone.one'), { title: 'Alpha', binder: MOVE }));
+        const back = fileOf('Alpha');
+        if (!back.startsWith(MOVE) || back.split(/[\\/]/).pop() !== name) throw new Error(`Alpha is at ${back}`);
+        if (files().some((f) => f.startsWith('Perso') && f.endsWith(' Alpha.ardoise'))) throw new Error('Alpha is still in Perso');
+        await waitForOrder(before, 'Alpha back after Gamma');
+      });
+
+      await check('« Déplacer vers… » de la barre de sélection : deux notes vers « Classe », le message le dit ; Ctrl + Z les remet dans leur classeur', async () => {
+        for (const title of ['Alpha', 'Beta']) {
+          const card = await markCard(app, title, `mv-${title}`);
+          await app.click(`${card} .card-check input`);
+        }
+        await app.click('.selection-bar button', l('library.selection.move'));
+        await app.click('.selection-panel [data-binder="Classe"]');
+        await waitForTitles(app, ['Gamma'], 'the two notes gone from the binder');
+        for (const title of ['Alpha', 'Beta']) {
+          if (!files().some((f) => f.startsWith('Classe') && f.endsWith(` ${title}.ardoise`))) throw new Error(`${title} is not in Classe`);
+        }
+        await said(fill(l('library.move.done.other'), { count: 2, binder: 'Classe' }));
+        await app.key('z', { ctrl: true });
+        await waitForTitles(app, ['Gamma', 'Alpha', 'Beta'], 'the two notes back');
+        await said(fill(l('library.move.undone.other'), { count: 2, binder: MOVE }));
+        if (files().some((f) => f.startsWith('Classe') && /Alpha|Beta/.test(f))) throw new Error('a note is still in Classe');
+        await waitForOrder(before, 'the order after the second undo');
+      });
+
+      await check('« Alpha » modifiée entre-temps : l’annulation la laisse où elle est, dit pourquoi, et ne perd rien', async () => {
+        const card = await markCard(app, 'Alpha', 'mv-last');
+        await app.click(`${card} .card-check input`);
+        await app.click('.selection-bar button', l('library.selection.move'));
+        await app.click('.selection-panel [data-binder="Perso"]');
+        await waitForTitles(app, ['Gamma', 'Beta'], 'Alpha gone');
+        // Changed since (a tag, as another computer could): its file has another stamp.
+        await app.evaluate(`(async () => {
+          const invoke = window.__TAURI_INTERNALS__.invoke;
+          const note = (await invoke('library_list')).notes.find((n) => n.title === 'Alpha');
+          await invoke('set_note_tags', { path: note.path, tags: ['modifiée'], stamp: note.stamp });
+          return true;
+        })()`);
+        await sleep(300);
+        await app.key('z', { ctrl: true });
+        await app.waitFor(`document.querySelector('.activity-failures')?.textContent.includes(${j(l('library.move.changed'))})`, 'the refusal');
+        if (!files().some((f) => f.startsWith('Perso') && f.endsWith(' Alpha.ardoise'))) throw new Error('Alpha left Perso although it changed');
+        await waitForTitles(app, ['Gamma', 'Beta'], 'the binder as it was');
       });
     },
   },

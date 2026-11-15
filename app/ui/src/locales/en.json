@@ -227,6 +227,74 @@
       "undoRefused": "Rearrangement not undone: the binder's order has changed since (a note copied, another computer, a sync). The new order is kept.",
       "undoFailed": "The rearrangement could not be undone: {message}"
     },
+    "undoGone": "the note is no longer in the library (trashed or deleted); it was not changed.",
+    "move": {
+      "done": {
+        "one": "\"{title}\" moved to \"{binder}\".",
+        "other": "{count} notes moved to \"{binder}\"."
+      },
+      "failed": {
+        "one": "One note could not be moved:",
+        "other": "{count} notes could not be moved:"
+      },
+      "undone": {
+        "one": "Move undone: \"{title}\" is back in \"{binder}\".",
+        "other": "Move undone: {count} notes are back in \"{binder}\"."
+      },
+      "undoneMixed": {
+        "one": "Move undone: {count} note is back in the binder it came from.",
+        "other": "Move undone: {count} notes are back in the binders they came from."
+      },
+      "atEnd": {
+        "one": "The binder's order has changed since: it was put at the end.",
+        "other": "The binder's order has changed since: they were put at the end."
+      },
+      "renamed": {
+        "one": "Its file name being already taken in this binder, it is now called \"{name}\".",
+        "other": "Their file names being already taken in this binder, {count} notes were given a number."
+      },
+      "recreated": {
+        "one": "The binder \"{binder}\" no longer existed: it was created again.",
+        "other": "{count} binders no longer existed: they were created again."
+      },
+      "undoFailed": {
+        "one": "One note could not be put back in its binder:",
+        "other": "{count} notes could not be put back in their binder:"
+      },
+      "changed": "it was changed since; it stays where it is.",
+      "gone": "it is no longer there (moved again, renamed, trashed or deleted).",
+      "undoError": "The move could not be undone: {message}"
+    },
+    "favoriteDrop": {
+      "done": {
+        "one": "\"{title}\" added to the favourites.",
+        "other": "{count} notes added to the favourites."
+      },
+      "undone": {
+        "one": "Favourite undone: \"{title}\" is no longer a favourite.",
+        "other": "Favourites undone: {count} notes are no longer favourites."
+      },
+      "undoFailed": {
+        "one": "One note could not be taken off the favourites:",
+        "other": "{count} notes could not be taken off the favourites:"
+      },
+      "undoError": "The favourite could not be undone: {message}"
+    },
+    "tagDrop": {
+      "done": {
+        "one": "Tag \"{tag}\" added to \"{title}\".",
+        "other": "Tag \"{tag}\" added to {count} notes."
+      },
+      "undone": {
+        "one": "Tag undone: \"{title}\" no longer has the tag \"{tag}\".",
+        "other": "Tag undone: {count} notes no longer have the tag \"{tag}\"."
+      },
+      "undoFailed": {
+        "one": "One note could not lose the tag:",
+        "other": "{count} notes could not lose the tag:"
+      },
+      "undoError": "The tag could not be removed: {message}"
+    },
     "turn": {
       "button": "Turn",
       "panel": "Turn the selected notes",
@@ -1028,6 +1096,8 @@
     "modes": {
       "label": "Tool",
       "select": "Select",
+      "selectRectangle": "Select: rectangle",
+      "selectLasso": "Select: lasso",
       "pen": "Pen",
       "line": "Line",
       "rectangle": "Rectangle",
@@ -1073,9 +1143,9 @@
       "missingMany": "No font of Ardoise has these characters: {chars}. They are drawn as squares.",
       "greek": {
         "button": "Greek alphabet",
-        "buttonHint": "Greek alphabet and symbols: a letter touched is added to the text being typed",
-        "label": "Greek alphabet and symbols",
-        "inactive": "First touch the page to type a text",
+        "buttonHint": "Greek alphabet and symbols, in the side panel’s Characters tab: a letter touched is added to the text being typed",
+        "inactive": "First touch the page with the Text tool to type a text",
+        "textTool": "Text tool",
         "groups": {
           "lower": "Lower case",
           "upper": "Upper case",
@@ -1247,7 +1317,8 @@
       "tool": "Ink",
       "width": "Width"
     },
-    "selectHelp": "Lasso: select · Shift+lasso: add · Ctrl+lasso: remove · Double-click a text or an equation: change it · F: straighten shapes · Esc: deselect all",
+    "selectHelpRectangle": "Rectangle: drag a rectangle to select · Shift+rectangle: add · Ctrl+rectangle: remove · Click the button again (or V): lasso · Double-click a text or an equation: change it · F: straighten shapes · Esc: deselect all",
+    "selectHelpLasso": "Lasso: draw an outline to select · Shift+lasso: add · Ctrl+lasso: remove · Click the button again (or V): rectangle · Double-click a text or an equation: change it · F: straighten shapes · Esc: deselect all",
     "selection": {
       "label": "Selection",
       "count": "Selected strokes: {count}",
@@ -1266,7 +1337,7 @@
     "straighten": {
       "button": "Straighten shapes",
       "hint": "Turns the selected strokes that look like a line, a circle, an ellipse, a rectangle or an arrow into clean shapes (F key). Other strokes, handwriting included, stay as they are.",
-      "disabledHint": "Select strokes with the lasso first, then straighten them.",
+      "disabledHint": "Select strokes first, then straighten them.",
       "doneOne": "1 shape straightened (Ctrl+Z to undo).",
       "doneMany": "{count} shapes straightened (Ctrl+Z to undo).",
       "none": "No shape recognised in the selection. Ardoise straightens lines and arrows at least {line} mm long, and circles, ellipses and rectangles at least {closed} mm across, drawn clearly enough (setting: the small button to the right of the button). Select the drawings rather than the text: a small upright oval (under 2.5 cm) looks like an O or a 0 and stays as it is, like everything else that is not a clear shape.",
@@ -1274,7 +1345,7 @@
         "button": "Straightening settings",
         "title": "Straighten shapes",
         "count": {
-          "noSelection": "Select strokes with the lasso to see what would be straightened.",
+          "noSelection": "Select strokes to see what would be straightened.",
           "none": "With these values, no shape is recognised in the selection.",
           "some": "With these values: {shapes} out of {strokes}.",
           "shapes": {
@@ -1478,7 +1549,7 @@
     "backgroundLoadFailed": "This note's background image could not be loaded ({message}). The note opens without it; the image stays in the file unless you remove it.",
     "keys": {
       "list": {
-        "select": "Select tool",
+        "select": "Select tool (press again: rectangle or lasso)",
         "pen": "Pen tool",
         "eraser": "Eraser tool",
         "text": "Text tool",
@@ -1536,6 +1607,7 @@
       "background": "Background",
       "sound": "Sound",
       "projection": "Projection",
+      "characters": "Characters",
       "help": "Help"
     },
     "openTitle": "{tab} (click to collapse)",
@@ -2124,8 +2196,11 @@
     },
     "select": {
       "toggle": "Select",
-      "hint": "Pick strokes with a lasso or a click to delete them, change their colour, move them or resize them (V)",
-      "help": "Lasso: select · click: one stroke · Shift: add · Ctrl: remove · Esc: deselect. Drag inside the frame to move the selection, or by a corner to resize it (pen, finger or mouse). The colour swatches change the colour of the selection. Only strokes of the chosen layer are picked.",
+      "rectangle": "Select: rectangle",
+      "lasso": "Select: lasso",
+      "hint": "Pick strokes with a rectangle, a lasso or a click to delete them, change their colour, move them or resize them (V; pressing it again switches between the rectangle and the lasso)",
+      "helpRectangle": "Rectangle: drag a rectangle to select · click: one stroke · Shift: add · Ctrl: remove · Esc: deselect · click the button again (or V): lasso. Drag inside the frame to move the selection, or by a corner to resize it (pen, finger or mouse). The colour swatches change the colour of the selection. Only strokes of the chosen layer are picked.",
+      "helpLasso": "Lasso: draw an outline to select · click: one stroke · Shift: add · Ctrl: remove · Esc: deselect · click the button again (or V): rectangle. Drag inside the frame to move the selection, or by a corner to resize it (pen, finger or mouse). The colour swatches change the colour of the selection. Only strokes of the chosen layer are picked.",
       "bar": "Touch up the selection",
       "count": "Selected strokes: {count}",
       "delete": "Delete",
@@ -2219,7 +2294,7 @@
           "action": "Pen tool: write with the computer's pen or mouse"
         },
         "select": {
-          "action": "Select tool (lasso or click on a stroke; drag inside the frame to move, by a corner to resize)"
+          "action": "Select tool (rectangle or lasso, or click on a stroke; V again switches between the two; drag inside the frame to move, by a corner to resize)"
         },
         "delete": {
           "action": "Delete the selection"
