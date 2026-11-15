@@ -305,7 +305,7 @@ and the `mock-*.ts` stand-ins, `locales/fr.json` and `locales/en.json` (each par
   Nothing is deleted during or right after a drag. The files are never in the library.
 - **Interface**: the handle is a button of its own on the card (not inside the draggable `.card-open`, so the HTML5 drag
   to a binder is untouched), visible on hover/selection, with a tooltip naming the destinations; on a selected card it
-  carries the whole selection (`LibraryState.dragOutPaths`). The selection bar's second help line explains it.
+  carries the whole selection (`LibraryState.dragOutPaths`). The user guide explains it (no help line on screen since Q23).
 
 #### Checking a drop by hand (Windows)
 
