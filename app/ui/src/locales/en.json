@@ -39,6 +39,8 @@
     "sidebarLabel": "Library navigation",
     "all": "All notes",
     "favorites": "Favourites",
+    "unsorted": "Not in a binder",
+    "unsortedHint": "The notes in no binder. Drop notes here to take them out of their binder.",
     "binders": "Binders",
     "tags": "Tags",
     "trash": "Trash",
@@ -135,6 +137,7 @@
     "empty": {
       "favorites": "No favourites yet. Click a note's star to find it here.",
       "binder": "This binder is empty. Drag notes into it.",
+      "unsorted": "Every note is in a binder.",
       "tag": "No note has this tag.",
       "search": "No note matches “{query}”."
     },

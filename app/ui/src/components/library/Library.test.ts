@@ -498,6 +498,46 @@ describe('library: drag and drop', () => {
     expect(ui.q('[data-binder="Classe/3e B"] .count')?.textContent).toBe('2');
   });
 
+  it('shows the notes in no binder under « Non classées », and takes dropped notes out of their binder', async () => {
+    const ui = await render();
+    const unsorted = () => ui.q('[data-view="unsorted"]')!;
+    expect(unsorted().querySelector('.nav-label')!.textContent).toBe('Non classées');
+    expect(unsorted().querySelector('.count')!.textContent).toBe('1');
+    await ui.view('[data-view="unsorted"]');
+    expect(ui.titles()).toEqual(['Liste de courses']);
+    expect(ui.q('#library-heading')!.textContent).toBe('Non classées');
+    expect(unsorted().getAttribute('aria-current')).toBe('true');
+
+    // A card of a binder dropped on « Non classées » leaves it for the library's root.
+    await ui.view('[data-view="all"]');
+    ui.open('Cours de physique').dispatchEvent(ui.drag('dragstart'));
+    await ui.settle();
+    const over = ui.drag('dragover');
+    unsorted().dispatchEvent(over);
+    await ui.settle();
+    expect(over.defaultPrevented).toBe(true);
+    expect(unsorted().classList.contains('drop')).toBe(true);
+    expect(ui.q('[data-view="all"]')!.classList.contains('drop')).toBe(false);
+    unsorted().dispatchEvent(ui.drag('drop'));
+    await ui.settle();
+    await vi.waitFor(() => expect(unsorted().querySelector('.count')!.textContent).toBe('2'));
+    await ui.view('[data-view="unsorted"]');
+    expect(ui.titles().sort()).toEqual(['Cours de physique', 'Liste de courses']);
+
+    // No note left outside a binder: the view says so.
+    await ui.view('[data-view="all"]');
+    for (const title of ['Cours de physique', 'Liste de courses']) {
+      ui.open(title).dispatchEvent(ui.drag('dragstart'));
+      await ui.settle();
+      ui.q('[data-binder="Classe"]')!.dispatchEvent(ui.drag('drop'));
+      await ui.settle();
+    }
+    await vi.waitFor(() => expect(unsorted().querySelector('.count')!.textContent).toBe('0'));
+    await ui.view('[data-view="unsorted"]');
+    expect(ui.all('.note-card').length).toBe(0);
+    expect(document.body.textContent).toContain('Toutes les notes sont rangées dans un classeur.');
+  });
+
   it('makes favourites of the notes dropped on « Favoris », and tags those dropped on a tag', async () => {
     const ui = await render();
     const favorites = ui.q('[data-view="favorites"]')!;

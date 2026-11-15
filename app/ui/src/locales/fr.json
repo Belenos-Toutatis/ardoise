@@ -39,6 +39,8 @@
     "sidebarLabel": "Navigation de la bibliothèque",
     "all": "Toutes les notes",
     "favorites": "Favoris",
+    "unsorted": "Non classées",
+    "unsortedHint": "Les notes rangées dans aucun classeur. Déposez-y des notes pour les sortir de leur classeur.",
     "binders": "Classeurs",
     "tags": "Étiquettes",
     "trash": "Corbeille",
@@ -135,6 +137,7 @@
     "empty": {
       "favorites": "Aucun favori pour l'instant. Cliquez sur l'étoile d'une note pour la retrouver ici.",
       "binder": "Ce classeur est vide. Faites-y glisser des notes.",
+      "unsorted": "Toutes les notes sont rangées dans un classeur.",
       "tag": "Aucune note n'a cette étiquette.",
       "search": "Aucune note ne correspond à « {query} »."
     },

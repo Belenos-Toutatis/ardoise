@@ -60,7 +60,7 @@ Les captures montrent le programme avec des notes de démonstration et une table
 
    ![Fenêtre Bienvenue dans Ardoise : le bouton Choisir un dossier… et le choix de la langue](images/fr/premier-lancement.webp)
 
-3. **Découvrez la bibliothèque.** C'est la page d'accueil : à gauche, **Toutes les notes**, **Favoris**, les
+3. **Découvrez la bibliothèque.** C'est la page d'accueil : à gauche, **Toutes les notes**, **Favoris**, **Non classées**, les
    **Classeurs**, les **Étiquettes**, la **Corbeille** et le bloc **Tablette** ; au milieu, une carte par note. Un clic sur
    une carte ouvre la note (chapitre [7](#7-la-bibliothèque)).
 
@@ -1094,7 +1094,7 @@ La bibliothèque est la page d'accueil. En haut : le champ **Rechercher une note
 **Date : la plus récente d'abord**, **Date : la plus ancienne d'abord**, **Titre : A → Z**, **Titre : Z → A**, et, quand
 un classeur est affiché, **Ordre du classeur**, voir plus bas), les
 boutons **Nouvelle note**, **Depuis un PDF ou une image…** et **Réglages**. À gauche : la barre latérale avec
-**Toutes les notes**, **Favoris**, les **Classeurs**, les **Étiquettes**, la **Corbeille**, l'entrée
+**Toutes les notes**, **Favoris**, **Non classées** (les notes rangées dans aucun classeur), les **Classeurs**, les **Étiquettes**, la **Corbeille**, l'entrée
 **Importer depuis Inkspace…** (chapitre 11), et en bas le bloc **Tablette** et le bouton **Tester la tablette**.
 
 ![La bibliothèque : la barre latérale (classeurs, étiquettes, favoris, corbeille, tablette) et les cartes des notes avec miniature, titre, date, classeur et étiquettes](images/fr/bibliotheque.webp)
@@ -1114,7 +1114,7 @@ aussi son fichier.
 **Le clic droit** n'affiche jamais le menu d'une page web (« Enregistrer l'image sous… », « Outils supplémentaires »…) :
 Ardoise montre son propre menu, ou rien. Le menu s'ouvre **sous le pointeur** (la touche `Menu`, ou `Maj + F10`, sur une carte ou
 un classeur l'ouvre sous son bouton **⋯**). Il existe sur : une carte et un classeur (ci-dessus) ; **Toutes les notes** et
-**Favoris** (**Afficher**, **Tout sélectionner**) ; une étiquette (**Afficher**, **Couleur…**, qui ouvre la palette de la
+**Favoris** et **Non classées** (**Afficher**, **Tout sélectionner**) ; une étiquette (**Afficher**, **Couleur…**, qui ouvre la palette de la
 couleur) ; la **Corbeille** (**Ouvrir la corbeille**, **Vider la corbeille…**, avec la même question de confirmation que le
 bouton) ; une note de la corbeille (**Restaurer**, **Supprimer définitivement…**, qui demande confirmation) ; un calque et la
 page de l'éditeur (chapitre 8). Les flèches, `Début`, `Fin` et `Entrée` conduisent le menu ; `Échap`, un clic ailleurs, le
@@ -1250,7 +1250,8 @@ Sélectionnez une ou plusieurs notes, faites un clic droit sur l'une d'elles (ou
 barre latérale, ou sur celle d'une carte, n'affiche que les notes qui la portent. L'étoile d'une carte (ou
 **Ajouter aux favoris**, dans le menu de la carte) ajoute aux **Favoris**. Vous pouvez aussi faire glisser une carte (ou toute la sélection) sur
 **Favoris** ou sur une étiquette de la barre latérale : les notes deviennent des favoris, ou reçoivent cette étiquette,
-sans changer de classeur.
+sans changer de classeur. Déposées sur **Non classées** (ou sur **Toutes les notes**), elles sortent de leur classeur et
+rejoignent les notes rangées dans aucun classeur ; `Ctrl + Z` les y remet.
 
 *Couleurs des étiquettes.* Le petit rond à côté d'une étiquette, dans la barre latérale et dans la fenêtre
 **Étiquettes…** (sous **Étiquettes existantes**), ouvre une palette de huit couleurs, lisibles en thème clair comme en
