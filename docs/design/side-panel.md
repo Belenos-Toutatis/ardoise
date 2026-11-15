@@ -7,8 +7,8 @@ look, its « nouveau » blocks are M17). Written on 2026-11-11 from reading the 
 run: every "today" cites where it was read; "(supposé)" marks what was not checked.
 
 **Words.** The **rail**: the column of icon tabs on the right edge of the editor and of the live control window. A
-**tab**: Calques (`layers`), Page (`page`), Fond (`background`), Son (`sound`), Projection (`projection`), Aide
-(`help`), always in that order. The **pane**: the panel left of the rail that shows the open tab. **Collapsed**: the
+**tab**: Calques (`layers`), Page (`page`), Fond (`background`), Son (`sound`), Projection (`projection`), Caractères
+(`characters`, the editor's only, since 2026-11-15: §14), Aide (`help`), always in that order. The **pane**: the panel left of the rail that shows the open tab. **Collapsed**: the
 pane hidden, the rail alone, the page taking the width. The **above block**: what a window shows above the open tab,
 whatever the tab (the selection; in the editor also the split).
 
@@ -96,9 +96,9 @@ completes them.
 
 ```ts
 export type SideWhere = 'editor' | 'live';
-export type SideTabId = 'layers' | 'page' | 'background' | 'sound' | 'projection' | 'help';
-/** Every tab, in the rail's order; a window shows those it gives content for. */
-export const SIDE_TABS: readonly SideTabId[] = ['layers', 'page', 'background', 'sound', 'projection', 'help'];
+export type SideTabId = 'layers' | 'page' | 'background' | 'sound' | 'projection' | 'characters' | 'help';
+/** Every tab, in the rail's order; a window shows those it gives content for (`characters`: the editor's, §14). */
+export const SIDE_TABS: readonly SideTabId[] = ['layers', 'page', 'background', 'sound', 'projection', 'characters', 'help'];
 export type SideDot = 'warn' | 'rec' | 'live';
 export interface SideBadge { count?: number; dot?: SideDot }
 export type SideBadges = Partial<Record<SideTabId, SideBadge>>;
@@ -1085,3 +1085,41 @@ Ctrl + Q does in the projected window is not listed (the group « Dans la fenêt
 journey never switches the user's microphone on (otherwise a log line says vitest checked it). Fixes: a live check
 clicks a switch, then presses Page Down, the arrow and Space with the focus on it; the editor's replay check reads the
 stored view while the replay runs; the live check measures the padding of the block above the tab.
+
+## 14. The « Caractères » tab (2026-11-15)
+
+The Greek letters and symbols of the Text tool (`page-objects.md` §4). The first version (2026-11-14) was a pop-up palette
+under the toolbar, which covered the frame being typed; the user asked for it to move, saw three mock-ups (this tab, a
+floating window, a strip under the toolbar) and chose the tab.
+
+- **Where.** `characters`, between Projection and Aide in `SIDE_TABS`, so in the editor's rail (seven tabs) and not in live
+  mode's (no snippet: live has no text tool). Icon: an omega with its two feet (`SideIcon` `characters`). Name: « Caractères »
+  / "Characters" (`side.tabs.characters`). Content: `CharactersTab.svelte` (in `components/editor/`, like the editor's other
+  tab contents), given as the `characters` snippet of `<SidePanel>`; the snippet is always given, so the tab can be chosen on
+  the rail with any tool, like the others.
+- **Content.** One `pane-block` per group with its `pane-title` (Minuscules, Majuscules, Variantes, Symboles, Exposants et
+  indices), the keys in a grid `repeat(auto-fill, minmax(2.4rem, 1fr))` 2.6rem high: six a row in the 290 px pane, four (45 ×
+  39 px) in the 240 px pane of a window up to 900 px wide, the scroll bar taking its room; never a horizontal scroll, the pane's body scrolls down as the other tabs
+  do. Keys drawn in the family and weight of the frame being typed (the tool shows them), the tool's otherwise.
+- **Inserting.** A press inserts at the caret of the frame being typed, in place of its selection, as a change of the
+  typing (one editor step with it); `pointerdown` is default-prevented, so the focus stays in the frame. Keyboard: Tab into
+  the tab, arrows between the keys, Enter or Space inserts and gives the focus back to the frame. The field's blur ignores
+  the keys and the tab's own button on the rail (a press on it would take the focus from the field: the typing goes on and
+  the focus comes back to the field after the press); leaving the tab for anything else ends the typing.
+- **Without a frame being typed**: the keys are disabled, the tab says « Touchez d'abord la page avec l'outil Texte pour
+  taper un texte », and when the Text tool is not the chosen one a button « Outil Texte » (`characters-text-tool`) chooses it.
+- **« αβγ »** (the Text tool's options, `data-action="text-greek"`, `aria-pressed` = the tab shows with the pane open,
+  `aria-controls` = the tab's panel). The rule (`toggleCharacters` in `Editor.svelte`): when the tab is not showing (another
+  tab, or the panel folded, even on this tab), it opens the panel on it; when it is showing, it gives back the panel's view
+  just before it last showed (the tab, and the folded state: a panel the button unfolded is folded again), or the default
+  view (Calques, open) when the tab has been showing since the editor opened. The view before is kept by an effect that
+  records every view in which the tab is not showing.
+- **Remembered** like every tab (§3): a view with Caractères shown is stored, so an editor closed on it reopens on it, its
+  keys disabled until a frame is typed. Chosen because it is the panel's one rule (the tab a person leaves is the tab they
+  find), and a teacher who types Greek all lesson keeps it; the other choice (never remember it, reopen on the tab before)
+  would need an exception in `SidePanelState`, as the replay's forced Son has.
+- **Escape** has no step for it (the pop-up's `closeGreekPalette` is gone from `lib/editor/escape.ts`): it ends the typing,
+  the tab stays as it is.
+- **Narrow window.** The main window is at least 800 × 560: the pane is 240 px wide up to 900 px, so at 800 px the stage
+  keeps about 512 px with the pane open, and the field of the frame being typed stays on the stage, beside the tab, never
+  under it. Folding the panel (« › » or the open tab) gives the page its width back; « αβγ » unfolds it.

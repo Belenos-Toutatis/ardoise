@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  export type SideIconName = 'layers' | 'page' | 'background' | 'sound' | 'projection' | 'help' | 'collapse' | 'close';
+  export type SideIconName = 'layers' | 'page' | 'background' | 'sound' | 'projection' | 'characters' | 'help' | 'collapse' | 'close';
 </script>
 
 <script lang="ts">
@@ -43,6 +43,9 @@
     <rect x="2" y="8" width="20" height="9" rx="2" />
     <circle cx="14" cy="12.5" r="2.6" />
     <path d="M6 12.5h2M6 20v-3M18 20v-3" />
+  {:else if name === 'characters'}
+    <!-- An omega with its two feet: the Greek letters and symbols. -->
+    <path d="M4 19h5v-1.8a7 7 0 1 1 6 0V19h5" />
   {:else if name === 'help'}
     <rect x="2" y="6" width="20" height="12" rx="2" />
     <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" />

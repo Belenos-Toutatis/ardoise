@@ -4,7 +4,7 @@
  * Text frames that wrap in the editor (format 1.7, docs/design/page-objects.md §4): a new frame wraps at the page's right
  * edge, the field shows the frame's lines (a line break of its own where the frame wraps) and turns what is typed back
  * into the frame's text, the side handles of a selected frame change its width, a frame made before 1.7 keeps its lines,
- * a character no font has is named under the frame, and the Greek palette inserts at the caret (FR and EN).
+ * a character no font has is named under the frame (FR and EN). The « Caractères » tab: `Editor.characters.test.ts`.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -16,7 +16,6 @@ import { instantiateInk } from '../../lib/ink';
 import { mockLibrary, resetMockLibrary } from '../../lib/mock-data';
 import type { TextObject } from '../../lib/note';
 import { textStyle } from '../../lib/editor/objects';
-import { textInput } from '../../lib/editor/text-input.svelte';
 import Editor from './Editor.svelte';
 
 vi.mock('../VideoExportDialog.svelte', async () => ({
@@ -58,7 +57,6 @@ let cleanup: (() => void) | null = null;
 beforeEach(() => {
   resetMockLibrary();
   setLocale('fr');
-  textInput.paletteOpen = false;
   try {
     localStorage.clear();
   } catch {
@@ -288,111 +286,5 @@ describe('a character no font has', () => {
     await v.tap(6100, 9100);
     await v.input('Bravo \u{1F600}\u{4E2D}');
     expect(v.q('[data-slot="text-missing"]')!.textContent).toContain('No font of Ardoise has these characters');
-  });
-});
-
-describe('the Greek palette', () => {
-  const button = (v: Awaited<ReturnType<typeof render>>) => v.q<HTMLButtonElement>('[data-action="text-greek"]')!;
-  const letter = (v: Awaited<ReturnType<typeof render>>, char: string) =>
-    v.q<HTMLButtonElement>(`[data-slot="greek-palette"] button[data-char="${char}"]`)!;
-  /** A press of the pen or the mouse on a key: its pointerdown keeps the focus, then the click. */
-  const press = (key: HTMLButtonElement) => {
-    const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 });
-    key.dispatchEvent(down);
-    key.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
-    return down.defaultPrevented;
-  };
-
-  it('opens with the text tool, says to touch the page first, then inserts at the caret', async () => {
-    const v = await render();
-    v.tool('Texte').click();
-    await tick();
-    expect(button(v).getAttribute('aria-label')).toBe('Alphabet grec');
-    button(v).click();
-    await tick();
-    expect(v.q('[data-slot="greek-palette"]')).not.toBeNull();
-    expect(v.q('[data-slot="greek-hint"]')!.textContent).toBe("Touchez d'abord la page pour taper un texte");
-    expect(letter(v, 'α').disabled).toBe(true);
-    // The whole alphabet in both cases, final sigma, the variants, the symbols and the scripts.
-    for (const c of 'αβγδεζηθικλμνξοπρσςτυφχψωΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩϵϑϕϖϱµ°±×·≈≠≤≥→⇌∞√′⁰²⁻₂') expect(letter(v, c), c).not.toBeNull();
-    expect(letter(v, 'α').getAttribute('aria-label')).toBe('alpha minuscule');
-    expect(letter(v, 'Α').getAttribute('aria-label')).toBe('Alpha majuscule');
-    expect(letter(v, 'ς').getAttribute('aria-label')).toBe('sigma final minuscule');
-    expect(letter(v, '²').getAttribute('aria-label')).toBe('exposant 2');
-    expect(letter(v, '₂').getAttribute('aria-label')).toBe('indice 2');
-    // A frame: the letters work; the panel stays open.
-    await v.tap(6000, 9000);
-    expect(v.q('[data-slot="greek-hint"]')).toBeNull();
-    await v.input('v = d/t');
-    const f = v.field()!;
-    f.setSelectionRange(0, 0);
-    expect(press(letter(v, 'Δ'))).toBe(true);
-    await tick();
-    expect(f.value).toBe('Δv = d/t');
-    expect(document.activeElement).toBe(f);
-    expect(f.selectionStart).toBe(1);
-    // A selection is replaced.
-    f.setSelectionRange(5, 6);
-    press(letter(v, 'Δ'));
-    await tick();
-    expect(f.value).toBe('Δv = Δ/t');
-    press(letter(v, 'τ'));
-    await tick();
-    expect(f.value).toBe('Δv = Δτ/t');
-    expect(v.q('[data-slot="greek-palette"]')).not.toBeNull();
-    // The letters are drawn in the frame's family.
-    expect(letter(v, 'α').getAttribute('style')).toContain('Ardoise Latin Modern Math');
-    // Escape closes the palette first, the typing goes on; the next one ends the typing.
-    await v.key('Escape', {}, f);
-    expect(v.q('[data-slot="greek-palette"]')).toBeNull();
-    expect(v.field()).not.toBeNull();
-    await v.key('Escape', {}, v.field()!);
-    expect(v.field()).toBeNull();
-    const [frame] = await v.saved();
-    expect(frame.text).toBe('Δv = Δτ/t');
-    // One step for the typing and the letters.
-    v.undoButton().click();
-    await tick();
-    expect(await v.saved()).toHaveLength(0);
-  });
-
-  it('closes when the tool changes, and inserts from the keyboard', async () => {
-    const v = await render();
-    v.tool('Texte').click();
-    await tick();
-    await v.tap(6000, 9000);
-    button(v).click();
-    await tick();
-    expect(v.q('[data-slot="greek-palette"]')).not.toBeNull();
-    // Enter on a key (a click without a pointer): inserted, the focus stays on the key.
-    const alpha = letter(v, 'α');
-    alpha.focus();
-    alpha.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 0 }));
-    await tick();
-    expect(v.field()!.value).toBe('α');
-    // The arrows move from key to key.
-    await v.key('ArrowRight', {}, alpha);
-    expect(document.activeElement).toBe(letter(v, 'β'));
-    await v.key('ArrowLeft', {}, document.activeElement!);
-    expect(document.activeElement).toBe(alpha);
-    v.tool('Sélection : rectangle').click();
-    await tick();
-    expect(textInput.paletteOpen).toBe(false);
-    expect(v.q('[data-slot="greek-palette"]')).toBeNull();
-  });
-
-  it('speaks English too', async () => {
-    setLocale('en');
-    const v = await render();
-    v.tool('Text').click();
-    await tick();
-    expect(button(v).getAttribute('aria-label')).toBe('Greek alphabet');
-    button(v).click();
-    await tick();
-    expect(v.q('[data-slot="greek-hint"]')!.textContent).toBe('First touch the page to type a text');
-    expect(letter(v, 'α').getAttribute('aria-label')).toBe('lowercase alpha');
-    expect(letter(v, 'Ω').getAttribute('aria-label')).toBe('uppercase Omega');
-    expect(letter(v, 'ϑ').getAttribute('aria-label')).toBe('theta symbol');
-    expect(letter(v, '⁻').getAttribute('aria-label')).toBe('superscript minus');
   });
 });

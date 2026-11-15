@@ -7,9 +7,12 @@
  */
 
 export type SideWhere = 'editor' | 'live';
-export type SideTabId = 'layers' | 'page' | 'background' | 'sound' | 'projection' | 'help';
-/** Every tab, in the rail's order; a window shows those it gives content for. */
-export const SIDE_TABS: readonly SideTabId[] = ['layers', 'page', 'background', 'sound', 'projection', 'help'];
+export type SideTabId = 'layers' | 'page' | 'background' | 'sound' | 'projection' | 'characters' | 'help';
+/**
+ * Every tab, in the rail's order; a window shows those it gives content for. `characters` (Greek letters and symbols to
+ * insert in a text frame) is the editor's only: live mode has no text tool.
+ */
+export const SIDE_TABS: readonly SideTabId[] = ['layers', 'page', 'background', 'sound', 'projection', 'characters', 'help'];
 export type SideDot = 'warn' | 'rec' | 'live';
 export interface SideBadge {
   count?: number;

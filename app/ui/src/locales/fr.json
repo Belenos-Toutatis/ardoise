@@ -1075,9 +1075,9 @@
       "missingMany": "Ces caractères n'existent dans aucune police d'Ardoise : {chars}. Ils sont dessinés comme des carrés.",
       "greek": {
         "button": "Alphabet grec",
-        "buttonHint": "Alphabet grec et symboles : une lettre touchée s’ajoute au texte tapé",
-        "label": "Alphabet grec et symboles",
-        "inactive": "Touchez d'abord la page pour taper un texte",
+        "buttonHint": "Alphabet grec et symboles, dans l’onglet « Caractères » du panneau de côté : une lettre touchée s’ajoute au texte tapé",
+        "inactive": "Touchez d'abord la page avec l'outil Texte pour taper un texte",
+        "textTool": "Outil Texte",
         "groups": {
           "lower": "Minuscules",
           "upper": "Majuscules",
@@ -1539,6 +1539,7 @@
       "background": "Fond",
       "sound": "Son",
       "projection": "Projection",
+      "characters": "Caractères",
       "help": "Aide"
     },
     "openTitle": "{tab} (cliquer pour replier)",

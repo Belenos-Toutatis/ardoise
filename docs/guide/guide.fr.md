@@ -1394,6 +1394,9 @@ prend toute la largeur et le rail reste. Les onglets, de haut en bas :
 - **Projection** : le **Vidéoprojecteur** (l'écran de projection, **Projeter**, **Arrêter la projection**), la **Zone
   projetée** (zoom, **Page entière**, **Largeur**) et **Partager sur le réseau** (le bouton n'est plus dans la barre
   d'outils ; voir la fin du chapitre 6). Voir **Projeter la note au vidéoprojecteur** plus bas.
+- **Caractères** : l'alphabet grec et les symboles à ajouter au texte tapé, avec n'importe quel outil (voir **Taper du
+  texte** plus bas ; le bouton **αβγ** de l'outil **Texte** ouvre cet onglet). Sans texte en cours de saisie, les lettres
+  sont grisées et l'onglet propose **Outil Texte**.
 - **Aide** : les raccourcis clavier de l'éditeur (voir le chapitre 17).
 
 Ardoise retient l'onglet ouvert et l'état replié de l'éditeur, sur ce PC, et les retrouve quand vous ouvrez une autre
@@ -1515,11 +1518,12 @@ Sous la barre d'outils, avec l'outil **Texte** ou quand des textes sont sélecti
   ∂ ∝ ‰ ′ ″, exposants ⁰…⁹ ⁺ ⁻ et indices ₀…₉) s'écrivent dans les deux polices, en gras aussi : ils viennent de Latin Modern
   Math, la police de mathématiques de la même famille. Un caractère qu'aucune police d'Ardoise ne contient (un émoji, un
   idéogramme…) est dessiné comme un carré □, et Ardoise le nomme sous le cadre pendant la saisie.
-- **αβγ** (alphabet grec) : ouvre une palette sous la barre, avec les minuscules (et le sigma final ς), les majuscules, les
-  variantes ϵ ϑ ϕ ϖ ϱ, des symboles, les exposants et les indices. Touchez d'abord la page pour taper un texte, puis touchez une
-  lettre : elle s'ajoute au curseur du cadre (à la place du texte sélectionné), et le curseur reste dans le cadre ; la palette
-  reste ouverte pour plusieurs lettres. `Échap` la ferme (un second `Échap` termine la saisie), comme son bouton ou un autre
-  outil. Au clavier : `Tab` jusqu'à la palette, les flèches, puis `Entrée`.
+- **αβγ** (alphabet grec) : ouvre l'onglet **Caractères** du panneau de côté (en dépliant le panneau s'il est replié),
+  à côté de la page, sans rien en cacher : les minuscules (et le sigma final ς), les majuscules, les variantes ϵ ϑ ϕ ϖ ϱ, des
+  symboles, les exposants et les indices. Touchez d'abord la page pour taper un texte, puis touchez une lettre : elle
+  s'ajoute au curseur du cadre (à la place du texte sélectionné), et le curseur reste dans le cadre. Un second appui sur
+  **αβγ** revient à l'onglet ouvert avant (et replie le panneau s'il l'était). `Échap` termine la saisie, l'onglet reste
+  ouvert. Au clavier : `Tab` jusqu'aux lettres, les flèches, puis `Entrée` (le curseur revient dans le cadre).
 - **Taille** : **Petit** (4 mm), **Moyen** (6 mm) ou **Grand** (9 mm).
 - **Gras**.
 - La couleur est celle de l'outil : choisissez-la dans les couleurs de la barre.

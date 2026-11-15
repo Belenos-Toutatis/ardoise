@@ -179,9 +179,9 @@ describe('SidePanel: the DOM contract', () => {
     expect(render().q('[data-slot="side-above"]')).toBeNull();
   });
 
-  it('lists the six tabs when every snippet is given', () => {
-    const { qa } = render({ tabs: ['layers', 'page', 'background', 'sound', 'projection', 'help'] });
-    expect(qa('[role="tab"]').map((tab) => tab.dataset.tab)).toEqual(['layers', 'page', 'background', 'sound', 'projection', 'help']);
+  it('lists the seven tabs in the order of the rail when every snippet is given (as the editor does)', () => {
+    const { qa } = render({ tabs: ['help', 'characters', 'layers', 'page', 'background', 'sound', 'projection'] });
+    expect(qa('[role="tab"]').map((tab) => tab.dataset.tab)).toEqual(['layers', 'page', 'background', 'sound', 'projection', 'characters', 'help']);
   });
 });
 
@@ -193,7 +193,7 @@ function press(el: Element, key: string, mods: { shiftKey?: boolean; ctrlKey?: b
 }
 
 describe('SidePanel: the keyboard on the rail', () => {
-  const ALL: SideTabId[] = ['layers', 'page', 'background', 'sound', 'projection', 'help'];
+  const ALL: SideTabId[] = ['layers', 'page', 'background', 'sound', 'projection', 'characters', 'help'];
 
   it('moves the focus with ArrowDown and ArrowUp, wrapping, without activating anything', () => {
     const { tab, target, panel } = render({ tabs: ALL });

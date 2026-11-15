@@ -12,7 +12,8 @@
    * the frame's to the glyph. What the browser makes of the value is turned back into the frame's text (`applyFieldInput`);
    * the value is set again when the wrapping changes. The undo of the field is its own (`FieldHistory`: Ctrl + Z,
    * Ctrl + Y), and a copy or a cut carries the text without the soft breaks. A character no face has is named under the
-   * frame. The Greek palette inserts at the caret (`registerTextInput`).
+   * frame. The side panel's « Caractères » tab inserts at the caret (`registerTextInput`); going to that tab (its keys
+   * with the keyboard, its tab on the rail) does not end the typing.
    *
    * Typing never reaches the editor's shortcuts (the editor ignores keys typed in a field); Escape is the editor's
    * (`lib/editor/escape.ts`: the first press ends the editing, the text kept). Leaving the field ends the editing too.
@@ -274,8 +275,14 @@
   onblur={(e) => {
     // The window itself lost the focus (another window, Alt + Tab): the field gets it back when the window does.
     if (typeof document !== 'undefined' && typeof document.hasFocus === 'function' && !document.hasFocus()) return;
-    // The focus went to the Greek palette (Tab, the keyboard): the typing goes on there.
-    if (e.relatedTarget instanceof Element && e.relatedTarget.closest('[data-slot="greek-palette"]')) return;
+    const next = e.relatedTarget instanceof Element ? e.relatedTarget : null;
+    // The focus went to the keys of the « Caractères » tab (Tab, the keyboard): the typing goes on there.
+    if (next?.closest('[data-slot="greek-palette"]')) return;
+    // The « Caractères » tab pressed on the rail: the typing goes on, the focus comes back here once the press is over.
+    if (next?.closest('[role="tab"][data-tab="characters"]')) {
+      setTimeout(() => field?.focus({ preventScroll: true }), 0);
+      return;
+    }
     onblur();
   }}
 ></textarea>

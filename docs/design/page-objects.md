@@ -146,14 +146,18 @@ Rule: nothing that rewrites a note may drop an object; wherever strokes move wit
   (`FieldHistory`: Ctrl + Z, Ctrl + Y and the context menu's; letters typed in a row one step); a copy or a cut carries the
   text without the soft breaks. The whole typing is still one step of the editor. The field is as wide as the wrap width (its
   dashed outline shows where the lines end), or the widest line with its hanging white space.
-- **Greek palette** (`GreekPalette.svelte`, `lib/editor/greek.ts`, `lib/editor/text-input.svelte.ts`): the button « αβγ » of
-  the text options (with the text tool) opens a panel: the small letters (ς included), the capitals, ϵ ϑ ϕ ϖ ϱ, symbols, the
-  superscripts and subscripts, drawn in the frame's family and weight, each with its name (FR/EN). A press inserts at the
-  caret of the frame being typed (`TextInputTarget.insert`, in place of the selection, as a change of the typing: the same
-  editor step) and takes the focus from nobody; from the keyboard (Tab into the panel, arrows, Enter) the focus stays on the
-  key and the typing goes on (the field's blur ignores the palette; leaving the palette for elsewhere ends the typing). With no
-  frame being typed the letters are disabled and the panel says to touch the page first. It stays open for several letters;
-  Escape closes it before it ends the typing (`escape.ts` `closeGreekPalette`), and so do its button and a change of tool.
+- **« Caractères » tab** (`CharactersTab.svelte`, `lib/editor/greek.ts`, `lib/editor/text-input.svelte.ts`; the user's
+  choice of 2026-11-15 after the first pop-up palette, which covered the frame being typed): a tab of the editor's side panel
+  (`side-panel.md` §14), before Aide, beside the page. The small letters (ς included), the capitals, ϵ ϑ ϕ ϖ ϱ, symbols, the
+  superscripts and subscripts, by titled groups, keys that wrap to the pane's width (six a row in the 290 px pane, four at 240 px),
+  drawn in the frame's family and weight (the tool's otherwise), each with its name (FR/EN). A press inserts at the caret of
+  the frame being typed (`TextInputTarget.insert`, in place of the selection, as a change of the typing: the same editor step)
+  and takes the focus from nobody; from the keyboard (Tab into the tab, arrows, Enter) the character goes in and the focus
+  goes back to the frame. The field's blur ignores the keys and the tab's own button on the rail (the focus comes back to the
+  field after that press); leaving the tab for elsewhere ends the typing. With no frame being typed the keys are disabled
+  and the tab says to touch the page with the Text tool, with « Outil Texte » when another tool is chosen. Escape has no step
+  for it: it ends the typing, the tab staying as it is. The button « αβγ » of the text options shows the tab (`toggleCharacters`
+  in `Editor.svelte`, rule in `side-panel.md` §14).
 - **Editing flow** (`Editor.svelte`): a tap of the text tool (pen, mouse, a finger's tap) asks for a new frame there or for the
   frame under it (its caret at the tapped place, `offsetAt`); a double click with the selection tool too. What is typed replaces
   the present doc without an undo step (`typeText`); the end of the typing (Escape, the field left, another tap or tool, undo)
