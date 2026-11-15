@@ -197,8 +197,9 @@ pour Windows. Le code est public. Les essais ci-dessous disent honnêtement ce q
 - **Ajoutés et essayés à la main le 15 novembre 2026**, sans compte rendu détaillé : l'onglet **Caractères** du
   panneau de côté (qui a remplacé cette palette), la sélection au rectangle ou au lasso avec sa mémoire et dans le mode
   direct, l'annulation d'un déplacement vers un autre classeur ou d'un dépôt sur **Favoris** ou une étiquette, le menu
-  de la carte qui porte toutes les actions sur les notes (il a remplacé la barre de boutons au-dessus des cartes) et la
-  vue **Non classées**.
+  de la carte qui porte toutes les actions sur les notes (il a remplacé la barre de boutons au-dessus des cartes), la
+  vue **Non classées**, le filtre qui combine un classeur et des étiquettes, et le classeur qui se déplie sous une note
+  qu'on y tient pour la déposer dans un sous-classeur.
 - **Le reste** (bibliothèque, édition, relecture, exports, import d'Inkspace) est vérifié sous Windows par des tests
   automatiques sur le vrai exécutable, en français et en anglais. Jamais essayés à la main : l'export Word ouvert dans
   Word, l'import avec Inkspace ouvert, la fermeture de session de Windows avec une note non enregistrée. Windows 10 n'a
@@ -380,8 +381,9 @@ is in French and English. The pictures below show the demo library and simulated
   the editor, `Ctrl + Z` after rearranging cards and the export of a note with typed text. Added and tried by hand on
   15 November 2026, without a detailed report: the side panel's Characters tab (which replaced that palette), rectangle
   or lasso selection with its memory and in live mode, and undoing a move to another binder or a drop onto Favourites or
-  a tag, the card's menu holding every action on notes (it replaced the bar of buttons above the cards) and the "Not in a
-  binder" view. Everything else is checked on Windows by automated tests on
+  a tag, the card's menu holding every action on notes (it replaced the bar of buttons above the cards), the "Not in a
+  binder" view, the filter combining a binder and tags, and the binder that opens under a held note to drop it in a
+  sub-binder. Everything else is checked on Windows by automated tests on
   the production executable, in French and English; never tried by hand: a Word export opened in Word, an Inkspace
   import with Inkspace open, a real Windows logoff with unsaved work; Windows 10 not tried.
 - **Requirements**: Windows 11 (Windows 10 not tried), WebView2, and Bluetooth LE for a tablet. No administrator rights.
