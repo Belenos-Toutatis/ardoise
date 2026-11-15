@@ -217,8 +217,15 @@ describe('the menu of a tag', () => {
     expect(openMenu()!.getAttribute('aria-label')).toBe('Menu de l\'étiquette réunion');
     expect(entryLabels()).toEqual(['Afficher', 'Couleur…']);
     await view.click(entry('Afficher'));
-    expect(tag.getAttribute('aria-current')).toBe('true');
+    expect(tag.getAttribute('aria-pressed')).toBe('true');
     expect(view.titles()).toEqual(['Réunion parents']);
+    // Once in the filter, the menu offers to take it off.
+    rightClick(tag);
+    await view.settle();
+    expect(entryLabels()).toEqual(['Retirer du filtre', 'Couleur…']);
+    await view.click(entry('Retirer du filtre'));
+    expect(tag.getAttribute('aria-pressed')).toBe('false');
+    expect(view.titles().length).toBe(3);
 
     rightClick(tag);
     await view.settle();

@@ -2,6 +2,10 @@
 
 ## Non publié
 
+### Modifié (demande de l'utilisateur du 2026-11-15 : un classeur et des étiquettes ensemble)
+
+- **Les étiquettes filtrent la vue affichée au lieu de la remplacer, et s'additionnent.** Un clic sur une étiquette de la barre latérale (ou sur celle d'une carte, ou **Afficher** de son clic droit) garde le classeur affiché, ou **Toutes les notes**, **Favoris**, **Non classées**, et n'en montre que les notes qui portent cette étiquette ; une deuxième étiquette resserre encore : seules les notes qui portent **toutes** les étiquettes choisies restent (« Classe », « physique » et « 3e B » : les notes de Classe qui portent physique et 3e B). Les étiquettes choisies sont surlignées dans la barre latérale et s'affichent à côté du titre de la vue, chacune avec sa croix, plus **Retirer toutes les étiquettes** à partir de deux ; un nouveau clic sur une étiquette de la barre latérale la retire, et son clic droit offre alors **Retirer du filtre**. **Elles restent quand on change de classeur** (choix de l'utilisateur). Une étiquette qu'aucune note ne porte plus quitte le filtre. Sans note qui convienne, la vue le dit (« Aucune note de cette vue ne porte toutes ces étiquettes. »). Avec un filtre d'étiquettes, les cartes d'un classeur ne se rangent pas par glisser-déposer (comme pendant une recherche). Q25.
+
 ### Ajouté (demande de l'utilisateur du 2026-11-15 : retrouver les notes rangées nulle part)
 
 - **Une vue « Non classées » dans la barre latérale de la bibliothèque**, juste sous **Favoris** : elle n'affiche que les notes rangées dans aucun classeur (celles dont la carte porte « Non classée »), avec leur nombre. Son clic droit offre **Afficher** et **Tout sélectionner**. On peut y déposer des cartes : elles sortent de leur classeur, comme sur **Toutes les notes**, et `Ctrl + Z` ou **Annuler** les y remet. Sans note hors classeur, la vue le dit (« Toutes les notes sont rangées dans un classeur. »). Q24.

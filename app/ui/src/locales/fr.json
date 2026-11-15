@@ -40,6 +40,13 @@
     "all": "Toutes les notes",
     "favorites": "Favoris",
     "unsorted": "Non classées",
+    "tagFilter": {
+      "label": "Étiquettes que portent les notes affichées",
+      "add": "N'afficher que les notes qui portent aussi l'étiquette {tag}",
+      "remove": "Retirer l'étiquette {tag} du filtre",
+      "removeShort": "Retirer du filtre",
+      "clear": "Retirer toutes les étiquettes"
+    },
     "unsortedHint": "Les notes rangées dans aucun classeur. Déposez-y des notes pour les sortir de leur classeur.",
     "binders": "Classeurs",
     "tags": "Étiquettes",
@@ -138,7 +145,7 @@
       "favorites": "Aucun favori pour l'instant. Cliquez sur l'étoile d'une note pour la retrouver ici.",
       "binder": "Ce classeur est vide. Faites-y glisser des notes.",
       "unsorted": "Toutes les notes sont rangées dans un classeur.",
-      "tag": "Aucune note n'a cette étiquette.",
+      "tags": "Aucune note de cette vue ne porte toutes ces étiquettes.",
       "search": "Aucune note ne correspond à « {query} »."
     },
     "problems": "Fichiers illisibles : {count}",

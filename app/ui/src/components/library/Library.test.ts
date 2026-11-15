@@ -186,12 +186,51 @@ describe('library: listing and sidebar', () => {
     await ui.view('[data-binder="Classe"]');
     expect(ui.titles()).toEqual(['Cours de physique']);
 
+    // A tag narrows the binder shown: « Classe » has no note tagged « réunion ».
     await ui.view('[data-tag="réunion"]');
-    expect(ui.titles()).toEqual(['Réunion parents']);
+    expect(ui.titles()).toEqual([]);
+    expect(ui.target.textContent).toContain('Aucune note de cette vue ne porte toutes ces étiquettes.');
+    expect(ui.q('[data-tag="réunion"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(ui.q('[data-binder="Classe"]')?.getAttribute('aria-current')).toBe('true');
     expect(ui.q('[data-tag="réunion"] .count')?.textContent).toBe('1');
 
+    // The tag stays when another view is shown.
     await ui.view('[data-view="all"]');
+    expect(ui.titles()).toEqual(['Réunion parents']);
+    expect(ui.q('[data-filter-tag="réunion"]')).not.toBeNull();
+    // Its cross, next to the title, takes it off.
+    await ui.click(ui.q('[data-filter-tag="réunion"]')!);
     expect(ui.titles().length).toBe(3);
+    expect(ui.q('[data-tag="réunion"]')?.getAttribute('aria-pressed')).toBe('false');
+    expect(ui.q('[data-slot="tag-filter"]')).toBeNull();
+  });
+
+  it('shows only the notes that carry every tag clicked, in the binder shown, and a click on a tag takes it off', async () => {
+    const ui = await render();
+    await ui.view('[data-tag="physique"]');
+    expect(ui.titles()).toEqual(['Cours de physique']);
+    await ui.view('[data-tag="3e B"]');
+    expect(ui.titles()).toEqual(['Cours de physique']);
+    expect([...ui.all('[data-filter-tag]')].map((chip) => chip.dataset.filterTag)).toEqual(['physique', '3e B']);
+    // A third tag no note carries with the other two: nothing is left.
+    await ui.view('[data-tag="réunion"]');
+    expect(ui.titles()).toEqual([]);
+    // A click on a tag of the sidebar takes it off again.
+    await ui.view('[data-tag="réunion"]');
+    expect(ui.titles()).toEqual(['Cours de physique']);
+    // « Perso » with « physique » and « 3e B »: no note.
+    await ui.view('[data-binder="Perso"]');
+    expect(ui.titles()).toEqual([]);
+    // « Retirer toutes les étiquettes » shows all of Perso again.
+    await ui.click(ui.q('[data-action="clear-tags"]')!);
+    expect(ui.titles()).toEqual(['Réunion parents']);
+    expect(ui.q('[data-slot="tag-filter"]')).toBeNull();
+    // A card's tag joins the filter, without taking the others off.
+    await ui.view('[data-view="all"]');
+    await ui.click(ui.q('.note-card .chip[aria-label*="réunion"]')!);
+    expect(ui.titles()).toEqual(['Réunion parents']);
+    await ui.click(ui.q('.note-card .chip[aria-label*="réunion"]')!);
+    expect(ui.titles()).toEqual(['Réunion parents']);
   });
 
   it('explains empty views', async () => {

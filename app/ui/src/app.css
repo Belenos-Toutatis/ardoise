@@ -695,7 +695,8 @@ select {
   background: var(--surface-2);
 }
 
-.nav-item[aria-current='true'] {
+.nav-item[aria-current='true'],
+.nav-item[aria-pressed='true'] {
   background: var(--surface-2);
   box-shadow: inset 3px 0 0 var(--accent);
   font-weight: 600;
@@ -807,6 +808,22 @@ select {
   justify-content: space-between;
   gap: 1rem;
   margin: 0 0 1rem;
+}
+
+/* The tags the notes shown must all carry, next to the view's title; each leaves the filter by its cross. */
+.tag-filter {
+  align-self: center;
+}
+
+.tag-filter .chip {
+  font-weight: 600;
+}
+
+.tag-filter .clear-tags {
+  background: transparent;
+  color: var(--muted);
+  font-weight: 400;
+  text-decoration: underline;
 }
 
 /* The count of selected notes next to the view's title: the actions are in the menu of a card. */

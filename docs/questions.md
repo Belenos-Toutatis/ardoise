@@ -412,3 +412,16 @@ Décisions du développeur, à confirmer :
 - *Clic droit* : **Afficher**, **Tout sélectionner**, comme **Favoris**.
 
 **SPEC** : §4.3 ne parle pas de cette vue ; une phrase est à proposer à l'utilisateur.
+
+## Q25 — Un classeur et des étiquettes ensemble (2026-11-15) — **tranchée le 2026-11-15**
+
+Demande de l'utilisateur, mot pour mot : « Je clique sur un classeur et une étiquette, je ne devrais avoir que les notes du classeur avec cette étiquette. C'est un comportement supplémentaire que je souhaite. voir avec plusieurs étiquettes. »
+
+Choix de l'utilisateur (2026-11-15) :
+
+- *Plusieurs étiquettes* : **toutes** (une note doit porter chacune des étiquettes choisies ; chaque étiquette ajoutée resserre la liste), et non « au moins une ».
+- *Changer de classeur* : **les étiquettes restent** ; on retire une étiquette par un nouveau clic dans la barre latérale ou par sa croix à côté du titre, toutes d'un coup par **Retirer toutes les étiquettes**.
+
+Décisions du développeur, à confirmer : le clic sur l'étiquette d'une carte, et **Afficher** du clic droit d'une étiquette, l'ajoutent au filtre (ils ne la retirent jamais ; le clic droit offre **Retirer du filtre** quand elle y est) ; depuis la corbeille, une étiquette ramène à **Toutes les notes** ; le nombre affiché à côté de chaque étiquette de la barre latérale reste celui de toute la bibliothèque ; avec un filtre d'étiquettes, l'ordre d'un classeur ne se change pas par glisser-déposer (comme pendant une recherche) ; le filtre n'est pas gardé d'une ouverture d'Ardoise à l'autre.
+
+**SPEC** : §4.3 dit « recherche par titre et étiquettes » ; une phrase sur le filtre combiné est à proposer à l'utilisateur.

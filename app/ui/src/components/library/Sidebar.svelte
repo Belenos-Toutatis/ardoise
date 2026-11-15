@@ -124,7 +124,9 @@
 
   function tagItems(tag: string): MenuItem[] {
     return [
-      { id: 'show', label: t('contextMenu.show'), onselect: () => lib.setView({ kind: 'tag', tag }) },
+      lib.hasTagFilter(tag)
+        ? { id: 'hide', label: t('library.tagFilter.removeShort'), onselect: () => lib.toggleTagFilter(tag) }
+        : { id: 'show', label: t('contextMenu.show'), onselect: () => lib.showTag(tag) },
       { id: 'color', label: t('contextMenu.tagColor'), onselect: () => pickers[tag]?.show() },
     ];
   }
@@ -418,8 +420,9 @@
                 ondragleave={() => dragleave({ kind: 'tag', tag: entry.tag })}
                 ondrop={(event) => drop(event, { kind: 'tag', tag: entry.tag })}
                 data-tag-color={color}
-                aria-current={current({ kind: 'tag', tag: entry.tag })}
-                onclick={() => lib.setView({ kind: 'tag', tag: entry.tag })}
+                aria-pressed={lib.hasTagFilter(entry.tag)}
+                title={lib.hasTagFilter(entry.tag) ? t('library.tagFilter.remove', { tag: entry.tag }) : t('library.tagFilter.add', { tag: entry.tag })}
+                onclick={() => lib.toggleTagFilter(entry.tag)}
                 oncontextmenu={(event) => showMenu(event, t('contextMenu.tagLabel', { tag: entry.tag }), tagItems(entry.tag))}
               >
                 <span class="nav-label">

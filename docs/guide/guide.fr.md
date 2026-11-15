@@ -1114,7 +1114,7 @@ aussi son fichier.
 **Le clic droit** n'affiche jamais le menu d'une page web (« Enregistrer l'image sous… », « Outils supplémentaires »…) :
 Ardoise montre son propre menu, ou rien. Le menu s'ouvre **sous le pointeur** (la touche `Menu`, ou `Maj + F10`, sur une carte ou
 un classeur l'ouvre sous son bouton **⋯**). Il existe sur : une carte et un classeur (ci-dessus) ; **Toutes les notes** et
-**Favoris** et **Non classées** (**Afficher**, **Tout sélectionner**) ; une étiquette (**Afficher**, **Couleur…**, qui ouvre la palette de la
+**Favoris** et **Non classées** (**Afficher**, **Tout sélectionner**) ; une étiquette (**Afficher**, ou **Retirer du filtre** quand elle y est déjà, **Couleur…**, qui ouvre la palette de la
 couleur) ; la **Corbeille** (**Ouvrir la corbeille**, **Vider la corbeille…**, avec la même question de confirmation que le
 bouton) ; une note de la corbeille (**Restaurer**, **Supprimer définitivement…**, qui demande confirmation) ; un calque et la
 page de l'éditeur (chapitre 8). Les flèches, `Début`, `Fin` et `Entrée` conduisent le menu ; `Échap`, un clic ailleurs, le
@@ -1247,7 +1247,12 @@ affiché quand on revient de la note ; rouvrez-le avec le même bouton.
 Sélectionnez une ou plusieurs notes, faites un clic droit sur l'une d'elles (ou cliquez sur son bouton **⋯**) et choisissez
 **Étiquettes…** : dans la fenêtre, tapez une étiquette (plusieurs, séparées par une virgule) et cliquez sur **Ajouter** ; une
 étiquette existante se retire avec sa croix. Un clic sur une étiquette de la
-barre latérale, ou sur celle d'une carte, n'affiche que les notes qui la portent. L'étoile d'une carte (ou
+barre latérale, ou sur celle d'une carte, n'affiche que les notes qui la portent, **dans le classeur affiché** (ou dans
+**Toutes les notes**, **Favoris**, **Non classées**). Les étiquettes s'ajoutent : avec « physique » puis « 3e B », seules
+les notes qui portent les deux restent. Exemple : **Classe**, puis **physique** et **3e B**, montre les notes de Classe
+de physique en 3e B. Les étiquettes choisies sont surlignées dans la barre latérale et s'affichent à côté du titre de la
+vue ; elles restent quand vous changez de classeur. Un nouveau clic sur une étiquette de la barre latérale, ou sa croix
+à côté du titre, la retire ; **Retirer toutes les étiquettes** les retire toutes. L'étoile d'une carte (ou
 **Ajouter aux favoris**, dans le menu de la carte) ajoute aux **Favoris**. Vous pouvez aussi faire glisser une carte (ou toute la sélection) sur
 **Favoris** ou sur une étiquette de la barre latérale : les notes deviennent des favoris, ou reçoivent cette étiquette,
 sans changer de classeur. Déposées sur **Non classées** (ou sur **Toutes les notes**), elles sortent de leur classeur et
