@@ -35,6 +35,10 @@
 //! velocity; a delta is added to the velocity, an absolute value replaces the value and
 //! zeroes the velocity, an absent axis keeps both; each sample is then `value + velocity`. The
 //! values persist across strokes; only the velocity is reset, at every stroke header.
+//!
+//! A real Slate sometimes ends a stroke on a pressure slightly below zero (-1 and -3 seen on a
+//! page of 2026-11-24, always on the last sample, as the pen lifts). Such a sample has a
+//! pressure of 0; the value kept for the next sample is the one the tablet coded.
 
 /// Magic bytes of a Spark or Slate file (`b8bt`); the file header is these 4 bytes.
 pub const SLATE_MAGIC: [u8; 4] = [0x62, 0x38, 0x62, 0x74];
@@ -53,6 +57,11 @@ const FLAG_PEN_ID: u8 = 0x80;
 const FLAG_NEW_LAYER: u8 = 0x40;
 const PEN_TYPE_MASK: u8 = 0x3f;
 const AXIS_NAMES: [&str; 3] = ["x", "y", "pressure"];
+/// Index of the pressure in [`AXIS_NAMES`] and the decoder's state.
+const PRESSURE: usize = 2;
+/// How far below zero a coded pressure may go and still mean "no pressure" (the Slate's full
+/// range): beyond, the stream is not what it seems and decoding fails.
+const PRESSURE_UNDERSHOOT: i64 = 2047;
 
 /// One pen sample in raw device units: `x`, `y` in 10 µm on the Slate, `pressure` from 0 to
 /// 2047 on the Slate.
@@ -612,7 +621,9 @@ impl Builder {
                 }
             }
             let next = self.value[index] + self.velocity[index];
-            point[index] = u16::try_from(next).map_err(|_| StrokeError::OutOfRange {
+            let lifted = index == PRESSURE && (-PRESSURE_UNDERSHOOT..0).contains(&next);
+            let sampled = if lifted { 0 } else { next };
+            point[index] = u16::try_from(sampled).map_err(|_| StrokeError::OutOfRange {
                 offset,
                 axis: AXIS_NAMES[index],
                 value: next,
@@ -1063,6 +1074,43 @@ mod tests {
                 value: 65_536
             })
         );
+    }
+
+    #[test]
+    fn a_pressure_just_below_zero_is_no_pressure() {
+        // A pressure that falls below zero as the pen lifts, as real strokes do.
+        let file = decode(&bytes(
+            "62 38 62 74 ff ff ff 0a 00 0a 00 e5 00 80 80 80 e7 80 4c fc ff ff ff ff ff ff              ff ff ee ee ee 01 00 00 00 80 02 fc ff ff ff ff ff ff",
+        ))
+        .unwrap();
+        // 229, then velocity -128 -> 101, then velocity -153 -> -52, then -77 -> -129.
+        let pressures: Vec<u16> = file.strokes[0].points.iter().map(|p| p.pressure).collect();
+        assert_eq!(pressures, [229, 101, 0, 0]);
+        // -129 + 2 (the velocity restarts at 0): still below zero, so the raw value was kept.
+        assert_eq!(file.strokes[1].points, [point(10, 10, 0)]);
+        // The next stroke's absolute pressure is read as usual.
+        let file = decode(&bytes(
+            "62 38 62 74 ff ff ff 0a 00 0a 00 01 00 80 fe c0 2c 01",
+        ))
+        .unwrap();
+        let pressures: Vec<u16> = file.strokes[0].points.iter().map(|p| p.pressure).collect();
+        assert_eq!(pressures, [1, 0, 300]);
+        // The limit: -2047 is "no pressure", -2048 is an error; x and y have no such margin.
+        let below = |steps: usize| {
+            let mut data = bytes("62 38 62 74 ff ff ff 0a 00 0a 00 00 00 80 89 ");
+            data.extend(std::iter::repeat_n(0x00, steps));
+            decode(&data)
+        };
+        // Velocity -119, then absent axes: -119 per sample; 17 samples reach -2023.
+        assert!(below(16).is_ok());
+        assert!(matches!(
+            below(17),
+            Err(StrokeError::OutOfRange {
+                axis: "pressure",
+                value: -2142,
+                ..
+            })
+        ));
     }
 
     #[test]

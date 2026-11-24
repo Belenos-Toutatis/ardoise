@@ -2,6 +2,10 @@
 
 ## Non publié
 
+### Corrigé (signalé par l'utilisateur le 2026-11-24 : page impossible à récupérer)
+
+- **Une page de la Bamboo Slate était refusée à la synchronisation** (*pressure leaves the 0..=65535 range (-1)*) et restait sur la tablette, bloquant les suivantes. La tablette code parfois le dernier point d'un trait avec une pression juste sous zéro (−1 ou −3 au lever du stylet) ; Ardoise la lit maintenant comme une pression nulle. La page n'a jamais été effacée de la tablette.
+
 ### Ajouté (demande de l'utilisateur du 2026-11-15 : déposer dans un sous-classeur)
 
 - **Un classeur fermé se déplie sous une note qu'on y tient.** Des notes glissées et gardées un instant (0,7 s) au-dessus d'un classeur fermé qui a des sous-classeurs le déplient, pour les déposer dans l'un d'eux (« Classe » montre « 3e B »). Passer par-dessus sans s'arrêter ne déplie rien ; un glisser qui finit avant ne déplie rien non plus. Le classeur reste déplié après le dépôt. Q26.

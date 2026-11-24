@@ -557,7 +557,8 @@ For each POINT or DELTA packet, per axis independently:
 2. `last_delta = d`; `current = value`; `new_point = current + d`; `last_point = new_point`; emit it.
 
 Consequences: a delta is added to a running velocity, and an absent axis keeps moving with the previous velocity; an absolute value cancels the velocity.
-Pressure is treated the same way as x and y. Each emitted `(x, y, p)` is one pen sample, **one packet = one sample**; the samples are at a fixed rate with no per-point timestamp.
+Pressure is treated the same way as x and y. On a real Slate (firmware B160929A/C170704A, 2026-11-24) the last sample of a stroke sometimes comes out just below zero
+(-1 and -3 on 4 of 76 strokes, pen lifting; the file's CRC was right and the two downloads identical): it means no pressure, so the decoder gives 0 and goes on. Each emitted `(x, y, p)` is one pen sample, **one packet = one sample**; the samples are at a fixed rate with no per-point timestamp.
 Sampling interval is 5 ms (a Tuhi user measured it, issue #231; consistent with the live-mode `+= 5` ms).
 
 Per-point time (inferred, from #231): `t_point = stroke_timestamp + index * 5 ms` (Intuos Pro, absolute stroke time) or `power_up_offset + index * 5 ms` (Slate, relative stroke time).
