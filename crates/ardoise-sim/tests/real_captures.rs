@@ -248,6 +248,37 @@ fn every_capture_decodes_with_the_current_protocol() {
     say!("every frame is classified");
 }
 
+/// Every page that a real tablet sent whole becomes strokes: a page refused here would stay on the
+/// tablet and block the next ones (a page of 2026-11-24 ends strokes on a pressure below zero).
+#[test]
+fn every_page_downloaded_in_the_captures_decodes() {
+    let _report = common::report("every_page_downloaded_in_the_captures_decodes");
+    let Some(dir) = captures_or_skip("every_page_downloaded_in_the_captures_decodes") else {
+        return;
+    };
+    let mut decoded = 0;
+    for path in journals(&dir) {
+        let name = stem(&path);
+        let (_, entries) = log::read_log(&path).unwrap();
+        for (index, page) in downloads(&entries).iter().enumerate() {
+            if crc::crc32(&page.bytes) != page.announced_crc {
+                continue;
+            }
+            let file = stroke::decode(&page.bytes)
+                .unwrap_or_else(|e| panic!("{name} page {} does not decode: {e}", index + 1));
+            assert_eq!(file.unknown_packets, 0, "{name} page {}", index + 1);
+            say!(
+                "{name} page {}: {} strokes, {} points",
+                index + 1,
+                file.strokes.len(),
+                file.point_count()
+            );
+            decoded += 1;
+        }
+    }
+    say!("{decoded} pages decoded");
+}
+
 #[test]
 fn the_old_session_that_downloaded_pages_decodes_its_strokes() {
     let _report = common::report("the_old_session_that_downloaded_pages_decodes_its_strokes");
