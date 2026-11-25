@@ -4,10 +4,11 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use ardoise_core::library::{Library, LibraryChange, LibraryError, LibraryWatcher};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Event sent to the main window; its payload is the list of changes.
 pub const LIBRARY_CHANGED: &str = "library-changed";
@@ -15,31 +16,78 @@ pub const LIBRARY_CHANGED: &str = "library-changed";
 /// Quiet period before a batch of changes is reported.
 pub const DEBOUNCE: Duration = Duration::from_millis(300);
 
+/// How often a library that could not be opened (a network drive or a disk mounted after the
+/// start) is tried again.
+const RETRY_EVERY: Duration = Duration::from_secs(5);
+
 struct Running {
     root: PathBuf,
     _watcher: LibraryWatcher,
+}
+
+/// Outcome of one try of [`LibraryWatch::retry_once`].
+#[derive(Debug, PartialEq, Eq)]
+enum Retry {
+    /// The library still cannot be watched.
+    Again,
+    /// Watching started.
+    Started,
+    /// Another library was chosen meanwhile.
+    Superseded,
 }
 
 /// The running watcher, if any (managed state).
 #[derive(Default)]
 pub struct LibraryWatch {
     current: Mutex<Option<Running>>,
+    /// Counts the calls of [`follow`](Self::follow): a retry that is no longer the latest
+    /// choice gives up.
+    choice: AtomicU64,
 }
 
 impl LibraryWatch {
     /// Watches `library` (none: stops watching), sending changes to the main window. A failure
-    /// is logged and leaves the app without live refresh, never stops it.
+    /// is logged and leaves the app without live refresh, never stops it; the library is tried
+    /// again every few seconds, so that the refresh starts when its folder comes back.
     pub fn follow(&self, app: &AppHandle, library: Option<&str>) {
-        let app = app.clone();
+        let choice = self.choice.fetch_add(1, Ordering::SeqCst) + 1;
         // The handwriting index follows the library, and every change in it.
-        crate::handwriting::refresh(&app);
-        let result = self.follow_with(library.map(Path::new), move |changes| {
-            let _ = app.emit_to("main", LIBRARY_CHANGED, changes);
-            crate::handwriting::refresh(&app);
-        });
+        crate::handwriting::refresh(app);
+        let result = self.follow_with(library.map(Path::new), changes_to_window(app));
         if let Err(error) = result {
             eprintln!("Ardoise: {error}");
+            if let Some(root) = library {
+                retry_later(app.clone(), PathBuf::from(root), choice);
+            }
         }
+    }
+
+    /// One try of the retry that [`follow`](Self::follow) schedules: starts watching `root`
+    /// unless another library was chosen since (`choice` is no longer the latest).
+    fn retry_once(
+        &self,
+        root: &Path,
+        choice: u64,
+        on_change: impl FnMut(Vec<LibraryChange>) + Send + 'static,
+    ) -> Retry {
+        let mut current = self
+            .current
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // Checked under the lock: a newer `follow` that waits for it replaces what is set here.
+        if self.choice.load(Ordering::SeqCst) != choice {
+            return Retry::Superseded;
+        }
+        let Ok(watcher) =
+            Library::open(root).and_then(|library| library.watch(DEBOUNCE, on_change))
+        else {
+            return Retry::Again;
+        };
+        *current = Some(Running {
+            root: root.to_path_buf(),
+            _watcher: watcher,
+        });
+        Retry::Started
     }
 
     /// [`follow`](Self::follow) with any receiver of the changes. Nothing happens when the
@@ -93,6 +141,39 @@ impl LibraryWatch {
     }
 }
 
+/// What the watcher does with a batch of changes: tells the main window and the handwriting
+/// index.
+fn changes_to_window(app: &AppHandle) -> impl FnMut(Vec<LibraryChange>) + Send + 'static + use<> {
+    let app = app.clone();
+    move |changes| {
+        let _ = app.emit_to("main", LIBRARY_CHANGED, changes);
+        crate::handwriting::refresh(&app);
+    }
+}
+
+/// Tries to watch `root` every [`RETRY_EVERY`] until it works or another library is chosen.
+/// When it starts, the window is told to list the library again: it may have changed (or been
+/// unreadable) while nothing was watching.
+fn retry_later(app: AppHandle, root: PathBuf, choice: u64) {
+    let _ = std::thread::Builder::new()
+        .name("ardoise-library-watch-retry".into())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(RETRY_EVERY);
+                let watch = app.state::<LibraryWatch>();
+                match watch.retry_once(&root, choice, changes_to_window(&app)) {
+                    Retry::Again => {}
+                    Retry::Superseded => return,
+                    Retry::Started => {
+                        let _ = app.emit_to("main", LIBRARY_CHANGED, Vec::<LibraryChange>::new());
+                        crate::handwriting::refresh(&app);
+                        return;
+                    }
+                }
+            }
+        });
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
@@ -134,5 +215,39 @@ mod tests {
         assert_eq!(watch.watched(), None);
         watch.follow_with(None, |_| {}).unwrap();
         assert_eq!(watch.watched(), None);
+    }
+
+    #[test]
+    fn a_library_that_comes_back_is_watched_by_the_retry() {
+        // A drive mounted after the start: the folder is not a library yet.
+        let drive = tempfile::tempdir().unwrap();
+        let watch = LibraryWatch::default();
+        let first = watch.choice.fetch_add(1, Ordering::SeqCst) + 1;
+        assert!(
+            watch
+                .follow_with(Some(drive.path()), |_| {})
+                .is_err_and(|error| error.code() == "notALibrary")
+        );
+        assert_eq!(watch.retry_once(drive.path(), first, |_| {}), Retry::Again);
+        assert_eq!(watch.watched(), None);
+
+        // The library appears: the next try starts the watch.
+        std::fs::create_dir(drive.path().join("_ardoise")).unwrap();
+        assert_eq!(
+            watch.retry_once(drive.path(), first, |_| {}),
+            Retry::Started
+        );
+        assert_eq!(watch.watched().as_deref(), Some(drive.path()));
+
+        // A retry of an older choice does not replace the newer one.
+        let (other, _) = crate::library::tests::library();
+        let second = watch.choice.fetch_add(1, Ordering::SeqCst) + 1;
+        watch.follow_with(Some(other.path()), |_| {}).unwrap();
+        assert_eq!(
+            watch.retry_once(drive.path(), first, |_| {}),
+            Retry::Superseded
+        );
+        assert_eq!(watch.watched().as_deref(), Some(other.path()));
+        assert_ne!(first, second);
     }
 }

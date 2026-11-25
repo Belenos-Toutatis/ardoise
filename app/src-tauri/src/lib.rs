@@ -238,8 +238,11 @@ pub fn run() {
     drag::start_cleaning();
 
     // A library made before `.ardoise/` became `_ardoise/` is moved over once (best effort:
-    // opening the library retries later).
-    if let Some(library) = commands::current_state(&context).library() {
+    // opening the library retries later). Not in `--self-test`, which changes no data.
+    if let Some(library) = commands::current_state(&context)
+        .library()
+        .filter(|_| !cli.self_test)
+    {
         let library = std::path::Path::new(library);
         let _ = ardoise_core::library::migrate_legacy_meta_dir(library);
         // Upkeep, off the start (a synced folder can be slow): SPEC §3.2, the trash keeps notes
@@ -479,19 +482,23 @@ pub fn run() {
             webview_keys::disable_browser_keys(&main);
             // The end of the Windows session with unsaved notes (M10, `session_end.rs`).
             session_end::install(app.handle());
-            // Handwriting recognition of the library, in the background.
-            app.state::<handwriting::HandwritingRuntime>()
-                .start(app.handle());
-            // Live refresh of the library; a failure is logged, the app works without it.
-            let library = commands::current_state(&app.state::<AppContext>())
-                .library()
-                .map(str::to_owned);
-            app.state::<watcher::LibraryWatch>()
-                .follow(app.handle(), library.as_deref());
-            // The tablet: auto-connect, sync, live mode (a failure shows in its status).
-            tablet::start_service(app.handle(), cli.simulated_tablet, cli.simulated_blackboard);
-            // The assistant's bridge (MCP), for the windowed app only; logged when unavailable.
+            // `--self-test` changes no data and must not compete with a running app: it starts
+            // neither the recognition indexer, the library watch (opening a library may migrate
+            // its folder), the tablet service (it would connect, import pages, clear them from
+            // the tablet and set its clock), nor the assistant's bridge.
             if !cli.self_test {
+                // Handwriting recognition of the library, in the background.
+                app.state::<handwriting::HandwritingRuntime>()
+                    .start(app.handle());
+                // Live refresh of the library; a failure is logged, the app works without it.
+                let library = commands::current_state(&app.state::<AppContext>())
+                    .library()
+                    .map(str::to_owned);
+                app.state::<watcher::LibraryWatch>()
+                    .follow(app.handle(), library.as_deref());
+                // The tablet: auto-connect, sync, live mode (a failure shows in its status).
+                tablet::start_service(app.handle(), cli.simulated_tablet, cli.simulated_blackboard);
+                // The assistant's bridge (MCP), for the windowed app only; logged when unavailable.
                 app_bridge::start(app.handle());
             }
             Ok(())
