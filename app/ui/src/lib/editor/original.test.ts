@@ -162,6 +162,34 @@ describe('back to the original', () => {
     expect(revertToOriginal(unchanged, original).note.backgroundImage).toEqual(unchanged.note.backgroundImage);
   });
 
+  it('a page read in part stays one until its original is the whole page', () => {
+    const part = docFromNote(note([hline(0, 1000, 100)]));
+    const tablet = (partial?: true): NoteOriginal => ({
+      source: 'tablet',
+      page: part.note.page,
+      layers: part.note.layers,
+      strokes: [hline(0, 1000, 100), hline(0, 1000, 200)],
+      objects: [],
+      ...(partial ? { partial } : {}),
+    });
+    const marked: Doc = { ...part, partialPage: true };
+    expect(revertToOriginal(marked, tablet(true)).partialPage).toBe(true);
+    const whole = revertToOriginal(marked, tablet());
+    expect(whole.partialPage).toBeUndefined();
+    expect('partialPage' in whole).toBe(false);
+    expect(whole.note.strokes).toHaveLength(2);
+    // The doc before it keeps its mark, for undo; the note itself never has one.
+    expect(marked.partialPage).toBe(true);
+    expect('partialPage' in whole.note).toBe(false);
+    // A first version says nothing of a tablet page; an unmarked doc never takes the mark.
+    expect(revertToOriginal(marked, firstVersion(part.note)).partialPage).toBe(true);
+    expect('partialPage' in revertToOriginal(part, tablet(true))).toBe(false);
+    // Every edit keeps it.
+    expect(rotate(marked, 'cw').partialPage).toBe(true);
+    expect(select(marked, [0]).partialPage).toBe(true);
+    expect(crop(marked, { x: 0, y: 0, width: 5000, height: 5000 }).partialPage).toBe(true);
+  });
+
   it('an image removed since stays removed, and none appears', () => {
     const saved = withImage(PAGE2);
     const original = firstVersion(saved.note);

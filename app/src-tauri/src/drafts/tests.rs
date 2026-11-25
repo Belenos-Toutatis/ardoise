@@ -30,6 +30,7 @@ fn record(library: &str, id: &str, saved_at: i64, session: &str) -> DraftRecord 
         base_stamp: Some(stamp(1_800_000_000, 1234)),
         session: session.to_owned(),
         image: None,
+        partial_page: None,
         note,
     }
 }
@@ -74,6 +75,42 @@ fn files(store: &DraftStore) -> Vec<String> {
         .unwrap_or_default();
     names.sort();
     names
+}
+
+/// What a draft says of the tablet page of its note (Q27): kept both ways, and nothing for a note
+/// never read in part; a draft written before says nothing.
+#[test]
+fn a_draft_keeps_whether_the_note_held_only_part_of_its_tablet_page() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = DraftStore::new(dir.path());
+    for said in [Some(true), Some(false), None] {
+        let mut draft = record(LIBRARY, "n1", 10, "s1");
+        draft.partial_page = said;
+        store.write(&draft, None).unwrap();
+        let read = store.read(LIBRARY, "n1").unwrap();
+        assert_eq!(read.partial_page, said);
+        let shown = serde_json::to_value(Draft::from(read)).unwrap();
+        assert_eq!(
+            shown
+                .get("partialPage")
+                .and_then(serde_json::Value::as_bool),
+            said
+        );
+        assert_eq!(shown.get("partialPage").is_some(), said.is_some());
+    }
+    // As written before the field: the last one has none.
+    let text = fs::read_to_string(store.json_path(&draft_stem(LIBRARY, "n1"))).unwrap();
+    assert!(!text.contains("partialPage"));
+    assert!(store.read(LIBRARY, "n1").is_some());
+
+    // A copy made of a draft has no tablet page, so no mark either.
+    let (_dir, library) = library();
+    let mut draft = record(LIBRARY, "n1", 10, "s1");
+    draft.partial_page = Some(true);
+    let copy = restore_copy_in(&library, &draft, None, "Copie").unwrap();
+    let file = library.read(Path::new(&copy.path)).unwrap().file;
+    assert_eq!(file.original, None);
+    assert!(file.unknown_fields.is_empty());
 }
 
 #[test]

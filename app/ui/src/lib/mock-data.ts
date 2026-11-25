@@ -17,6 +17,8 @@ export interface StoredNote {
   binder: string;
   /** The ink before the first edit ("Revenir à l'original"), kept by the first save that changes it. */
   original?: NoteOriginal;
+  /** The note was made from only part of its tablet page (Q27). */
+  partialPage?: boolean;
   /** Set on a revision, a retouched copy of another note (`revision.json`). */
   revision?: { of: string; ofTitle: string; created: number; summary: RevisionEntry[] };
 }

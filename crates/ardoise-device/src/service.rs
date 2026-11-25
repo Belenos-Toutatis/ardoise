@@ -186,7 +186,8 @@ pub struct LastSync {
     /// Pages deleted from the tablet after being saved.
     pub deleted: u16,
     /// Why the sync stopped before the end (refused by the tablet, page not saved, transfer
-    /// corrupted...); `None` when it read every page it meant to. Unlike
+    /// corrupted...), or what must be said of one that did not stop (`pagePartial`: a page read in
+    /// part only, `pageRescued`...); `None` when it read every page it meant to. Unlike
     /// [`TabletStatus::error`], it stays until the next sync, even across reconnections.
     pub error: Option<StatusError>,
 }
@@ -464,13 +465,30 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The failure of a sync as the interface shows it: like [`error_code`], except that a refusal
 /// of the tablet is `syncRefused` (the pages stay on the tablet; nothing says the registration
-/// is lost, which `tabletRefused` suggests).
+/// is lost, which `tabletRefused` suggests). The message of `pagePartial` is the names of the
+/// notes, which its sentence gives; the cause is in the log.
 pub fn sync_error(error: &DeviceError) -> StatusError {
     let code = match error {
         DeviceError::Refused(_) => "syncRefused",
         other => error_code(other),
     };
-    StatusError::new(code, error)
+    match error {
+        DeviceError::PagePartial { notes, .. } => StatusError::new(code, listed(notes)),
+        other => StatusError::new(code, other),
+    }
+}
+
+/// Notes named one by one in a sentence shown to the user; the others are only counted.
+const NOTES_LISTED: usize = 5;
+
+/// `names` in one line: the first [`NOTES_LISTED`], then how many more.
+fn listed(names: &[String]) -> String {
+    let shown = names.iter().take(NOTES_LISTED);
+    let text = shown.cloned().collect::<Vec<_>>().join(", ");
+    match names.len().saturating_sub(NOTES_LISTED) {
+        0 => text,
+        more => format!("{text}… (+{more})"),
+    }
 }
 
 /// The `errorCodes.*` key of a device error (the interface translates it).
@@ -495,6 +513,8 @@ pub fn error_code(error: &DeviceError) -> &'static str {
         DeviceError::BlackboardConfirmDelete => "blackboardConfirmDelete",
         DeviceError::LiveOnOtherTablet { .. } => "sheetOtherTablet",
         DeviceError::BlackboardPagesFirst { .. } => "blackboardPagesFirst",
+        DeviceError::PageCutShort { .. } => "pageCutShort",
+        DeviceError::PagePartial { .. } => "pagePartial",
         DeviceError::PageRescued { .. } => "pageRescued",
         DeviceError::PageDoubtful { .. } => "pageDoubtful",
         DeviceError::PageNotSaved { .. } => "pageNotSaved",

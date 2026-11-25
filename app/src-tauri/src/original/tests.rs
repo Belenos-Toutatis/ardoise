@@ -7,6 +7,7 @@ use crate::thumbnails::thumbnail_png;
 use ardoise_core::library::FileStamp;
 use ardoise_core::note::{Origin, Paper};
 use ardoise_core::settings::SettingsStore;
+use ardoise_device::pages::PARTIAL_PAGE_FIELD;
 use ardoise_device::service::PageContext;
 use ardoise_ink::{Point, Rgba};
 use ardoise_sim::SimTablet;
@@ -592,8 +593,10 @@ fn the_answer_has_the_shape_of_the_interface() {
         layers: vec![],
         strokes: vec![],
         objects: vec![],
+        partial: false,
     })
     .unwrap();
+    assert!(tablet.get("partial").is_none());
     assert_eq!(tablet["source"], "tablet");
     assert!(tablet.get("backgroundImage").is_none());
     assert!(tablet.get("paper").is_none());
@@ -691,6 +694,219 @@ fn the_first_version_gives_the_placement_of_its_background_image() {
             ..
         }
     ));
+}
+
+/// [`sim_page`] followed by a packet that does not decode (a DELTA with the reserved axis mask 01).
+fn broken_page() -> DownloadedPage {
+    let mut page = sim_page();
+    page.bytes.extend_from_slice(&[0x04, 0x01]);
+    page
+}
+
+/// The note the synchronisation makes of `page`.
+fn synced(root: &Path, page: DownloadedPage) -> PathBuf {
+    let context = PageContext {
+        size: SLATE,
+        orientation: Orientation::Landscape,
+        board_position: Default::default(),
+    };
+    store_page_in(None, Some("fr-FR"), root, page, &context).unwrap()
+}
+
+/// What the editor's save does with the note as it is, `partial` being what it says of the page.
+fn save_saying(library: &Library, path: &Path, partial: Option<bool>) {
+    use crate::narration::NarrationRuntime;
+    use crate::notes::{SaveNoteWith, save_note_in};
+    let opened = open_in(library, path).unwrap();
+    save_note_in(
+        library,
+        &NarrationRuntime::default(),
+        path,
+        opened.note,
+        &opened.stamp,
+        &SaveNoteWith {
+            partial_page: partial,
+            ..SaveNoteWith::default()
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_page_read_in_part_goes_back_to_what_could_be_read_and_keeps_its_mark() {
+    let (dir, library) = library();
+    let tablet = TabletContext::of(dir.path(), &Settings::default(), Some("fr-FR"));
+    let page = broken_page();
+    let path = synced(dir.path(), page.clone());
+    let made = library.read(&path).unwrap().file;
+    assert!(made.thumbnail.is_some());
+    assert!(!made.note.strokes.is_empty());
+    let opened = open_in(&library, &path).unwrap();
+    assert!(opened.partial_page);
+    assert_eq!(
+        serde_json::to_value(&opened).unwrap()["partialPage"],
+        serde_json::json!(true)
+    );
+
+    // Edited and saved, as any note: the edits stay, the mark and the bytes too.
+    edit(&library, &path, &opened.stamp);
+    let edited = library.read(&path).unwrap().file;
+    assert_eq!(edited.note.strokes.len(), 2);
+    assert_eq!(edited.note.title, "Cours");
+    assert!(is_partial_page(&edited));
+    assert_eq!(edited.original.as_deref(), Some(page.bytes.as_slice()));
+    assert_eq!(edited.original_note, None);
+
+    // The original: the strokes read before the problem, said to be a part.
+    let original = original_in(&library, &path, &tablet).unwrap();
+    assert!(matches!(
+        original,
+        NoteOriginal::Tablet { partial: true, .. }
+    ));
+    assert_eq!(
+        serde_json::to_value(&original).unwrap()["partial"],
+        serde_json::json!(true)
+    );
+    let stamp = library.read(&path).unwrap().stamp;
+    go_back(&library, &path, &stamp, original);
+    let back = library.read(&path).unwrap().file;
+    assert_eq!(back.note.strokes, made.note.strokes);
+    // Still incomplete: the mark stays, whatever the save says.
+    for said in [None, Some(true), Some(false)] {
+        save_saying(&library, &path, said);
+        assert!(open_in(&library, &path).unwrap().partial_page, "{said:?}");
+    }
+}
+
+/// Once a version reads the page whole (here the mark put by hand on a page this one reads): the
+/// original is the whole page, the mark goes when the editor saves it, and comes back when that is
+/// undone and saved.
+#[test]
+fn the_mark_goes_once_the_whole_page_is_saved() {
+    let (dir, library) = library();
+    let tablet = TabletContext::of(dir.path(), &Settings::default(), Some("fr-FR"));
+    let path = synced(dir.path(), sim_page());
+    let loaded = library.read(&path).unwrap();
+    let whole = loaded.file.note.strokes.clone();
+    let mut file = loaded.file;
+    file.note.strokes.truncate(1);
+    file.unknown_fields
+        .insert(PARTIAL_PAGE_FIELD.into(), true.into());
+    let stamp = library.save(&path, &file, &loaded.stamp).unwrap();
+    assert!(open_in(&library, &path).unwrap().partial_page);
+
+    let original = original_in(&library, &path, &tablet).unwrap();
+    assert!(matches!(
+        original,
+        NoteOriginal::Tablet { partial: false, .. }
+    ));
+    assert_eq!(
+        serde_json::to_value(&original).unwrap().get("partial"),
+        None
+    );
+    // Looking is not going back: a save that says nothing keeps the mark.
+    go_back(&library, &path, &stamp, original);
+    assert!(open_in(&library, &path).unwrap().partial_page);
+    assert_eq!(library.read(&path).unwrap().file.note.strokes, whole);
+    save_saying(&library, &path, Some(false));
+    let saved = library.read(&path).unwrap().file;
+    assert!(!open_in(&library, &path).unwrap().partial_page);
+    assert!(!saved.unknown_fields.contains_key(PARTIAL_PAGE_FIELD));
+    // The original is read strictly from here, and is the same.
+    let (_, _, strokes) = ink(original_in(&library, &path, &tablet).unwrap());
+    assert_eq!(strokes, whole);
+    // Undone and saved.
+    save_saying(&library, &path, Some(true));
+    assert!(open_in(&library, &path).unwrap().partial_page);
+}
+
+/// Only the mark makes the reading tolerant, and makes bytes that look like another tablet's a page
+/// of the Slate.
+#[test]
+fn an_original_without_the_mark_is_read_strictly() {
+    let (dir, library) = library();
+    let tablet = TabletContext::of(dir.path(), &Settings::default(), Some("fr-FR"));
+    let path = synced(dir.path(), broken_page());
+    let loaded = library.read(&path).unwrap();
+    let mut file = loaded.file;
+    file.unknown_fields.remove(PARTIAL_PAGE_FIELD);
+    library.save(&path, &file, &loaded.stamp).unwrap();
+    assert!(!open_in(&library, &path).unwrap().partial_page);
+    let error = original_in(&library, &path, &tablet).unwrap_err();
+    assert_eq!(error.code(), "originalDamaged");
+    let shown = serde_json::to_value(&error).unwrap();
+    let message = shown["message"].as_str().unwrap();
+    assert!(message.contains("reserved axis mask"), "{message}");
+
+    // Whole 7-byte records of the blackboard, as far as the bytes can tell.
+    let mut page = sim_page();
+    page.bytes = vec![0xa1; 21];
+    let path = synced(dir.path(), page);
+    let (size, _, strokes) = ink(original_in(&library, &path, &tablet).unwrap());
+    assert_eq!((size, strokes), (SLATE, Vec::new()));
+}
+
+/// The mark describes the tablet's bytes: it goes where they go, and nowhere else.
+#[test]
+fn the_mark_of_a_page_read_in_part_goes_with_the_tablet_s_bytes() {
+    use crate::operations::{MergeLayout, SplitSpec, merge_in, split_in};
+    let (dir, library) = library();
+    let path = synced(dir.path(), broken_page());
+    let marked = |path: &Path| {
+        let file = library.read(path).unwrap().file;
+        (
+            file.original.is_some(),
+            file.unknown_fields.contains_key(PARTIAL_PAGE_FIELD),
+        )
+    };
+
+    // A split: the kept part is the note, the new note has neither.
+    let opened = open_in(&library, &path).unwrap();
+    let mut note = opened.note;
+    let last = note.strokes.len() - 1;
+    for p in &mut note.strokes[last].points {
+        p.t += 100_000;
+    }
+    let split = split_in(
+        &library,
+        &path,
+        note,
+        &opened.stamp,
+        &SplitSpec::Time { at: 90_000 },
+        "Suite",
+        None,
+    )
+    .unwrap();
+    assert_eq!(marked(&path), (true, true));
+    assert_eq!(marked(Path::new(&split.created.path)), (false, false));
+
+    // A merge: a new note, without the bytes of any.
+    let merged = merge_in(
+        &library,
+        &[path.display().to_string(), split.created.path.clone()],
+        MergeLayout::Overlay,
+        "Ensemble",
+    )
+    .unwrap();
+    assert_eq!(marked(Path::new(&merged.path)), (false, false));
+    assert_eq!(marked(&path), (true, true));
+
+    // A duplicate has both.
+    let (copy, _) = library.duplicate(&path, "copie-1", "copie").unwrap();
+    assert_eq!(marked(&copy.path), (true, true));
+
+    // The editor's copy ("save as a copy") is a blank note it fills: a save cannot mark it, nor a
+    // note of the blackboard.
+    let blank = library
+        .create(Path::new(""), &NoteFile::new(sample_note("Copie de page")))
+        .unwrap();
+    save_saying(&library, &blank.path, Some(true));
+    assert_eq!(marked(&blank.path), (false, false));
+    let mut board = NoteFile::new(sample_note("Xiaomi"));
+    board.original = Some(vec![0xa1; 21]);
+    let board = library.create(Path::new(""), &board).unwrap();
+    save_saying(&library, &board.path, Some(true));
+    assert_eq!(marked(&board.path), (true, false));
 }
 
 #[test]

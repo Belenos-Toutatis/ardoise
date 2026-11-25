@@ -260,6 +260,207 @@ fn a_corrupted_transfer_is_retried_once_then_reported_and_nothing_is_deleted() {
     );
 }
 
+/// A transfer the tablet cut short, with the right CRC of what it sent, as a real tablet's CRC is
+/// its own (the CRC of nothing is 0): asked once more, then refused, never a page to delete.
+#[test]
+fn a_page_cut_short_by_the_tablet_is_asked_again_then_refused_and_nothing_is_deleted() {
+    let whole = slate_page();
+    let info = || page_info(whole.len());
+    let sent = |bytes: &[u8]| {
+        let mut download = vec![cmd("c8 01 be")];
+        download.extend(page(bytes));
+        download.push(end_marker(bytes));
+        download
+    };
+    let start = || {
+        vec![
+            ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 00")]),
+            ("b1 01 01", vec![cmd("b3 01 00")]),
+            ("c1 01 00", vec![cmd("c2 02 01 00")]),
+        ]
+    };
+    for cut in [0, 2, whole.len() - 1] {
+        let cut_short = &whole[..cut];
+        assert!(ardoise_proto::stroke::decode(cut_short).is_err());
+
+        // Twice. No `ca` in the script: a delete request would fail the test.
+        let mut steps = start();
+        steps.extend([
+            ("cc 01 00", vec![info()]),
+            ("c3 01 00", sent(cut_short)),
+            ("cc 01 00", vec![info()]),
+            ("c3 01 00", sent(cut_short)),
+        ]);
+        let (mut session, _) = connected(steps);
+        let mut kept = 0;
+        let result = session.sync(true, &mut |_, _, _| {
+            kept += 1;
+            Ok(())
+        });
+        assert_eq!(
+            result.err(),
+            Some(DeviceError::PageCutShort {
+                announced: u32::try_from(whole.len()).unwrap(),
+                received: cut,
+            })
+        );
+        assert_eq!(kept, 0);
+
+        // Once: the second transfer is the page.
+        let mut steps = start();
+        steps.extend([
+            ("cc 01 00", vec![info()]),
+            ("c3 01 00", sent(cut_short)),
+            ("cc 01 00", vec![info()]),
+            ("c3 01 00", sent(&whole)),
+            ("ca 01 00", vec![cmd("b3 01 00")]),
+        ]);
+        let (mut session, _) = connected(steps);
+        let mut saved = Vec::new();
+        let summary = session
+            .sync(true, &mut |page, _, _| {
+                saved.push(page.bytes);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!((summary.downloaded, summary.deleted), (1, 1));
+        assert_eq!(saved, std::slice::from_ref(&whole));
+    }
+
+    // Shorter than announced but read to its end (what is missing is at most its last stroke's
+    // end mark here): asked once more, as it may have been cut between two packets. The same
+    // again: a page. Whole this time: the whole page is the one kept.
+    let readable = &whole[..whole.len() - ardoise_proto::stroke::STROKE_END_PACKET.len()];
+    assert!(ardoise_proto::stroke::decode(readable).is_ok());
+    for second in [readable, &whole] {
+        let mut steps = start();
+        steps.extend([
+            ("cc 01 00", vec![info()]),
+            ("c3 01 00", sent(readable)),
+            ("cc 01 00", vec![info()]),
+            ("c3 01 00", sent(second)),
+            ("ca 01 00", vec![cmd("b3 01 00")]),
+        ]);
+        let (mut session, _) = connected(steps);
+        let mut saved = Vec::new();
+        let summary = session
+            .sync(true, &mut |page, _, _| {
+                saved.push(page.bytes);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!((summary.downloaded, summary.deleted), (1, 1));
+        assert_eq!(saved, [second.to_vec()]);
+    }
+
+    // As long as announced and undecodable: not a failed transfer, a page the decoder does not
+    // know (what is made of it is the sink's affair).
+    let mut unreadable = whole.clone();
+    unreadable.truncate(readable.len());
+    unreadable.extend([0x04, 0x01, 0, 0, 0, 0, 0]);
+    assert_eq!(unreadable.len(), whole.len());
+    assert!(ardoise_proto::stroke::decode(&unreadable).is_err());
+    let mut steps = start();
+    steps.extend([
+        ("cc 01 00", vec![info()]),
+        ("c3 01 00", sent(&unreadable)),
+        ("ca 01 00", vec![cmd("b3 01 00")]),
+    ]);
+    let (mut session, _) = connected(steps);
+    assert_eq!(
+        session.sync(true, &mut |_, _, _| Ok(())).unwrap().deleted,
+        1
+    );
+}
+
+/// One short stroke, as the tablet stores it.
+fn slate_page() -> Vec<u8> {
+    use ardoise_proto::stroke::{Point, Stroke, StrokeTime, encode_slate};
+    encode_slate(&[Stroke {
+        time: StrokeTime::SincePowerUp { millis: 5 },
+        points: (0..4u16)
+            .map(|i| Point {
+                x: 1000 + i * 300,
+                y: 2000,
+                pressure: 700,
+            })
+            .collect(),
+        ..Stroke::default()
+    }])
+}
+
+/// The `cf` reply announcing `size` bytes, stored on 2026-10-24 09:30:00 UTC.
+fn page_info(size: usize) -> TransportEvent {
+    let [a, b, c, d] = u32::try_from(size).unwrap().to_le_bytes();
+    TransportEvent::Notification {
+        channel: Channel::Command,
+        data: vec![0xcf, 0x0a, a, b, c, d, 0x26, 0x10, 0x24, 0x09, 0x30, 0x00],
+    }
+}
+
+/// A corrupted transfer then one cut short, in either order: one retry in all.
+#[test]
+fn a_transfer_is_asked_again_once_whatever_was_wrong() {
+    let whole = slate_page();
+    let corrupted = || {
+        let mut download = vec![cmd("c8 01 be")];
+        download.extend(page(&whole[..3]));
+        download.push(end_marker(&whole));
+        download
+    };
+    let cut = || {
+        let mut download = vec![cmd("c8 01 be")];
+        download.extend(page(&whole[..2]));
+        download.push(end_marker(&whole[..2]));
+        download
+    };
+    for (first, second, crc) in [(corrupted(), cut(), false), (cut(), corrupted(), true)] {
+        let (mut session, _) = connected(vec![
+            ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 00")]),
+            ("b1 01 01", vec![cmd("b3 01 00")]),
+            ("c1 01 00", vec![cmd("c2 02 01 00")]),
+            ("cc 01 00", vec![page_info(whole.len())]),
+            ("c3 01 00", first),
+            ("cc 01 00", vec![page_info(whole.len())]),
+            ("c3 01 00", second),
+        ]);
+        let error = session.sync(true, &mut |_, _, _| Ok(())).unwrap_err();
+        assert_eq!(
+            matches!(error, DeviceError::CrcMismatch { .. }),
+            crc,
+            "{error:?}"
+        );
+        assert_eq!(
+            matches!(error, DeviceError::PageCutShort { .. }),
+            !crc,
+            "{error:?}"
+        );
+    }
+}
+
+/// A page announced empty is what it says: nothing is missing, it is deleted like any other.
+#[test]
+fn a_page_announced_without_any_byte_is_an_empty_page() {
+    let empty = vec![cmd("c8 01 be"), end_marker(&[])];
+    let (mut session, _) = connected(vec![
+        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 00")]),
+        ("b1 01 01", vec![cmd("b3 01 00")]),
+        ("c1 01 00", vec![cmd("c2 02 01 00")]),
+        ("cc 01 00", vec![cmd("cf 0a 00 00 00 00 26 10 24 09 30 00")]),
+        ("c3 01 00", empty),
+        ("ca 01 00", vec![cmd("b3 01 00")]),
+    ]);
+    let mut received = Vec::new();
+    let summary = session
+        .sync(true, &mut |page, _, _| {
+            received.push(page.bytes);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(summary.deleted, 1);
+    assert_eq!(received, [Vec::<u8>::new()]);
+}
+
 #[test]
 fn a_transfer_corrupted_once_succeeds_on_the_retry() {
     let bytes = vec![1u8, 2, 3, 4];

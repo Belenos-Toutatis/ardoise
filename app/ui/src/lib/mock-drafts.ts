@@ -90,6 +90,7 @@ export function mockDraftsInvoke(command: string, args: Record<string, unknown>)
           savedAt: Date.now(),
           baseStamp: copy((args.baseStamp as FileStamp | null) ?? null),
           hasImage: !!note.backgroundImage && !!args.imageKey,
+          ...(typeof args.partialPage === 'boolean' ? { partialPage: args.partialPage } : {}),
           note,
         },
       });

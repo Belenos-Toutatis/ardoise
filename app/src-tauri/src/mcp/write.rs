@@ -657,6 +657,8 @@ mod tests {
         // A tablet note: `original.bin` is the original, nothing else is kept.
         let mut tablet = NoteFile::new(sample_note("Tablette"));
         tablet.original = Some(vec![1, 2, 3]);
+        // Bytes that could not be read whole: the mark goes with them.
+        ardoise_device::pages::record_partial_page(&mut tablet, true);
         let (file, revised) = copy_of(&tablet, Vec::new());
         let created = services
             .create_revision(&library, Path::new(""), file, revised)
@@ -664,6 +666,7 @@ mod tests {
         let copy = library.read(&created.path).unwrap().file;
         assert_eq!(copy.original, Some(vec![1, 2, 3]));
         assert_eq!(copy.original_note, None);
+        assert!(ardoise_device::pages::is_partial_page(&copy));
 
         // A note already edited once keeps the original it has: the copy does not replace it.
         let mut edited = NoteFile::new(sample_note("Déjà retouchée"));
@@ -764,6 +767,7 @@ mod tests {
         assert!(part.thumbnail.is_some());
         assert_eq!(part.original, None);
         assert_eq!(part.original_note, None);
+        assert!(part.unknown_fields.is_empty());
         assert_eq!(part.revision.unwrap().of, source.note.id);
         // Samples are at 0, 8, 16... 232 ms: 15 stay, 15 moved, on a clock of their own.
         assert_eq!(part.note.strokes[0].points.len(), 15);

@@ -161,6 +161,9 @@ and the `mock-*.ts` stand-ins, `locales/fr.json` and `locales/en.json` (each par
     its rectangle turned back stands for it;
   - an image removed since stays removed.
   The confirmation says so in a sentence.
+- **A page read in part** (Q27; device-stack.md, « Pages read in part »): a note marked `partialPage` is read again as far
+  as this version can, and the mark goes once the whole page is saved. The panel promises what can be read, not the page
+  as it came, and says when the page comes back empty.
 - **Limit of a tablet original.** `original.bin` is decoded again with today's settings: the hand (orientation) of
   the settings and the drawing area of the tablet registered in the library (the Bamboo Slate's when none is). A
   note synced with the other hand, or from a tablet of another size, comes back turned or scaled in today's

@@ -597,13 +597,19 @@ fn comparable(entries: &[LogEntry]) -> Vec<(Direction, Option<Channel>, Option<S
         .collect()
 }
 
-/// The notes of the application, without the paths of the notes saved in the library and
-/// without the signal strength of a tablet found (the replay reports the first one it finds
-/// every time, while the real one varied between scans).
+/// The line that gives the sizes of a page downloaded (the journals recorded before 2026-11-25
+/// have none).
+fn is_page_size(info: &str) -> bool {
+    info.contains(" bytes received, ")
+}
+
+/// The notes of the application, without the paths of the notes saved in the library, without
+/// the sizes of the pages ([`is_page_size`]) and without the signal strength of a tablet found (the
+/// replay reports the first one it finds every time, while the real one varied between scans).
 fn notes(entries: &[LogEntry]) -> Vec<String> {
     entries
         .iter()
-        .filter(|e| e.dir == Direction::Note)
+        .filter(|e| e.dir == Direction::Note && !is_page_size(&e.info))
         .map(|e| {
             if let Some((page, _)) = e.info.split_once(" saved as ") {
                 format!("{page} saved")
@@ -728,6 +734,22 @@ fn the_guided_test_recorded_with_the_current_code_replays_as_the_real_run() {
     let (_, replayed_entries) = log::read_log(&replayed_log).unwrap();
     assert_eq!(comparable(&replayed_entries), comparable(&entries));
     assert_eq!(notes(&replayed_entries), notes(&entries));
+    // The real tablet announced each page at its exact size (a shorter one that does not decode
+    // is taken for a transfer cut short).
+    let sizes: Vec<&str> = replayed_entries
+        .iter()
+        .map(|e| e.info.as_str())
+        .filter(|info| is_page_size(info))
+        .collect();
+    let expected: Vec<String> = saved_pages
+        .iter()
+        .enumerate()
+        .map(|(i, page)| {
+            let size = page.len();
+            format!("page {}: {size} bytes received, {size} announced", i + 1)
+        })
+        .collect();
+    assert_eq!(sizes, expected);
     let reply_times = |entries: &[LogEntry]| {
         entries
             .iter()

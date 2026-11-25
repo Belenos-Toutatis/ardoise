@@ -1029,6 +1029,8 @@
     "pageRescued": "Une page de la tablette Xiaomi n'a pas pu être écrite dans la bibliothèque, et la tablette ne la garde plus : Ardoise en a gardé une copie de secours (dossier _ardoise\\rescued-pages de la bibliothèque, ou dossier Ardoise\\blackboard-rescue des données locales de ce PC) et l'importera à la prochaine synchronisation. Vérifiez que la bibliothèque est accessible et qu'il reste de la place.",
     "pageDoubtful": "Une page de la tablette Xiaomi n'a pas été reçue proprement, et la tablette ne la garde peut-être plus : ce qui est arrivé est gardé à part (dossier _ardoise\\rescued-pages\\doubtful de la bibliothèque, ou dossier doubtful sous Ardoise\\blackboard-rescue dans les données locales de ce PC), sans en faire une note. Si une note de cette page a été faite, vérifiez-la, et gardez le journal de diagnostic.",
     "pageNotSaved": "Une page de la tablette Xiaomi n'a pu être écrite ni dans la bibliothèque ni sur ce PC, et la tablette ne la garde plus : Ardoise la garde en mémoire et réessaiera à la prochaine synchronisation. Ne fermez pas Ardoise d'ici là, rendez la bibliothèque accessible ou libérez de la place, puis synchronisez de nouveau.",
+    "pageCutShort": "La Bamboo Slate a arrêté l'envoi d'une page avant la fin, deux fois de suite, et ce qui est arrivé ne peut pas être lu : cette page n'a été ni enregistrée ni effacée, elle reste sur la tablette, comme celles qui la suivent. Rapprochez la tablette de l'ordinateur puis synchronisez de nouveau ; si cela se répète, gardez le journal de diagnostic (dossier _ardoise\\diagnostics de la bibliothèque).",
+    "pagePartial": "Ardoise n'a pas su lire jusqu'au bout tout ce que la Bamboo Slate a envoyé. Ce qui a pu être lu, et toutes les données de la tablette, sont dans la bibliothèque (à vérifier : {detail}) : rien n'est perdu. Gardez le journal de diagnostic (dossier _ardoise\\diagnostics de la bibliothèque). Une version plus récente d'Ardoise pourra peut-être lire le reste : ouvrez alors la note et choisissez « Revenir à l'original » (onglet « Page » de l'éditeur).",
     "sheetBoardPosition": "Cette page de la tablette Xiaomi n'est pas dans le même sens que la tablette telle que vous la tenez : une page en largeur se continue avec la tablette tenue en largeur (boutons à droite ou à gauche), une page en hauteur avec la tablette tenue en hauteur (boutons en bas ou en haut). Pour la continuer, choisissez dans les réglages de la tablette Xiaomi une position du même sens que la page, tenez la tablette ainsi, puis reprenez le direct ; ou reprenez le direct sur une autre feuille. Rien n'a été écrit sur la note.",
     "boardPositionFixed": "Ce direct écrit sur une page de la tablette Xiaomi qui garde sa forme (une feuille reprise, ou une page écrite sur une image) : seules les deux positions du même sens que cette page sont possibles jusqu'à la fin du direct. La position n'a pas changé.",
     "orderChanged": "l'ordre de ce classeur a changé depuis ; il n'a pas été modifié ({detail})"
@@ -1430,10 +1432,19 @@
       "paperTitle": "Papier",
       "turnCropTitle": "Tourner et recadrer"
     },
+    "partialPage": {
+      "title": "Page lue en partie",
+      "text": "La tablette a envoyé une page qu'Ardoise n'a pas su lire jusqu'au bout. Cette note contient ce qui a pu être lu ; toutes les données de la tablette sont gardées dans la note.",
+      "later": "Gardez le journal de diagnostic (dossier _ardoise\\diagnostics de la bibliothèque). Une version plus récente d'Ardoise pourra peut-être lire le reste, avec « {button} » (onglet « {tab} »).",
+      "readable": "Cette version d'Ardoise lit la page en entier : « {button} » (onglet « {tab} ») la fait revenir tout entière, à la place de l'encre actuelle."
+    },
     "original": {
       "label": "Original",
       "button": "Revenir à l'original",
       "helpTablet": "Retrouvez l'encre telle qu'elle est arrivée de la tablette, sans vos modifications (avec l'orientation de la tablette choisie actuellement dans les réglages).",
+      "helpTabletPartial": "Retrouvez ce qu'Ardoise sait lire de la page envoyée par la tablette, sans vos modifications : la page n'a pas pu être lue jusqu'au bout.",
+      "helpTabletUnread": "Ardoise ne sait lire aucun trait de la page envoyée par la tablette : y revenir donne une page vide, sans vos modifications.",
+      "helpTabletEmpty": "La page envoyée par la tablette n'a aucun trait : y revenir donne une page vide, sans vos modifications.",
       "helpFirst": "Retrouvez l'encre de la première version enregistrée qui en contenait, sans les modifications faites ensuite.",
       "helpBlank": "Retrouvez la feuille vierge d'avant le mode direct, sans l'encre ajoutée depuis.",
       "none": "Pas encore d'original : la première fois que vous enregistrez une modification de l'encre, Ardoise garde la version précédente, si elle contenait de l'encre.",
@@ -1445,6 +1456,8 @@
       "confirm": "Revenir à l'original",
       "cancel": "Annuler",
       "done": "Encre de l'original rétablie : enregistrez pour la garder, ou Ctrl+Z pour annuler.",
+      "donePartial": "Ce qu'Ardoise sait lire de la page de la tablette est rétabli : enregistrez pour le garder, ou Ctrl+Z pour annuler.",
+      "doneEmpty": "Page vide rétablie : enregistrez pour la garder, ou Ctrl+Z pour annuler.",
       "failed": "L'original n'a pas pu être lu : {message}"
     },
     "papers": {

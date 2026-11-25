@@ -437,3 +437,30 @@ Demande de l'utilisateur, mot pour mot : « Lorsque je clique et que je glisse u
 Décisions du développeur, à confirmer : le classeur se déplie après 0,7 s d'arrêt au-dessus de lui (un passage plus court ne déplie rien) ; il reste déplié après le dépôt, ou si le glisser s'arrête ailleurs ; seul le nom du classeur réagit, pas sa petite flèche.
 
 **SPEC** : rien ne le dit ; une phrase est à proposer à l'utilisateur s'il veut l'y voir.
+
+## Q27 — Une page de la Bamboo Slate qu'Ardoise ne sait pas lire jusqu'au bout (2026-11-25) — **tranchée le 2026-11-25, à essayer**
+
+Constat : une page que le décodeur refuse restait sur la tablette et, comme celle-ci ne donne que sa page la plus ancienne, cachait toutes les suivantes (vérifié au simulateur : trois pages, la première illisible, quatre synchronisations de suite n'importent rien). Le message montré (« la bibliothèque ne peut pas être lue ou modifiée ») était faux. Le transfert étant contrôlé (CRC), les octets sont bien ceux de la tablette : une page illisible est très probablement un cas que notre décodeur ne connaît pas encore (un tel cas a été corrigé le 2026-11-24), et ses octets ne doivent jamais être perdus.
+
+Choix de l'utilisateur (2026-11-25) : « **A, note partielle** ». La page devient une note avec les traits lus avant le problème et un avertissement ; tous les octets de la tablette sont dans la note (`original.bin`) ; elle est vide si rien n'est lisible. La page n'est effacée de la tablette qu'après l'écriture vérifiée, si l'option est cochée, et la synchronisation continue. « Revenir à l'original » relit ces octets : la page entière revient une fois le décodeur corrigé. La tablette Xiaomi n'est pas concernée.
+
+Options écartées :
+
+- *B, copie de secours* : les octets bruts gardés à part dans un dossier, sans note (comme les pages de secours de la Xiaomi).
+- *C, message seul* : la page reste sur la tablette, avec un message juste.
+
+Décisions du développeur, à confirmer :
+
+- *Rien n'est deviné après le problème* : la lecture s'arrête au premier paquet incompréhensible, même si un trait lisible le suit peut-être (rien dans le format ne permet de retrouver le paquet suivant à coup sûr).
+- *Message de fin de synchronisation* : il nomme les notes à vérifier (cinq au plus, puis leur nombre). Il ne dit pas « a échoué », et n'apparaît qu'une fois, dans le résultat de la dernière synchronisation, sans couleur d'erreur. Une vraie erreur passe avant lui, comme une page douteuse de la Xiaomi ; il est alors dit à la fin de la synchronisation suivante de la Bamboo. Si une page finie entre-temps est reçue aussitôt, ou si cette synchronisation-là ne peut pas commencer, il est redit. Il ne promet pas que les pages suivantes sont arrivées : elles ne viennent que si l'effacement après import est activé.
+- *Avertissement de l'éditeur* : un message en haut, que l'on ferme pour cette ouverture de la note. Quand cette version d'Ardoise lit la page en entier, il le dit et renvoie à **Revenir à l'original**. Ardoise ne remplace jamais l'encre de lui-même, pour ne pas toucher aux modifications faites depuis. Pas de pastille sur la carte.
+- *L'avertissement suit les données de la tablette* : une copie ou une version retouchée par l'assistant, qui gardent ces données, le gardent ; la nouvelle note d'une découpe, une fusion ou « Enregistrer comme copie » ne l'ont pas. Il suit aussi `Ctrl + Z`, et ne part du fichier qu'à l'enregistrement de la page entière.
+- *Transfert arrêté trop tôt* : le contrôle (CRC) est calculé par la tablette sur ce qu'elle a envoyé, il ne dit donc rien de ce qui manque. Une page reçue plus courte qu'annoncée **et** illisible est redemandée une fois ; si elle est encore incomplète, elle n'est ni enregistrée ni effacée, et le message le dit (« elle reste sur la tablette »). Elle bloque alors les suivantes, comme avant, mais en faire une note partielle et l'effacer perdrait le reste. Une page plus courte mais lisible est aussi redemandée une fois (elle a pu être coupée entre deux points), puis acceptée telle qu'elle arrive. Les deux tailles sont dans le journal.
+- *Page annoncée sans aucun octet* : rien ne manque ; une note vide, sans avertissement.
+- *Test guidé* : son étape de synchronisation échoue toujours quand une page ne se lit pas entièrement, mais la page devient une note et ne bloque plus.
+- *Brouillon et découpe* : le brouillon d'une note lue en partie retient si la page entière était revenue ; une découpe enregistre d'abord la note quand l'avertissement n'est plus celui du fichier.
+- *« Revenir à l'original »* : le panneau et le message disent quand il ne rend que ce qu'Ardoise sait lire, ou une page vide.
+- *« Enregistrer comme copie »* : comme pour toute note de la tablette, la copie n'a pas les données de la tablette. Elles restent dans la note d'origine ; si son fichier a disparu du disque, il faut le reprendre dans la corbeille d'Ardoise (ou dans celle de Nextcloud, ou de Windows, selon ce qui l'a effacé), sinon dans le journal de diagnostic de la synchronisation, qui contient aussi ces octets. Les mettre dans la copie demanderait qu'Ardoise les garde en mémoire pendant l'édition : non fait.
+- *Lecture par une version plus ancienne* : elle garde l'avertissement sans le montrer ; « Revenir à l'original » y reste refusé (« original illisible ») pour cette note.
+
+**SPEC** : §4.1 dit « chaque page devient une note » ; une phrase est à proposer à l'utilisateur, par exemple : « Une page de la Bamboo Slate qui ne peut pas être lue jusqu'au bout devient une note avec ce qui a pu être lu, un avertissement et toutes les données de la tablette ; elle ne bloque pas les suivantes (`docs/questions.md` Q27). »

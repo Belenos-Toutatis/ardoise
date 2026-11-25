@@ -33,6 +33,11 @@ export interface Draft extends DraftSummary {
   baseStamp: FileStamp | null;
   /** A background image was kept with it (`draft_stage_image` stages it again). */
   hasImage: boolean;
+  /**
+   * Whether the edited note held only part of its tablet page (Q27). Absent: the note was never read in part, or the
+   * draft was written before.
+   */
+  partialPage?: boolean;
   note: Note;
 }
 
@@ -44,6 +49,8 @@ export interface DraftSnapshot {
   baseStamp: FileStamp | null;
   /** The staged pixels of the note's background image. */
   imageKey: string | null;
+  /** For a note that was read in part only (Q27): whether it still holds only part of its tablet page. */
+  partialPage?: boolean;
 }
 
 /** Where drafts go (`draft_write`, `draft_discard`; tests stand in for them). */

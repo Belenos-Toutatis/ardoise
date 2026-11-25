@@ -357,6 +357,14 @@
   let switching = $state<string | null>(null);
   /** Set when the open note is a revision (a retouched copy made by an assistant): its account and its source. */
   let revision = $state.raw<RevisionOfNote | null>(null);
+  /**
+   * Q27: the open note was made from only part of its tablet page. What it holds now is `Doc.partialPage` (going back
+   * to the original may give the whole page, and undo takes it back); the banner says it until it is closed.
+   */
+  let partialNote = $state(false);
+  let partialDismissed = $state(false);
+  /** What the file says of it: as opened, then as last saved. */
+  let savedPartial = false;
   /** The dialog of the revision that is open, if any. */
   let revisionDialog = $state<'account' | 'compare' | null>(null);
   /** « Ouvrir l'original » is looking for the source: a second click waits. */
@@ -442,6 +450,8 @@
   const pageProjection = new EditorProjection();
 
   const doc = $derived(history?.present ?? null);
+  /** Q27: this version reads the whole tablet page of a note that holds only part of it: "back to the original" gives it. */
+  const partialReadable = $derived(original?.source === 'tablet' && !original.partial);
   /** The note differs from the one last saved. */
   const noteDirty = $derived(!!doc && doc.note !== savedNote);
   /** Something waits to be saved: the note's changes, or the sound of a writing recording. */
@@ -621,6 +631,7 @@
             note: { ...present.note, title },
             baseStamp: stamp,
             imageKey: present.backgroundPixels?.key ?? null,
+            ...(partialNote ? { partialPage: present.partialPage === true } : {}),
           }
         : null;
     untrack(() => drafts.update(snapshot));
@@ -837,6 +848,9 @@
     originalError = null;
     revision = null;
     revisionDialog = null;
+    partialNote = false;
+    partialDismissed = false;
+    savedPartial = false;
     // Nothing of the previous note stays on screen while this one loads: its name, its errors, its notices.
     title = '';
     titleDraft = '';
@@ -865,7 +879,13 @@
       if (currentPath !== target) return;
       // Text frames measured as this module lays them out (Rust measures them too when it reads a note: no change then).
       const fresh = docFromNote(measureTexts(opened.note, module.text), t('editor.layers.defaultName', { n: 1 }));
-      const start = staged ? { ...fresh, backgroundPixels: pixelsOf(staged) } : fresh;
+      const start: Doc = {
+        ...fresh,
+        ...(staged ? { backgroundPixels: pixelsOf(staged) } : {}),
+        ...(opened.partialPage ? { partialPage: true } : {}),
+      };
+      partialNote = opened.partialPage === true;
+      savedPartial = partialNote;
       ink = module;
       // The fonts of the text frames, for the field where one types and the toolbar's family buttons.
       void registerTextFonts(module.text);
@@ -979,12 +999,15 @@
     try {
       const note = { ...present.note, title };
       const imageKey = present.backgroundPixels?.key;
-      const next = staged
-        ? await api.saveNote(target, note, stamp, imageKey, staged.key)
-        : await api.saveNote(target, note, stamp, imageKey);
+      const next = partialNote
+        ? await api.saveNote(target, note, stamp, imageKey, staged?.key, present.partialPage === true)
+        : staged
+          ? await api.saveNote(target, note, stamp, imageKey, staged.key)
+          : await api.saveNote(target, note, stamp, imageKey);
       if (gen !== generation) return false;
       stamp = next;
       savedNote = present.note;
+      if (partialNote) savedPartial = present.partialPage === true;
       notifySaved(target);
       void refreshOriginal();
       if (staged) soundSaved(staged);
@@ -1102,6 +1125,8 @@
         void refreshOriginal(true);
         revision = null;
         revisionDialog = null;
+        // Nor of a tablet page.
+        partialNote = false;
         // The copy has no narration, or the sound it was saved with.
         if (staged && stagedNarration?.key === staged.key) stagedNarration = null;
         void loadNarration();
@@ -1194,7 +1219,14 @@
       if (gen !== generation || !history) return;
       if (kept) pixels = pixelsOf(kept);
       else if (!sameImage(restored.backgroundImage, history.present.note.backgroundImage)) pixels = undefined;
-      const fresh = docFromNote(restored, t('editor.layers.defaultName', { n: 1 }));
+      // What the draft says of its tablet page (the whole page gone back to, or that undone, and not saved); a draft
+      // that says nothing leaves it as the opened note has it.
+      const partial = current.draft.partialPage ?? history.present.partialPage === true;
+      if (current.draft.partialPage !== undefined) partialNote = true;
+      const fresh: Doc = {
+        ...docFromNote(restored, t('editor.layers.defaultName', { n: 1 })),
+        ...(partial ? { partialPage: true } : {}),
+      };
       change(restored.backgroundImage && pixels ? { ...fresh, backgroundPixels: pixels } : fresh);
       // That draft now follows the note: replaced by the next one, removed once it is saved.
       drafts.adopt(noteId);
@@ -2189,7 +2221,14 @@
     const next = revertToOriginal(doc, original);
     if (next === doc) return;
     change(next);
-    showNotice(t('editor.original.done'));
+    const tabletPage = original.source === 'tablet';
+    showNotice(
+      tabletPage && original.strokes.length === 0
+        ? t('editor.original.doneEmpty')
+        : tabletPage && original.partial
+          ? t('editor.original.donePartial')
+          : t('editor.original.done'),
+    );
   }
 
   // --- Export, copy, split ----------------------------------------------------------------
@@ -2303,6 +2342,10 @@
       if (!present || !stamp) return;
       const gen = generation;
       const target = currentPath;
+      // What the note holds of its tablet page differs from what the file says (Q27: gone back to the whole page, or that
+      // undone, and not saved yet): saved first, the split itself leaves the file's mark as it is.
+      if (partialNote && (present.partialPage === true) !== savedPartial && !(await writeNote())) return;
+      if (gen !== generation) return;
       saving = true;
       try {
         const result = await api.splitNote(
@@ -2317,7 +2360,11 @@
         const fresh = docFromNote(result.note, t('editor.layers.defaultName', { n: 1 }));
         // The kept part has the same background image, with the same pixels.
         const pixels = result.note.backgroundImage ? present.backgroundPixels : undefined;
-        const start = pixels ? { ...fresh, backgroundPixels: pixels } : fresh;
+        const start: Doc = {
+          ...fresh,
+          ...(pixels ? { backgroundPixels: pixels } : {}),
+          ...(present.partialPage ? { partialPage: true } : {}),
+        };
         // A frame or a bookmark being typed, an equation being written, belong to the doc that goes.
         textEdit = null;
         bookmarkEdit = null;
@@ -2947,6 +2994,19 @@
         <button type="button" class="button small-button primary" disabled={saving || recorder.busy} onclick={saveCopy}>{t('editor.saveCopy')}</button>
       {/if}
       <button type="button" class="button small-button" onclick={() => (disk = null)}>{t('editor.dismiss')}</button>
+    </div>
+  {/if}
+  {#if partialNote && doc?.partialPage && !partialDismissed}
+    <div class="banner notice editor-banner" role="status" data-slot="partial-page">
+      <strong>{t('editor.partialPage.title')}</strong>
+      <p>{t('editor.partialPage.text')}</p>
+      <p>
+        {t(partialReadable ? 'editor.partialPage.readable' : 'editor.partialPage.later', {
+          tab: t('side.tabs.page'),
+          button: t('editor.original.button'),
+        })}
+      </p>
+      <button type="button" class="button small-button" onclick={() => (partialDismissed = true)}>{t('editor.dismiss')}</button>
     </div>
   {/if}
   {#if saveError}

@@ -102,6 +102,7 @@ alphabetical order; **key order and whitespace are not significant**.
 | `timing` | `"recorded"` or `"synthesized"` | whether point times were measured or made up (imported notes without timing). |
 | `origin` | `{"kind": "tablet"}`, `{"kind": "live"}`, `{"kind": "ardoise"}` or `{"kind": "inkspace", "id": string}` | where the note comes from (`id` = Inkspace's note UUID). |
 | `boardPosition` | `"buttonsBottom"`, `"buttonsTop"`, `"buttonsRight"` or `"buttonsLeft"`, optional | for a note made from a page of the Xiaomi blackboard (its `original.bin`): how the blackboard was held, i.e. how the page's points were turned to make the note (docs/design/blackboard.md, « Positions, the Rust side »). Absent: `buttonsBottom` (notes made before 2026-11). Not a key of the format's model: `ardoise-device` writes and reads it, and every reader, of any 1.x version, keeps it verbatim as an unknown key; it describes `original.bin`, which no edit changes, so it stays true after an older version edited the note. |
+| `partialPage` | `true`, optional | the note was made from only part of its `original.bin`, a page of the Bamboo Slate that could not be decoded to its end (docs/design/device-stack.md, « Pages read in part »): its ink is that of the strokes before the problem, if any. Absent otherwise; any value but `false` and `null` counts as `true`; without `original.bin` it means nothing, and is not written. A reader that goes back to the original reads those bytes as a page of the Slate whatever they look like, and keeps what comes before the first error; the key goes when a version that reads them to their end saves the note with the whole page. Like `boardPosition`, not a key of the format's model: `ardoise-device` writes and reads it, and every reader, of any 1.x version, keeps it verbatim as an unknown key; it describes `original.bin`, so a copy of the note that keeps those bytes keeps it, and a note made without them (a split, a merge, a new note) never has it. |
 
 ### 2.1 `backgroundImage` (1.2)
 
@@ -475,7 +476,7 @@ notes. The member has a read limit of about 16 MiB, decompressed, like `note.jso
 The library's duplicate (`Library::duplicate`, SPEC §4.3) and change of date (`Library::set_created`) are ordinary rewrites of a
 `NoteFile`: they add no member and no key, so they do not change the format version. A duplicate keeps every member and every unknown
 key or member verbatim (it is a new `id`, a title followed by the copy word, no `favorite`, and `modified` now; `created`, the tablet's
-`original.bin`, the narration, `revision.json` and `boardPosition` are the original's); a change of date writes only `created` (and
+`original.bin`, the narration, `revision.json`, `boardPosition` and `partialPage` are the original's); a change of date writes only `created` (and
 `modified`), the points' times and the narration's offset being offsets from it. Their effect on the recognition of synced pages is in
 `docs/design/library-order.md` §5. The free order of a binder is **not** in the note: it is `_ardoise-order.json` in the binder's folder
 (same document, §2).

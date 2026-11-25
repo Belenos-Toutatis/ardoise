@@ -2259,6 +2259,7 @@ fn a_draft_left_for_the_note_can_only_become_a_new_note_after_the_resume() {
     let mut edited = before.file.note.clone();
     edited.title = "Brouillon".to_owned();
     let record = DraftRecord {
+        partial_page: None,
         version: DRAFT_VERSION,
         library: path_text(library.root()),
         path: path_text(&path),

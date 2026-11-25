@@ -58,8 +58,9 @@ Behaviour:
   tablet, and only when `delete_after_import`. Without deletion the tablet only lets us read its oldest page: a page
   already imported (same deterministic note id, `pages::page_note_id`) is not stored twice. `cancel()` stops between
   pages (pages already saved stay saved and deleted). At the end `last_sync = { at, saved: [paths], deleted, error }`
-  (`error` when the sync stopped early or could not start, e.g. `syncRefused`; it stays until the next sync, across
-  reconnections, unlike `status.error`). After a sync that deleted pages the count is read again at once: a page
+  (`error` when the sync stopped early or could not start, e.g. `syncRefused`, or for what must be said of a sync that
+  nothing stopped: `pagePartial`, a page that could only be read in part, device-stack.md; it stays until the next sync,
+  across reconnections, unlike `status.error`). After a sync that deleted pages the count is read again at once: a page
   finished meanwhile is synced on the same connection (H1, see device-stack.md).
   When the tablet is not connected, `sync_now()` waits for it (connection `searching`, `pending = "sync"`).
 - **Live mode**: `start_live(sink)` enters live mode when connected (or as soon as the tablet connects: `pending =

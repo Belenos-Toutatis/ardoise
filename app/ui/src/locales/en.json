@@ -1029,6 +1029,8 @@
     "pageRescued": "A page of the Xiaomi tablet could not be written in the library, and the tablet no longer holds it: Ardoise kept a rescue copy (the _ardoise\\rescued-pages folder of the library, or the Ardoise\\blackboard-rescue folder of this PC's local data) and will import it at the next sync. Check that the library can be reached and has room left.",
     "pageDoubtful": "A page of the Xiaomi tablet was not received cleanly, and the tablet may no longer hold it: what came is kept apart (the _ardoise\\rescued-pages\\doubtful folder of the library, or a doubtful folder under Ardoise\\blackboard-rescue in this PC's local data) and was not made into a note. If a note of that page was made, check it, and keep the diagnostic log.",
     "pageNotSaved": "A page of the Xiaomi tablet could be written neither in the library nor on this PC, and the tablet no longer holds it: Ardoise keeps it in memory and will try again at the next sync. Do not close Ardoise until then; make the library reachable or free some room, then sync again.",
+    "pageCutShort": "The Bamboo Slate stopped sending a page before its end, twice in a row, and what came cannot be read: that page was neither saved nor deleted, it stays on the tablet, and so do the pages after it. Bring the tablet closer to the computer and sync again; if it keeps happening, keep the diagnostic log (the _ardoise\\diagnostics folder of the library).",
+    "pagePartial": "Ardoise could not read everything the Bamboo Slate sent to its end. What could be read, and all the tablet's data, are in the library (to check: {detail}): nothing is lost. Keep the diagnostic log (the _ardoise\\diagnostics folder of the library). A later version of Ardoise may be able to read the rest: open the note then and choose \"Back to the original\" (the editor's \"Page\" tab).",
     "sheetBoardPosition": "This page of the Xiaomi tablet is not the same way round as the tablet is held: a wide page is continued with the tablet held wide (buttons on the right or on the left), an upright page with the tablet held upright (buttons at the bottom or at the top). To continue it, choose a position of the same way round as the page in the Xiaomi tablet's settings, hold the tablet that way, then resume live mode; or resume live mode on another sheet. Nothing was written on the note.",
     "boardPositionFixed": "This live mode writes on a page of the Xiaomi tablet that keeps its shape (a resumed sheet, or a page written over an image): only the two positions of the same way round as that page are possible until live mode ends. The position did not change.",
     "orderChanged": "the order of this binder has changed since; it was not modified ({detail})"
@@ -1430,10 +1432,19 @@
       "paperTitle": "Paper",
       "turnCropTitle": "Turn and crop"
     },
+    "partialPage": {
+      "title": "Page read in part",
+      "text": "The tablet sent a page that Ardoise could not read to its end. This note holds what could be read; all the tablet's data are kept in the note.",
+      "later": "Keep the diagnostic log (the _ardoise\\diagnostics folder of the library). A later version of Ardoise may be able to read the rest, with \"{button}\" (the \"{tab}\" tab).",
+      "readable": "This version of Ardoise reads the whole page: \"{button}\" (the \"{tab}\" tab) brings it back whole, in place of the present ink."
+    },
     "original": {
       "label": "Original",
       "button": "Back to the original",
       "helpTablet": "Get the ink back as it came from the tablet, without your edits (with the tablet orientation currently chosen in the settings).",
+      "helpTabletPartial": "Get back what Ardoise can read of the page the tablet sent, without your edits: the page could not be read to its end.",
+      "helpTabletUnread": "Ardoise can read no stroke of the page the tablet sent: going back to it gives an empty page, without your edits.",
+      "helpTabletEmpty": "The page the tablet sent has no stroke: going back to it gives an empty page, without your edits.",
       "helpFirst": "Get back the ink of the first saved version that had any, without the edits made since.",
       "helpBlank": "Get back the blank sheet from before live mode, without the ink added since.",
       "none": "No original yet: the first time you save a change of the ink, Ardoise keeps the version before it, if it had any ink.",
@@ -1445,6 +1456,8 @@
       "confirm": "Back to the original",
       "cancel": "Cancel",
       "done": "Original ink restored: save to keep it, or Ctrl+Z to undo.",
+      "donePartial": "What Ardoise can read of the tablet's page is restored: save to keep it, or Ctrl+Z to undo.",
+      "doneEmpty": "Empty page restored: save to keep it, or Ctrl+Z to undo.",
       "failed": "The original could not be read: {message}"
     },
     "papers": {

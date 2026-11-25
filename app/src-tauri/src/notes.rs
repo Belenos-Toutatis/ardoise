@@ -7,6 +7,7 @@ use std::path::Path;
 
 use ardoise_core::library::{FileStamp, Library, LibraryError};
 use ardoise_core::note::{Background, BackgroundImage, Note, PageSize, Template};
+use ardoise_device::pages::is_partial_page;
 use ardoise_ink::{Tool, outline};
 use ardoise_media::narration_header;
 use ardoise_render::{
@@ -96,6 +97,10 @@ pub struct OpenedNote {
     /// The narration the note holds, read from the header of its audio member (M17); `None` without
     /// one, or when it is damaged (the replay says why: `narration_info`).
     pub narration: Option<NarrationInfo>,
+    /// The note was made from only part of its tablet page, which could not be read whole
+    /// (`ardoise_device::pages::is_partial_page`): the editor says so.
+    #[serde(rename = "partialPage")]
+    pub partial_page: bool,
 }
 
 pub fn open_in(library: &Library, path: &Path) -> Result<OpenedNote, LibraryError> {
@@ -108,6 +113,7 @@ pub fn open_in(library: &Library, path: &Path) -> Result<OpenedNote, LibraryErro
         .and_then(|bytes| narration_header(bytes).ok())
         .map(|header| NarrationInfo::of(&header));
     Ok(OpenedNote {
+        partial_page: is_partial_page(&loaded.file),
         revision: loaded
             .file
             .revision
@@ -142,18 +148,32 @@ pub fn save_in_with_account(
     stamp: &FileStamp,
     account: Option<&str>,
 ) -> Result<FileStamp, LibraryError> {
-    save_file(library, path, note, stamp, account, None)
+    let extras = SaveExtras {
+        account,
+        ..SaveExtras::default()
+    };
+    save_file(library, path, note, stamp, extras)
 }
 
-/// [`save_in_with_account`] that, with `audio` (an `audio.opus` member), also makes it the note's
-/// narration, replacing any, in the same write.
+/// What a save writes besides the note, in the same write.
+#[derive(Debug, Clone, Copy, Default)]
+struct SaveExtras<'a> {
+    /// A line for the account of a revision ([`save_in_with_account`]).
+    account: Option<&'a str>,
+    /// An `audio.opus` member: the note's narration, replacing any.
+    audio: Option<&'a [u8]>,
+    /// Whether the note holds only part of its tablet page (`original::settle_partial_page`);
+    /// `None`: as the file says.
+    partial_page: Option<bool>,
+}
+
+/// [`save_in`] with `extras`.
 fn save_file(
     library: &Library,
     path: &Path,
     mut note: Note,
     stamp: &FileStamp,
-    account: Option<&str>,
-    audio: Option<&[u8]>,
+    extras: SaveExtras,
 ) -> Result<FileStamp, LibraryError> {
     let loaded = library.read(path)?;
     if loaded.stamp != *stamp {
@@ -167,11 +187,14 @@ fn save_file(
         path: loaded.path.clone(),
         source,
     })?;
-    if let Some(account) = account {
+    if let Some(account) = extras.account {
         file.add_revision_entry(note.modified, account);
     }
-    if let Some(audio) = audio {
+    if let Some(audio) = extras.audio {
         file.audio = Some(audio.to_vec());
+    }
+    if let Some(partial) = extras.partial_page {
+        crate::original::settle_partial_page(&mut file, partial);
     }
     file.thumbnail = background::settle(&mut file, &note);
     file.note = note;
@@ -239,7 +262,10 @@ pub async fn open_note(context: State<'_, AppContext>, path: String) -> CommandR
 /// (`background::Staging`); without it the file's own image member is kept, which must show
 /// the image the note describes (`background::check_keyless`). `narration_key` names the sound of
 /// a recording made while writing, kept in memory until now (`NarrationSaved::staged`): it is
-/// written in the same save as the note (M17, [`save_note_in`]).
+/// written in the same save as the note (M17, [`save_note_in`]). `partial_page`, from the editor of
+/// a note that was opened with it ([`OpenedNote::partial_page`]): whether the note still holds only
+/// part of its tablet page.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn save_note(
     app: AppHandle,
@@ -249,6 +275,7 @@ pub async fn save_note(
     stamp: FileStamp,
     image_key: Option<String>,
     narration_key: Option<String>,
+    partial_page: Option<bool>,
 ) -> CommandResult<FileStamp> {
     let library = library_of(&context)?;
     blocking(move || {
@@ -258,11 +285,22 @@ pub async fn save_note(
             Path::new(&path),
             note,
             &stamp,
-            image_key.as_deref(),
-            narration_key.as_deref(),
+            &SaveNoteWith {
+                image_key: image_key.as_deref(),
+                narration_key: narration_key.as_deref(),
+                partial_page,
+            },
         )
     })
     .await
+}
+
+/// What `save_note` is given besides the note.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SaveNoteWith<'a> {
+    pub image_key: Option<&'a str>,
+    pub narration_key: Option<&'a str>,
+    pub partial_page: Option<bool>,
 }
 
 /// What `save_note` does: the note saved with the background pixels staged under `image_key`
@@ -278,22 +316,19 @@ pub fn save_note_in(
     path: &Path,
     note: Note,
     stamp: &FileStamp,
-    image_key: Option<&str>,
-    narration_key: Option<&str>,
+    with: &SaveNoteWith,
 ) -> CommandResult<FileStamp> {
-    let audio = narration_key
+    let audio = with
+        .narration_key
         .map(|key| narration.staged_audio(key))
         .transpose()?;
-    let saved = save_with_keys(
-        library,
-        path,
-        note,
-        stamp,
-        image_key,
-        None,
-        audio.as_deref(),
-    )?;
-    if let Some(key) = narration_key {
+    let extras = SaveExtras {
+        account: None,
+        audio: audio.as_deref(),
+        partial_page: with.partial_page,
+    };
+    let saved = save_with_keys(library, path, note, stamp, with.image_key, extras)?;
+    if let Some(key) = with.narration_key {
         narration.drop_staged(key);
     }
     Ok(saved)
@@ -322,19 +357,21 @@ pub fn save_with_key_and_account(
     key: Option<&str>,
     account: Option<&str>,
 ) -> CommandResult<FileStamp> {
-    save_with_keys(library, path, note, stamp, key, account, None)
+    let extras = SaveExtras {
+        account,
+        ..SaveExtras::default()
+    };
+    save_with_keys(library, path, note, stamp, key, extras)
 }
 
-/// [`save_with_key_and_account`] that, with `audio` (an `audio.opus` member), also makes it the
-/// note's narration in the same write.
+/// [`save_with_key_and_account`] with every `extras`.
 fn save_with_keys(
     library: &Library,
     path: &Path,
     note: Note,
     stamp: &FileStamp,
     key: Option<&str>,
-    account: Option<&str>,
-    audio: Option<&[u8]>,
+    extras: SaveExtras,
 ) -> CommandResult<FileStamp> {
     let chosen = background::chosen_for_save(background::staging(), &note, key)?;
     if key.is_none() && note.background_image.is_some() {
@@ -343,10 +380,8 @@ fn save_with_keys(
             background::check_keyless(&on_disk.file.note, &note)?;
         }
     }
-    background::with_staged(chosen, || {
-        save_file(library, path, note, stamp, account, audio)
-    })
-    .map_err(library_error)
+    background::with_staged(chosen, || save_file(library, path, note, stamp, extras))
+        .map_err(library_error)
 }
 
 /// The page background as a PNG data URL; with `image`, the background image staged under its
@@ -730,8 +765,10 @@ mod tests {
             &saved.path,
             edited.clone(),
             &opened.stamp,
-            None,
-            Some(&key),
+            &SaveNoteWith {
+                narration_key: Some(&key),
+                ..SaveNoteWith::default()
+            },
         )
         .unwrap();
         let after = library.read(&saved.path).unwrap();
@@ -764,8 +801,10 @@ mod tests {
             &saved.path,
             edited.clone(),
             &stamp,
-            None,
-            Some(&key),
+            &SaveNoteWith {
+                narration_key: Some(&key),
+                ..SaveNoteWith::default()
+            },
         )
         .unwrap_err();
         assert_eq!(error.code(), "noStagedNarration");
@@ -779,8 +818,7 @@ mod tests {
             &saved.path,
             retitled,
             &stamp,
-            None,
-            None,
+            &SaveNoteWith::default(),
         )
         .unwrap();
         let after = library.read(&saved.path).unwrap().file;
@@ -812,8 +850,10 @@ mod tests {
             &saved.path,
             file.note.clone(),
             &stamp,
-            None,
-            Some(&key),
+            &SaveNoteWith {
+                narration_key: Some(&key),
+                ..SaveNoteWith::default()
+            },
         )
         .unwrap_err();
         assert_eq!(error.code(), "noteConflict");
@@ -829,8 +869,10 @@ mod tests {
             &copy.path,
             file.note.clone(),
             &copy.stamp,
-            None,
-            Some(&key),
+            &SaveNoteWith {
+                narration_key: Some(&key),
+                ..SaveNoteWith::default()
+            },
         )
         .unwrap();
         let copied = library.read(&copy.path).unwrap().file;
@@ -851,8 +893,10 @@ mod tests {
             &saved.path,
             kept.file.note.clone(),
             &newer,
-            None,
-            Some(&key),
+            &SaveNoteWith {
+                narration_key: Some(&key),
+                ..SaveNoteWith::default()
+            },
         )
         .unwrap();
         let after = library.read(&saved.path).unwrap().file;

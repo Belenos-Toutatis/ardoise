@@ -415,6 +415,14 @@ restent des notes, les autres restent sur la tablette). Le panneau résume ensui
 Chaque page devient une *note* à la racine de la bibliothèque, sans titre (la carte affiche la date), à la taille de
 la tablette. Vous pouvez la titrer, la ranger, l'étiqueter (chapitre 7).
 
+Il peut arriver qu'Ardoise ne sache pas lire une page de la Bamboo Slate jusqu'au bout. Elle devient quand même une note,
+avec ce qui a pu être lu et toutes les données de la tablette : rien n'est perdu. Elle n'empêche pas les pages suivantes
+d'arriver, tant que **Effacer de la tablette après import** est coché (voir « Les options »). Le panneau le dit à la fin de
+la synchronisation, et l'éditeur affiche **Page lue en partie** quand vous ouvrez la note. Gardez le journal de diagnostic
+(dossier `_ardoise\diagnostics` de la bibliothèque) : une version plus récente d'Ardoise pourra peut-être lire le reste,
+avec **Revenir à l'original** (chapitre 8). Si la tablette arrête l'envoi d'une page avant la fin, Ardoise la redemande une
+fois, puis la laisse sur la tablette et le dit.
+
 ### Les options
 
 Dans l'onglet **Réglages** du panneau **Tablette** (et dans **Réglages**, section **Tablette**), on règle une tablette à

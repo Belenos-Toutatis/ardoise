@@ -364,6 +364,8 @@ export interface OpenedNote {
   revision?: RevisionOfNote | null;
   /** The narration the note holds (M17: read when it opens, not only in a replay); null without one. */
   narration?: NarrationInfo | null;
+  /** The note was made from only part of its tablet page, which could not be read whole (Q27). */
+  partialPage?: boolean;
 }
 
 /** The registered tablet (`_ardoise/device.json`), shared by every PC. */

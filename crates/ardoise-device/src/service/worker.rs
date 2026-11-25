@@ -139,6 +139,27 @@ struct SyncRun {
     /// A failure that did not stop the sync (a rescue copy that could not be imported): said at
     /// its end when nothing else is.
     deferred: Option<DeviceError>,
+    /// The pages that could only be read in part (the Slate's): each is a note, the sync goes on.
+    /// Said at its end when nothing else is ([`Worker::finish_sync`]).
+    partial: Vec<PartialPage>,
+}
+
+/// A page that could only be read in part.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PartialPage {
+    /// Its note, as the interface names it (its file without the extension).
+    note: String,
+    /// What stopped the reading.
+    cause: String,
+}
+
+/// What is said of the pages read in part, `None` without any.
+fn partial_error(pages: &[PartialPage]) -> Option<DeviceError> {
+    let first = pages.first()?;
+    Some(DeviceError::PagePartial {
+        notes: pages.iter().map(|page| page.note.clone()).collect(),
+        cause: first.cause.clone(),
+    })
 }
 
 /// Where a live run that has not streamed yet stands with the blackboard's stored pages (SPEC
@@ -234,6 +255,13 @@ pub(super) struct Worker {
     /// Pages set apart as doubtful by a sync cut short by a lost link: said at the end of the
     /// sync that resumes it.
     doubtful_untold: Vec<u32>,
+    /// Pages of the Slate read in part that the end of their sync did not say (a failure was said
+    /// instead): said at the end of the Slate's next sync.
+    partial_untold: Vec<PartialPage>,
+    /// Pages of the Slate read in part that the last sync said, until its pages are counted again:
+    /// a sync that follows at once (a page finished meanwhile) says them again, or nobody would
+    /// have had time to read it.
+    partial_told: Vec<PartialPage>,
     stop: bool,
 }
 
@@ -274,6 +302,8 @@ impl Worker {
             board_record_unreadable: false,
             held: Vec::new(),
             doubtful_untold: Vec::new(),
+            partial_untold: Vec::new(),
+            partial_told: Vec::new(),
             stop: false,
         }
     }
@@ -665,7 +695,7 @@ impl Worker {
     /// link.
     fn count_pages(&mut self) {
         self.counted_at = self.session_time();
-        self.count_now = false;
+        let recounted = std::mem::take(&mut self.count_now);
         let counted = match self.session.as_mut() {
             Some(session) => session.stored_pages(),
             None => return,
@@ -683,6 +713,9 @@ impl Worker {
         }
         if self.config.options.auto_sync && pages > before {
             self.want_sync = true;
+        } else if recounted {
+            // No sync follows the last one at once: what it said of its pages stays shown.
+            self.partial_told.clear();
         }
         let pending = self.pending();
         self.publisher.update(|status| {
@@ -723,6 +756,7 @@ impl Worker {
             self.keep("the link was lost during a sync");
             self.finish_sync(run, Some(&DeviceError::Disconnected));
         }
+        self.settle_partial_told();
         if let Some(run) = self.live.as_mut()
             && run.active
         {
@@ -842,6 +876,7 @@ impl Worker {
             permission: None,
             board: BoardSync::default(),
             deferred: None,
+            partial: Vec::new(),
         };
         if to_read == 0 {
             self.finish_sync(run, None);
@@ -876,6 +911,8 @@ impl Worker {
                 self.keep(format!("sync failed: {other}"));
                 let at = self.now_ms();
                 let shown = sync_error(&other);
+                // This failure replaces what the last sync said of its pages.
+                self.partial_untold.append(&mut self.partial_told);
                 self.publisher.update(|status| {
                     status.sync = None;
                     status.last_sync = Some(LastSync {
@@ -906,20 +943,30 @@ impl Worker {
                 saved,
             });
         });
-        let page = match session.download_oldest() {
-            // Notifications can be lost on the way (BLE stack buffers): try once more.
-            Err(DeviceError::CrcMismatch { .. }) => session.download_oldest(),
-            other => other,
-        };
-        let page = match page {
-            Ok(page) => page,
+        let download = match session.download_page() {
+            Ok(download) => download,
             Err(error) => return self.sync_failed(error),
         };
+        let page = download.page;
+        if let Some(journal) = &self.journal {
+            if let Some(first) = download.retried {
+                journal.note(format!("page {index} downloaded again: {first}"));
+            }
+            journal.note(format!(
+                "page {index}: {} bytes received, {} announced",
+                page.bytes.len(),
+                page.announced_size
+            ));
+        }
+        let partial_before = run.partial.len();
         let message = match keep_page(&mut self.store_page, run, page, index) {
             Ok(message) => message,
             // The page stays on the tablet.
             Err(error) => return self.sync_failed(error),
         };
+        // The bytes of a page this version cannot read whole are in its note, and in the log of
+        // this connection, which is kept.
+        let partial = run.partial.get(partial_before).cloned();
         // Only now, the page safe in the library, may it leave the tablet; a cancellation
         // arriving meanwhile takes effect after it (cancel stops between pages).
         if run.delete {
@@ -927,6 +974,8 @@ impl Worker {
             let deleted = session.delete_oldest();
             session.set_cancel_flag(self.interrupt.clone());
             if let Err(error) = deleted {
+                self.note(message);
+                self.keep_partial(partial);
                 return self.sync_failed(error);
             }
             run.deleted += 1;
@@ -935,6 +984,7 @@ impl Worker {
         let finished = run.done >= run.to_read;
         let saved = saved_count(run);
         self.note(message);
+        self.keep_partial(partial);
         self.publisher.update(|status| {
             status.sync = Some(SyncProgress {
                 current: index,
@@ -944,6 +994,28 @@ impl Worker {
         });
         if finished && let Some(run) = self.sync.take() {
             self.finish_sync(run, None);
+        }
+    }
+
+    /// The link is gone before the pages were counted again: what the last sync said of its pages
+    /// stays shown, unless a sync that waits for the next connection is about to replace it, which
+    /// then says it again.
+    fn settle_partial_told(&mut self) {
+        if self.want_sync {
+            self.partial_untold.append(&mut self.partial_told);
+        } else {
+            self.partial_told.clear();
+        }
+    }
+
+    /// The page just stored could only be read in part: the log of this connection is kept.
+    fn keep_partial(&mut self, partial: Option<PartialPage>) {
+        if let Some(page) = partial {
+            self.keep(format!(
+                "a page could only be read in part ({}): {}",
+                page.note, page.cause
+            ));
+            self.write_journal();
         }
     }
 
@@ -1003,8 +1075,16 @@ impl Worker {
                 .collect();
             doubtful.retain(|time| kept.contains(time));
         }
+        // Pages read in part, of this sync and of those before it that could not say so (or that
+        // it follows at once): said when nothing else is.
+        let mut partial = Vec::new();
+        if run.kind == TabletKind::Slate {
+            partial.append(&mut self.partial_untold);
+            partial.append(&mut self.partial_told);
+        }
+        partial.extend(run.partial.iter().cloned());
         // A failure that did not stop the sync is said when nothing else is.
-        let deferred = run.deferred.clone();
+        let deferred = run.deferred.clone().or_else(|| partial_error(&partial));
         let error = match (error, deferred.as_ref()) {
             (None, deferred) => deferred,
             (error, Some(deferred)) => {
@@ -1024,10 +1104,12 @@ impl Worker {
                     .join(", ")
             ));
         }
-        // The doubtful page is what the user is told only when nothing else stopped the sync, or
-        // when what stopped it was that very page (its error would say it stayed on the tablet).
+        // The doubtful page is what the user is told only when nothing else stopped the sync (a
+        // page read in part stops nothing: it waits for the Slate's next sync, its note says it
+        // meanwhile), or when what stopped it was that very page (its error would say it stayed on
+        // the tablet).
         let told = match error {
-            None => doubtful.first().copied(),
+            None | Some(DeviceError::PagePartial { .. }) => doubtful.first().copied(),
             Some(DeviceError::PageUnreadable { time, .. }) => {
                 doubtful.iter().copied().find(|doubtful| doubtful == time)
             }
@@ -1048,6 +1130,12 @@ impl Worker {
                 run.to_read,
                 run.deleted
             )),
+            Some(error @ DeviceError::PagePartial { .. }) => self.note(format!(
+                "sync finished: {} of {} pages saved, {} deleted; {error}",
+                run.saved.len(),
+                run.to_read,
+                run.deleted
+            )),
             Some(error) => self.note(format!(
                 "sync failed after {} of {} pages saved, {} deleted: {error}",
                 run.saved.len(),
@@ -1059,7 +1147,15 @@ impl Worker {
         let remaining = run.total.saturating_sub(run.deleted);
         // The sync just counted the pages; after deletions, the count is due again now.
         self.counted_at = self.session_time();
-        self.count_now = error.is_none() && run.deleted > 0;
+        // Pages read in part stop nothing: the Slate's are counted again all the same. Not after
+        // a doubtful page is said: a sync that followed at once would hide it.
+        let counts = matches!(error, None | Some(DeviceError::PagePartial { .. }));
+        self.count_now = counts && run.deleted > 0;
+        if !matches!(error, Some(DeviceError::PagePartial { .. })) {
+            self.partial_untold.append(&mut partial);
+        } else if self.count_now {
+            self.partial_told = partial;
+        }
         let error = error.map(sync_error);
         // Whichever tablet still holds the link: the blackboard too.
         let active = self.link_kind();
@@ -1619,6 +1715,8 @@ impl Worker {
         }
         identity::forget(&root).map_err(|e| DeviceError::Storage(e.to_string()))?;
         self.record = None;
+        self.partial_untold.clear();
+        self.partial_told.clear();
         self.note("registration forgotten");
         let connection = self.waiting_connection();
         let board_connected = self.board.is_some();
@@ -1659,6 +1757,9 @@ impl Worker {
         }
         let reset = root != self.config.identity_root || library.is_none();
         self.config.library = library;
+        // Their notes are in the library left.
+        self.partial_untold.clear();
+        self.partial_told.clear();
         if !reset {
             return;
         }
@@ -1703,6 +1804,7 @@ impl Worker {
     fn close_session(&mut self, why: &str) {
         self.counted_at = None;
         self.count_now = false;
+        self.settle_partial_told();
         self.stored_event = false;
         self.slate_checked_at = None;
         let closed = match (self.session.take(), self.board.take()) {
@@ -2014,8 +2116,24 @@ fn keep_page_as(
             if !run.saved.contains(&shown) {
                 run.saved.push(shown);
             }
+            if let Stored::Partial(cause) = &stored.how {
+                let note = stored.path.file_stem().unwrap_or_default();
+                run.partial.push(PartialPage {
+                    note: note.to_string_lossy().into_owned(),
+                    cause: cause.clone(),
+                });
+            }
             Ok(match stored.how {
+                Stored::New if recorded.bytes.is_empty() => format!(
+                    "{name} holds no byte: an empty note saved as {}",
+                    stored.path.display()
+                ),
                 Stored::New => format!("{name} saved as {}", stored.path.display()),
+                Stored::Partial(why) => format!(
+                    "{name} cannot be read whole ({why}): what could be read, and all its bytes, \
+                     saved as {}",
+                    stored.path.display()
+                ),
                 Stored::NewNotUpdated(why) => format!(
                     "{name} saved as {} (a later store of a screen; the note of the earlier \
                      store was not updated: {why})",

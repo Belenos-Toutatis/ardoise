@@ -165,6 +165,46 @@ stay out of git).
 - **Logs end.** Each written service log ends with the disconnection and `end of this log: <why>`; the app stops the
   tablet service (and cancels a guided test) at exit, waiting at most 3 s.
 
+## Pages read in part (Q27, 2026-11-25)
+
+The Slate only gives its oldest page. A page that `stroke::decode` refused used to stay on it and hide every later page
+for good, with `libraryAccess` as the only explanation. The transfer's CRC is checked, so such bytes are the tablet's
+own: the decoder does not know something yet. User's decision (docs/questions.md Q27): a note of what can be read.
+
+- **Decoder**: `stroke::decode_partial` gives the strokes before the first error, and that error; `decode` (strict) runs
+  the same code. Nothing in the stream allows finding the next packet after one that makes no sense, so nothing after
+  it is guessed.
+- **Note**: `pages::partial_note_from_page` never fails; a page with a problem gives the note of the strokes before it
+  (empty if there is none), `original.bin` = all the bytes received, and the key `partialPage` (docs/file-format.md §2).
+  Same id as any page (`page_note_id`: time and bytes), so it is recognised when synced again, edited or not, and after a
+  decoder fix; the rules of the deletion and of the trash are unchanged. The check of the file written covers the key.
+- **A transfer cut short is not a page**: the CRC is the tablet's, over the bytes it sent, so a tablet that stops early
+  sends a right one (and the CRC of nothing is 0). Made into a note and deleted, the rest of such a page would be lost.
+  `Session::download_page` (used by the sync and by the guided test) asks a page shorter than announced once more, as it
+  does a corrupted one (one retry in all). Still shorter and not decodable to its end, it is refused
+  (`DeviceError::PageCutShort`, `pageCutShort`): nothing stored, nothing deleted. Still shorter but decodable, it is a
+  page (the retry covers a transfer cut between two packets, which decodes): announced and
+  received are equal in every real download of the Slate so far (8 of 8 in the journals), but on a trace of an Intuos
+  Pro the announced size is 12 bytes more than the file (protocol.md §5.1), so it cannot be a rule by itself. Both sizes
+  are in the log of every page. A page announced and received without any byte has nothing missing: an empty note, not
+  marked.
+- **Sync**: not stopped. `Stored::Partial` makes a `PartialPage` of the run; at the end `DeviceError::PagePartial`
+  (`pagePartial`, its message being the names of the notes) is said like a deferred failure, when nothing else is. It
+  stops neither the recount after the deletions nor the sync of a page finished meanwhile; what that second sync would
+  hide at once (or, when it cannot start, replace by its failure) is said again (`partial_told`), and what a failure or a
+  doubtful page of the blackboard hid is said by the next sync of the Slate (`partial_untold`). A doubtful page goes
+  first: its page may be lost, the Slate's is in its note. The panel shows it once, as a notice of the last sync, not as
+  an error. The log of the connection is kept (the page's bytes, the decode error, the note's path).
+- **"Back to the original"** (`app/src-tauri/src/original.rs`): a marked note's bytes are read as a page of the Slate
+  (never `page_kind`, which guesses), tolerantly; `NoteOriginal::Tablet.partial` says whether they still stop early. An
+  unmarked note stays strict (`originalDamaged`). The editor keeps the mark in its document (`Doc.partialPage`, so undo
+  and redo follow it), shows a warning while it is there, and gives it to `save_note` (`partialPage`):
+  `original::settle_partial_page` removes the key only when this version does read the page whole. The drafts keep it too
+  (`DraftRecord::partial_page`; absent from a draft of a note never read in part). A split leaves the file's mark as it
+  is, so the note is saved first when the two differ.
+- **Guided test**: the step fails and names the page, which is a note all the same.
+- **Simulator**: `SimTablet::store_raw_page`, `cut_next_transfer`, `refuse_requests_after`, `lose_link_at_request`.
+
 ## M10: the guided test keeps the tablet's pages as notes
 
 `DiagnosticConfig::page_import` (a `PageImport`, shareable) turns each downloaded page into a note of the library
