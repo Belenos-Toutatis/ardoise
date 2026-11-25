@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use ardoise_core::fsutil::{write_atomic, write_atomic_new};
-use ardoise_core::note::Note;
+use ardoise_core::note::{Note, PageSize};
 use ardoise_hwr::Recognizer;
 use ardoise_hwr::document::{Block, Document, Drawing, Labels};
 use ardoise_hwr::docx::to_docx;
@@ -41,6 +41,8 @@ use crate::handwriting::{Indexer, NoteReading, blocking, hwr_error, reading_of};
 
 /// Resolution of the drawings' images, in dots per inch.
 const DRAWING_DPI: u32 = 200;
+/// Largest side the renderer accepts, in pixels (`MAX_SIDE` of `ardoise-render`, which is private).
+const MAX_RENDER_SIDE: u32 = 16_384;
 /// Margin kept around a drawing, in page units (2 mm).
 const DRAWING_MARGIN: f32 = 200.0;
 /// Millimetres in an inch.
@@ -128,6 +130,18 @@ fn drawings_only(source: &Note, strokes: &[usize]) -> Note {
     note
 }
 
+/// The resolution at which a page of size `page` is rendered whole for its drawings: [`DRAWING_DPI`],
+/// lowered for a long page (notes joined end to end, up to 100 m) so that no side exceeds the
+/// renderer's limit; the export would fail with `imageTooLarge` otherwise, for a setting this
+/// dialogue does not have.
+fn drawing_dpi(page: PageSize) -> u32 {
+    let longest = page.width.max(page.height).max(1) as f32;
+    // Pixels per dpi along the longest side; the renderer refuses more than `MAX_RENDER_SIDE`.
+    let per_dpi = longest * scale_for_dpi(1);
+    let fitting = (MAX_RENDER_SIDE as f32 / per_dpi).floor() as u32;
+    DRAWING_DPI.min(fitting).max(1)
+}
+
 /// The images of `areas`, cropped from one rendering of the note that holds only their strokes
 /// (the text next to a drawing does not creep into it). Ink on white, except on a dark paper,
 /// where the paper stays so that light ink remains visible.
@@ -145,10 +159,11 @@ fn render_drawings(source: &LoadedSource, areas: &[&DrawingArea]) -> CommandResu
     let paper = paper_color(note.background.paper);
     let luminance =
         0.299 * f32::from(paper.r) + 0.587 * f32::from(paper.g) + 0.114 * f32::from(paper.b);
-    let options = RenderOptions::at_dpi(DRAWING_DPI, luminance < 110.0);
+    let dpi = drawing_dpi(note.page);
+    let options = RenderOptions::at_dpi(dpi, luminance < 110.0);
     let image = render_note(NoteView::new(&note, source.picture.as_deref()), &options)
         .map_err(render_error)?;
-    let scale = scale_for_dpi(DRAWING_DPI);
+    let scale = scale_for_dpi(dpi);
     areas
         .iter()
         .map(|area| {
@@ -161,13 +176,13 @@ fn render_drawings(source: &LoadedSource, areas: &[&DrawingArea]) -> CommandResu
                 pixel(b.right() + DRAWING_MARGIN).ceil() as u32,
                 pixel(b.bottom() + DRAWING_MARGIN).ceil() as u32,
             );
-            let png = encode_png_at(&cropped, Some(DRAWING_DPI)).map_err(render_error)?;
+            let png = encode_png_at(&cropped, Some(dpi)).map_err(render_error)?;
             Ok(Drawing {
                 png,
                 width_px: cropped.width,
                 height_px: cropped.height,
-                width_mm: cropped.width as f32 / DRAWING_DPI as f32 * MM_PER_INCH,
-                height_mm: cropped.height as f32 / DRAWING_DPI as f32 * MM_PER_INCH,
+                width_mm: cropped.width as f32 / dpi as f32 * MM_PER_INCH,
+                height_mm: cropped.height as f32 / dpi as f32 * MM_PER_INCH,
             })
         })
         .collect()
@@ -333,17 +348,27 @@ const IMAGES_SUFFIX: &str = "_images";
 /// Highest number tried in a folder name (` (2)`…).
 const MAX_FOLDER_SUFFIX: u32 = 999;
 
-/// Whether `name` is a drawing file of a previous export of `stem` (`<stem>-<number>.png`).
+/// Whether `name` is a drawing file of a previous export of `stem` (`<stem>-<number>.png`),
+/// whatever its case: Windows file names do not tell them apart, and a file renamed or copied by
+/// hand may have changed it.
 fn is_export_image(name: &str, stem: &str) -> bool {
-    name.strip_prefix(stem)
+    name.to_lowercase()
+        .strip_prefix(&stem.to_lowercase())
         .and_then(|rest| rest.strip_prefix('-'))
         .and_then(|rest| rest.strip_suffix(".png"))
         .is_some_and(|number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()))
 }
 
+/// Whether `name` is a file Windows adds to a folder on its own (thumbnails cache, folder
+/// settings): it does not make the folder the user's.
+fn is_windows_litter(name: &str) -> bool {
+    name.eq_ignore_ascii_case("Thumbs.db") || name.eq_ignore_ascii_case("desktop.ini")
+}
+
 /// The files of `folder` when it can be used for the drawings of `stem`'s export: it does not
 /// exist (nothing to list) or holds nothing but the drawings of a previous export of the same
-/// document. `None` when it holds anything else (the user's own files, a sub-folder), or is not
+/// document (the files Windows adds by itself are ignored, and never listed: they are not ours to
+/// remove). `None` when it holds anything else (the user's own files, a sub-folder), or is not
 /// a folder.
 fn previous_export_files(folder: &Path, stem: &str) -> Option<Vec<PathBuf>> {
     let entries = match fs::read_dir(folder) {
@@ -354,8 +379,12 @@ fn previous_export_files(folder: &Path, stem: &str) -> Option<Vec<PathBuf>> {
     let mut files = Vec::new();
     for entry in entries {
         let entry = entry.ok()?;
-        let name = entry.file_name();
-        if !entry.file_type().ok()?.is_file() || !is_export_image(&name.to_string_lossy(), stem) {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let is_file = entry.file_type().ok()?.is_file();
+        if is_file && is_windows_litter(&name) {
+            continue;
+        }
+        if !is_file || !is_export_image(&name, stem) {
             return None;
         }
         files.push(entry.path());
@@ -432,7 +461,14 @@ pub fn write_markdown(
     }
     write_atomic(destination, markdown.text.as_bytes()).map_err(|e| fail(destination, e))?;
     // Drawings of a previous, longer export are not linked any more (best effort).
-    for old in stale.iter().filter(|old| !written.contains(old)) {
+    // Compared without regard to case: an old `COURS-1.PNG` is the file just written as
+    // `Cours-1.png` on Windows, and removing it would remove the new drawing.
+    let lower = |path: &Path| path.to_string_lossy().to_lowercase();
+    let written_lower: Vec<String> = written.iter().map(|path| lower(path)).collect();
+    for old in stale
+        .iter()
+        .filter(|old| !written_lower.contains(&lower(old)))
+    {
         let _ = fs::remove_file(old);
     }
     if markdown.images.is_empty() {
@@ -1384,6 +1420,98 @@ lu
         assert!(!is_export_image("notes-a.png", "notes"));
         assert!(!is_export_image("other-1.png", "notes"));
         assert!(!is_export_image("notes-1.png.bak", "notes"));
+        // Windows does not tell the cases apart.
+        assert!(is_export_image("NOTES-1.PNG", "notes"));
+        assert!(is_export_image("Notes-3.png", "NOTES"));
+        assert!(is_export_image("Éléments-2.png", "éléments"));
+    }
+
+    #[test]
+    fn the_files_windows_adds_do_not_make_the_images_folder_the_users() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("notes.md");
+        let two = vec![sample_document(), sample_document()];
+        write_markdown(&destination, &two, &labels()).unwrap();
+        let folder = dir.path().join("notes_images");
+        // The Explorer, on a network share, drops its files in the folder.
+        fs::write(folder.join("Thumbs.db"), b"cache").unwrap();
+        fs::write(folder.join("desktop.ini"), b"[.ShellClassInfo]").unwrap();
+        // The images of the previous export in capitals, as a copy by hand may leave them.
+        fs::rename(folder.join("notes-2.png"), folder.join("NOTES-2.PNG")).unwrap();
+        let written = write_markdown(&destination, &[sample_document()], &labels()).unwrap();
+        // The same folder is reused: no ` (2)`, the images of a longer previous version are
+        // removed, and the files Windows added are left where they are.
+        assert_eq!(written[1], folder.join("notes-1.png"));
+        assert!(!dir.path().join("notes_images (2)").exists());
+        assert!(folder.join("notes-1.png").is_file());
+        assert!(!folder.join("NOTES-2.PNG").exists());
+        assert_eq!(fs::read(folder.join("Thumbs.db")).unwrap(), b"cache");
+        assert!(folder.join("desktop.ini").is_file());
+        // Without drawings now: the images go, the Explorer's files stay (so does the folder).
+        let mut plain = sample_document();
+        plain.blocks.retain(|b| !matches!(b, Block::Drawing(_)));
+        write_markdown(&destination, &[plain], &labels()).unwrap();
+        assert!(!folder.join("notes-1.png").exists());
+        assert!(folder.join("Thumbs.db").is_file() && folder.join("desktop.ini").is_file());
+        // A file of the user's among them still makes the folder theirs.
+        fs::write(folder.join("readme.txt"), b"keep").unwrap();
+        write_markdown(&destination, &[sample_document()], &labels()).unwrap();
+        assert!(dir.path().join("notes_images (2)").is_dir());
+        assert_eq!(fs::read(folder.join("readme.txt")).unwrap(), b"keep");
+    }
+
+    #[test]
+    fn a_page_longer_than_the_renderer_limit_still_gives_its_drawings() {
+        // Notes joined end to end: 2.16 m of page is 17 000 px at 200 dpi, over the limit.
+        let mut long = source();
+        long.note.page = PageSize {
+            width: 2_000,
+            height: 216_000,
+        };
+        long.note.strokes = vec![stroke(500.0, 200_000.0)];
+        let area = DrawingArea {
+            bounds: Bounds {
+                x: 500.0,
+                y: 200_000.0,
+                width: 1000.0,
+                height: 1000.0,
+            },
+            strokes: vec![0],
+        };
+        let drawings = render_drawings(&long, &[&area]).unwrap();
+        let drawing = &drawings[0];
+        assert!(drawing.width_px > 0 && drawing.height_px > 0);
+        // The size in millimetres is the real one at the lower resolution: 10 mm of ink and
+        // 2 x 2 mm of margin.
+        assert!(
+            (drawing.width_mm - 14.0).abs() < 1.0,
+            "{}",
+            drawing.width_mm
+        );
+        let image = ardoise_render::decode_png(&drawing.png).unwrap();
+        assert!(image.pixels.as_chunks::<4>().0.iter().any(|p| p[0] < 100));
+        // The resolution only goes down as far as the page needs, and never below one dot.
+        assert_eq!(drawing_dpi(source().note.page), DRAWING_DPI);
+        assert!(
+            drawing_dpi(PageSize {
+                width: 2_000,
+                height: 216_000
+            }) < DRAWING_DPI
+        );
+        assert_eq!(
+            drawing_dpi(PageSize {
+                width: 2_000,
+                height: 10_000_000
+            }),
+            4
+        );
+        assert_eq!(
+            drawing_dpi(PageSize {
+                width: 1,
+                height: u32::MAX
+            }),
+            1
+        );
     }
 
     #[test]

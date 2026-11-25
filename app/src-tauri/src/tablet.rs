@@ -234,6 +234,48 @@ pub fn rescue_fallback_dir() -> PathBuf {
         .join("blackboard-rescue")
 }
 
+/// Where the automatic exports that failed are written, beside the tablet's diagnostic logs
+/// (`<library>/_ardoise/diagnostics/`), which come back to the developer through the library.
+const AUTO_EXPORT_LOG: &str = "autoexport.log";
+/// Lines kept in [`AUTO_EXPORT_LOG`]: the oldest go first.
+const AUTO_EXPORT_LOG_LINES: usize = 200;
+
+/// Adds the `failures` of an automatic export (a note, why) to [`AUTO_EXPORT_LOG`], one line each
+/// with the local time. The library is a synced folder: the file is rewritten whole, atomically,
+/// never appended to in place. Nothing is written when there is no failure.
+fn log_auto_export_failures(
+    root: &Path,
+    failures: &[(PathBuf, String)],
+    now: chrono::DateTime<chrono::Local>,
+) -> std::io::Result<()> {
+    if failures.is_empty() {
+        return Ok(());
+    }
+    let dir = root
+        .join(ardoise_core::library::META_DIR)
+        .join(ardoise_device::log::DIAGNOSTICS_DIR);
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(AUTO_EXPORT_LOG);
+    let mut lines: Vec<String> = match std::fs::read_to_string(&path) {
+        Ok(text) => text.lines().map(str::to_owned).collect(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => return Err(error),
+    };
+    let stamp = now.format("%Y-%m-%d %H:%M:%S");
+    lines.extend(failures.iter().map(|(note, error)| {
+        // One line per failure, whatever the message holds.
+        let error = error.replace(['\r', '\n'], " ");
+        format!(
+            "{stamp} automatic export of {} failed: {error}",
+            note.display()
+        )
+    }));
+    let excess = lines.len().saturating_sub(AUTO_EXPORT_LOG_LINES);
+    let mut text = lines.split_off(excess).join("\n");
+    text.push('\n');
+    ardoise_core::fsutil::write_atomic(&path, text.as_bytes())
+}
+
 /// Writes a synced page as a note in the library root (`root`): the points turned for the
 /// orientation of `context`, a thumbnail, the note read back to check it
 /// (`LibrarySink::store_page`: a new note, or the note of an earlier store of the same screen
@@ -276,6 +318,10 @@ pub fn store_stored_page_in(
             "Ardoise: automatic export of {} failed: {error}",
             path.display()
         );
+    }
+    // The production exe has no console: the failure goes where the logs of the tablet are.
+    if let Err(error) = log_auto_export_failures(root, &report.failures, chrono::Local::now()) {
+        eprintln!("Ardoise: cannot write {AUTO_EXPORT_LOG}: {error}");
     }
     for (path, dpi) in &report.lowered {
         eprintln!(
@@ -1049,6 +1095,54 @@ mod tests {
             library.read(&again).unwrap().file.note.layers[0].name,
             "Layer 1"
         );
+        // ... but it is written where the diagnostics of the library are (the exe has no console).
+        let journal = dir
+            .path()
+            .join("_ardoise")
+            .join("diagnostics")
+            .join(AUTO_EXPORT_LOG);
+        let text = std::fs::read_to_string(&journal).unwrap();
+        assert_eq!(text.lines().count(), 1, "{text}");
+        assert!(
+            text.contains("automatic export of") && text.contains("failed:"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn failed_automatic_exports_are_kept_one_line_each_and_the_oldest_go() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = dir
+            .path()
+            .join("_ardoise")
+            .join("diagnostics")
+            .join(AUTO_EXPORT_LOG);
+        let now = chrono::Local::now();
+        // Nothing failed: no file.
+        log_auto_export_failures(dir.path(), &[], now).unwrap();
+        assert!(!journal.exists());
+        let note = PathBuf::from("Cours.ardoise");
+        log_auto_export_failures(
+            dir.path(),
+            &[(note.clone(), "locked\nby a reader".into())],
+            now,
+        )
+        .unwrap();
+        log_auto_export_failures(dir.path(), &[(note.clone(), "second".into())], now).unwrap();
+        let text = std::fs::read_to_string(&journal).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2, "{text}");
+        assert!(lines[0].contains("Cours.ardoise failed: locked by a reader"));
+        assert!(lines[1].ends_with("failed: second"));
+        // A long history keeps the last lines only.
+        let many: Vec<(PathBuf, String)> = (0..AUTO_EXPORT_LOG_LINES + 5)
+            .map(|n| (note.clone(), format!("error {n}")))
+            .collect();
+        log_auto_export_failures(dir.path(), &many, now).unwrap();
+        let text = std::fs::read_to_string(&journal).unwrap();
+        assert_eq!(text.lines().count(), AUTO_EXPORT_LOG_LINES);
+        assert!(text.lines().next().unwrap().ends_with("failed: error 5"));
+        assert!(text.lines().last().unwrap().ends_with("failed: error 204"));
     }
 
     /// Waits for a status event accepted by `what`.
