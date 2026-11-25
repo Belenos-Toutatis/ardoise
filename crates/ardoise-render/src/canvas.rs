@@ -180,7 +180,7 @@ impl PageCanvas {
         let mut pixmap = Pixmap::new(width, height).ok_or(size_error)?;
         let dark = match backdrop {
             Backdrop::Paper => {
-                background::paint(&mut pixmap, &note.background, scale);
+                background::paint(&mut pixmap, &note.background, note.page, scale);
                 if let Some(placed) = view.placed() {
                     picture::paint(&mut pixmap, &placed, scale);
                 }
