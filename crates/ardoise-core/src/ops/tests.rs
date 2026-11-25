@@ -1014,6 +1014,40 @@ fn split_at_time_moves_the_objects_that_appear_after_the_instant() {
     );
 }
 
+/// A bookmark between the cut and the first moved content goes with the new note at time 0 (it
+/// is no content, so it never sets the start), without overflowing the shift.
+#[test]
+fn split_at_time_puts_a_bookmark_before_the_first_moved_content_at_zero() {
+    let mut note = note_with(
+        "A",
+        vec![
+            stroke(0, &[(0.0, 0.0, 0), (1.0, 1.0, 5000)]),
+            stroke(0, &[(2.0, 2.0, 12_000), (3.0, 3.0, 13_000)]),
+        ],
+    );
+    note.objects = vec![
+        PageObject::bookmark("early", 0, 2000, 0.0, 0.0, "Avant"),
+        PageObject::bookmark("between", 0, 8000, 0.0, 0.0, "Entre"),
+        PageObject::bookmark("late", 0, 12_500, 0.0, 0.0, "Après"),
+    ];
+    let split = split_at_time(&note, 7000, new_note("B")).unwrap();
+    assert_eq!(ids(&split.kept), ["early"]);
+    assert_eq!(ids(&split.extracted), ["between", "late"]);
+    assert_eq!(split.extracted.objects[0].t, 0);
+    assert_eq!(split.extracted.objects[1].t, 500);
+    assert_eq!(split.extracted.strokes[0].points[0].t, 0);
+    // `created` follows the first moved sample, not the bookmark.
+    assert_eq!(split.extracted.created, note.created + 12_000);
+
+    // Only bookmarks after the cut: nothing to move.
+    let mut tail = note_with("C", vec![stroke(0, &[(0.0, 0.0, 0), (1.0, 1.0, 5000)])]);
+    tail.objects = vec![PageObject::bookmark("late", 0, 8000, 0.0, 0.0, "Fin")];
+    assert_eq!(
+        split_at_time(&tail, 7000, new_note("D")),
+        Err(OpsError::NothingToSplit)
+    );
+}
+
 #[test]
 fn split_by_zone_moves_the_objects_whose_centre_is_inside_on_visible_layers() {
     let mut note = note_with(
