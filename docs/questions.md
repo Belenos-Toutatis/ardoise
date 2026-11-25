@@ -463,4 +463,4 @@ Décisions du développeur, à confirmer :
 - *« Enregistrer comme copie »* : comme pour toute note de la tablette, la copie n'a pas les données de la tablette. Elles restent dans la note d'origine ; si son fichier a disparu du disque, il faut le reprendre dans la corbeille d'Ardoise (ou dans celle de Nextcloud, ou de Windows, selon ce qui l'a effacé), sinon dans le journal de diagnostic de la synchronisation, qui contient aussi ces octets. Les mettre dans la copie demanderait qu'Ardoise les garde en mémoire pendant l'édition : non fait.
 - *Lecture par une version plus ancienne* : elle garde l'avertissement sans le montrer ; « Revenir à l'original » y reste refusé (« original illisible ») pour cette note.
 
-**SPEC** : §4.1 dit « chaque page devient une note » ; une phrase est à proposer à l'utilisateur, par exemple : « Une page de la Bamboo Slate qui ne peut pas être lue jusqu'au bout devient une note avec ce qui a pu être lu, un avertissement et toutes les données de la tablette ; elle ne bloque pas les suivantes (`docs/questions.md` Q27). »
+**SPEC** : §4.1 le dit depuis le 2026-11-25, avec l'accord de l'utilisateur (« Oui, écris-la »).
