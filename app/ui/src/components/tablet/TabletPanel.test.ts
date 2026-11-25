@@ -242,6 +242,44 @@ describe('tablet panel: sync', () => {
     expect(q('[data-slot="last-sync"]')!.textContent).toContain('2 notes enregistrées.');
   });
 
+  it('says that a page could only be read in part, as what happened to a sync that did not fail', async () => {
+    const { q } = await render();
+    const partial = { code: 'pagePartial', message: '2026-11-24, 2026-11-24 (2)' };
+    mockTabletPatch({ lastSync: { at: Date.now(), saved: ['a', 'b', 'c'], deleted: 3, error: partial }, error: partial });
+    await settle();
+    const last = q('[data-slot="last-sync"]')!;
+    // Announced politely, once: not as an error of the panel too.
+    expect(last.getAttribute('role')).toBe('status');
+    expect(last.classList.contains('error')).toBe(false);
+    expect(q('[data-slot="tablet-error"]')).toBeNull();
+    expect(last.getAttribute('data-failed')).toBeNull();
+    expect(last.getAttribute('data-partial')).toBe('true');
+    const text = last.textContent!;
+    expect(text).toContain('Dernière synchronisation :');
+    expect(text).not.toContain('a échoué');
+    expect(text).not.toContain('restent sur la tablette');
+    expect(text).toContain('à vérifier : 2026-11-24, 2026-11-24 (2)');
+    expect(text).toContain("rien n'est perdu");
+    expect(text).toContain("« Revenir à l'original » (onglet « Page » de l'éditeur)");
+    expect(text).toContain('_ardoise\\diagnostics');
+    expect(text).toContain('3 notes enregistrées.');
+    expect(text).toContain('3 pages effacées de la tablette.');
+    // Nothing that would be false without deletion, or after a cancelled sync.
+    expect(text).not.toContain('a continué');
+  });
+
+  it('says that a page cut short stays on the tablet', async () => {
+    const { q } = await render();
+    const cut = { code: 'pageCutShort', message: 'the tablet sent 300 of the 812 bytes of a page' };
+    mockTabletPatch({ lastSync: { at: Date.now(), saved: ['a'], deleted: 1, error: cut }, error: cut });
+    await settle();
+    const last = q('[data-slot="last-sync"]')!;
+    expect(last.getAttribute('data-failed')).toBe('true');
+    expect(last.textContent).toContain("La Bamboo Slate a arrêté l'envoi d'une page avant la fin");
+    expect(last.textContent).toContain("ni enregistrée ni effacée");
+    expect(last.textContent).not.toContain('Xiaomi');
+  });
+
   it('says that only the oldest page can be read when nothing is deleted', async () => {
     const { q, action, click } = await render();
     await api.tabletSetOptions({ autoSync: false, deleteAfterImport: false, orientation: 'landscape', boardPosition: 'buttonsBottom', button: 'newPage' });

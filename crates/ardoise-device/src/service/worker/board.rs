@@ -653,6 +653,7 @@ impl Worker {
             permission,
             board: BoardSync::default(),
             deferred: None,
+            partial: Vec::new(),
         };
         let mut run = run;
         // Rescued pages first (docs/design/blackboard.md §9.2): one that cannot be imported

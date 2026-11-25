@@ -19,6 +19,11 @@ export type NoteOriginal =
       strokes: Stroke[];
       /** The page objects (text frames) it had: always empty for a tablet page; absent from older answers. */
       objects?: PageObject[];
+      /**
+       * The tablet page still cannot be read to its end (Q27): these are the strokes read before the problem. Absent
+       * for a page read whole.
+       */
+      partial?: boolean;
       /** The paper the first version had; never given for a tablet page. */
       paper?: Paper;
       /**

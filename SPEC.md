@@ -81,7 +81,7 @@ Priorités : **P1** = indispensable pour remplacer Inkspace, **P2** = proposé e
 
 - Recherche des tablettes à proximité et **enregistrement** guidé (appui long sur le bouton, animation explicative). L'enregistrement rend la tablette inutilisable par l'appli du téléphone et par Inkspace : l'assistant le dit avant.
 - Connexion automatique quand la tablette enregistrée est à portée.
-- **Synchronisation** des pages stockées : à la connexion (automatique, désactivable) ou à la demande ; chaque page devient une note ; option « effacer de la tablette après import réussi » (activée par défaut, l'effacement n'a lieu qu'après écriture vérifiée du fichier).
+- **Synchronisation** des pages stockées : à la connexion (automatique, désactivable) ou à la demande ; chaque page devient une note ; option « effacer de la tablette après import réussi » (activée par défaut, l'effacement n'a lieu qu'après écriture vérifiée du fichier). Une page de la Bamboo Slate qui ne peut pas être lue jusqu'au bout devient une note avec ce qui a pu être lu, un avertissement et toutes les données de la tablette ; elle ne bloque pas les suivantes (`docs/questions.md` Q27). Une page dont la tablette interrompt l'envoi, et qui est illisible, reste sur la tablette.
 - Informations : nom, batterie et charge, version du firmware, nombre de pages en mémoire, modèle et taille.
 - Réglages : renommer la tablette, mettre à l'heure, orientation (droitier / gaucher), oublier la tablette.
 - **Tablette Xiaomi** (ajout demandé par l'utilisateur le 2026-11-12, `docs/questions.md` Q14 ; protocole dans `docs/research/xiaomi-blackboard.md`) :

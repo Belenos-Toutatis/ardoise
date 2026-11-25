@@ -198,6 +198,37 @@ fn pages_already_in_the_library_are_not_stored_twice() {
     assert_eq!(notes(library.path()), after_first);
 }
 
+/// A page the decoder does not know: its step says so, and it is a note like the others (what can
+/// be read, all its bytes), so that nothing blocks the pages after it.
+#[test]
+fn a_page_that_cannot_be_decoded_is_kept_as_a_note_and_fails_the_sync_step() {
+    let tablet = SimTablet::slate_large();
+    let library = tempfile::tempdir().unwrap();
+    let raw = vec![0x62, 0x38, 0x62, 0x74, 0x04, 0x01];
+    tablet.store_raw_page(raw.clone());
+    let mut user = SimulatedUser::autonomous(tablet.clone());
+    let report = run(&tablet, &mut user, library.path());
+    let sync = step(&report, StepId::Sync);
+    assert_eq!(sync.status, StepStatus::Failed);
+    assert!(
+        detail(sync, "error").contains("reserved axis mask 01"),
+        "{sync:?}"
+    );
+    assert_eq!(detail(sync, "deleted"), "4");
+    assert_eq!(detail(sync, "notes"), "4");
+    assert_eq!(tablet.stored_page_count(), 0);
+    let opened = ardoise_core::library::Library::open(library.path()).unwrap();
+    let partial: Vec<_> = opened
+        .list()
+        .notes
+        .iter()
+        .map(|entry| opened.read(&entry.path).unwrap().file)
+        .filter(ardoise_device::pages::is_partial_page)
+        .collect();
+    assert_eq!(partial.len(), 1);
+    assert_eq!(partial[0].original, Some(raw));
+}
+
 #[test]
 fn a_second_run_reuses_the_saved_registration() {
     let _report = common::report("a_second_run_reuses_the_saved_registration");

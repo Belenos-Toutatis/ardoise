@@ -2,6 +2,13 @@
 
 ## Non publié
 
+### Corrigé (décision de l'utilisateur du 2026-11-25 : une page illisible ne bloque plus la tablette)
+
+- **Une page de la Bamboo Slate qu'Ardoise ne sait pas lire jusqu'au bout ne bloque plus les suivantes.** La tablette ne donne que sa page la plus ancienne : une page refusée y restait et cachait pour toujours celles d'après, avec un message faux (« la bibliothèque ne peut pas être lue ou modifiée »). Elle devient maintenant une note avec les traits lus avant le problème (vide si rien n'est lisible) et toutes les données de la tablette, octet pour octet ; elle n'est effacée de la tablette qu'après la vérification habituelle du fichier, et seulement si **Effacer de la tablette après import** est coché : les pages suivantes arrivent alors à leur tour. À la fin, le panneau dit quelle note vérifier, et le journal de la connexion est gardé dans `_ardoise\diagnostics`.
+- **L'éditeur affiche « Page lue en partie »** dans une telle note (message que l'on peut fermer ; jamais à la projection ni dans les exports). **Revenir à l'original** relit les données de la tablette : quand une version plus récente d'Ardoise sait les lire en entier, le message le dit, la page entière revient et l'avertissement disparaît une fois la note enregistrée (`Ctrl + Z` le ramène avec l'encre). Une copie de la note garde les données et l'avertissement ; une découpe ou une fusion, non. Q27.
+- **Une page que la tablette arrête d'envoyer avant la fin n'est pas traitée ainsi** : arrivée plus courte qu'annoncée et illisible, elle est redemandée une fois ; si elle est encore incomplète, elle reste sur la tablette, rien n'est écrit ni effacé, et le message le dit.
+- Le brouillon gardé après un arrêt brutal d'Ardoise et la découpe d'une note retiennent l'avertissement, et **Revenir à l'original** dit quand il ne rend qu'une partie de la page, ou une page vide.
+
 ### Corrigé (signalé par l'utilisateur le 2026-11-24 : page impossible à récupérer)
 
 - **Une page de la Bamboo Slate était refusée à la synchronisation** (*pressure leaves the 0..=65535 range (-1)*) et restait sur la tablette, bloquant les suivantes. La tablette code parfois le dernier point d'un trait avec une pression juste sous zéro (−1 ou −3 au lever du stylet) ; Ardoise la lit maintenant comme une pression nulle. La page n'a jamais été effacée de la tablette.

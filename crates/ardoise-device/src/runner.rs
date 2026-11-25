@@ -468,6 +468,11 @@ impl Run<'_> {
                     total: u32::from(total),
                 },
             );
+            lock(&log).note(format!(
+                "page {index}: {} bytes received, {} announced",
+                page.bytes.len(),
+                page.announced_size
+            ));
             // Without a place to keep the page, it must stay on the tablet.
             let Some(dir) = &dir else {
                 return Err("@noPagesFolder".into());

@@ -216,14 +216,15 @@ describe('moving notes to a binder, then undoing', () => {
 describe('the step outlives the notice and the view', () => {
   it('is still there when the card left the binder shown, the notice is gone and another view is open', async () => {
     const view = await render();
-    undoNotice.durationMs = 30;
+    // Long enough to be seen before it goes, even on a busy machine.
+    undoNotice.durationMs = 600;
     await view.click(view.q('[data-binder="Perso"]'));
     expect(view.titles()).toEqual(['Réunion parents']);
     await dropOn(view, 'Réunion parents', '[data-binder="Classe"]');
     // The card is gone from the view, the notice offers « Annuler » all the same.
     expect(view.titles()).toEqual([]);
     expect(notices(view)).toEqual(['« Réunion parents » déplacée dans « Classe ».']);
-    await vi.waitFor(() => expect(view.all('.activity-offer')).toHaveLength(0));
+    await vi.waitFor(() => expect(view.all('.activity-offer')).toHaveLength(0), { timeout: 4000 });
     undoNotice.durationMs = realDuration;
     // The user goes to look at the target, and only then sees the mistake.
     await view.click(view.q('[data-binder="Classe"]'));

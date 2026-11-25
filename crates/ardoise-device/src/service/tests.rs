@@ -318,6 +318,20 @@ fn device_errors_map_to_translated_codes() {
         (DeviceError::NoLibrary, "noLibrary"),
         (DeviceError::InvalidName("é".into()), "invalidName"),
         (DeviceError::Storage("disk full".into()), "libraryAccess"),
+        (
+            DeviceError::PagePartial {
+                notes: vec!["2026-10-24".into()],
+                cause: "packet at offset 4 uses the reserved axis mask 01".into(),
+            },
+            "pagePartial",
+        ),
+        (
+            DeviceError::PageCutShort {
+                announced: 812,
+                received: 300,
+            },
+            "pageCutShort",
+        ),
         (DeviceError::Unexpected("?".into()), "tablet"),
         (
             DeviceError::TransferIncomplete {
@@ -359,6 +373,33 @@ fn device_errors_map_to_translated_codes() {
         assert_eq!(error_code(&error), code, "{error:?}");
         assert_eq!(StatusError::from(&error).message, error.to_string());
     }
+}
+
+/// The end of a sync names the notes of the pages read in part, the first ones one by one; the
+/// cause is for the log.
+#[test]
+fn a_sync_says_the_notes_of_the_pages_read_in_part() {
+    let error = |count: usize| DeviceError::PagePartial {
+        notes: (1..=count).map(|n| format!("Note {n}")).collect(),
+        cause: "packet at offset 4 uses the reserved axis mask 01".into(),
+    };
+    assert_eq!(
+        sync_error(&error(1)),
+        StatusError::new("pagePartial", "Note 1")
+    );
+    assert_eq!(sync_error(&error(2)).message, "Note 1, Note 2");
+    assert_eq!(
+        sync_error(&error(7)).message,
+        "Note 1, Note 2, Note 3, Note 4, Note 5… (+2)"
+    );
+    let logged = error(1).to_string();
+    assert!(
+        logged.contains("offset 4") && logged.contains("Note 1"),
+        "{logged}"
+    );
+    // Any other failure keeps its own message.
+    let storage = DeviceError::Storage("disk full".into());
+    assert_eq!(sync_error(&storage).message, storage.to_string());
 }
 
 /// Hands every live input to the test.

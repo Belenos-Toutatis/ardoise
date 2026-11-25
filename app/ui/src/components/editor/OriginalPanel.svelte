@@ -46,7 +46,9 @@
     original === null
       ? t('editor.original.loading')
       : original.source === 'tablet'
-        ? t('editor.original.helpTablet')
+        ? original.strokes.length === 0
+          ? t(original.partial ? 'editor.original.helpTabletUnread' : 'editor.original.helpTabletEmpty')
+          : t(original.partial ? 'editor.original.helpTabletPartial' : 'editor.original.helpTablet')
         : original.source === 'firstVersion'
           ? original.strokes.length === 0
             ? t('editor.original.helpBlank')

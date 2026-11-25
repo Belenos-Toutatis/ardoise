@@ -19,7 +19,7 @@ use std::time::{Duration, Instant, SystemTime};
 use ardoise_core::library::Library;
 use ardoise_core::settings::Orientation;
 use ardoise_device::identity::{self, DEVICE_FORMAT, DeviceRecord, HostId};
-use ardoise_device::pages::LibrarySink;
+use ardoise_device::pages::{LibrarySink, is_partial_page};
 use ardoise_device::service::{
     Connection, LiveInput, LiveSink, LiveState, PageContext, PageStore, RegisterStep,
     ServiceConfig, TabletOptions, TabletService, TabletStatus,
@@ -67,6 +67,46 @@ fn with_pages(tablet: &SimTablet, count: usize) {
     {
         tablet.draw_page(page);
     }
+}
+
+/// The file of the first reference page followed by a packet that does not decode: a DELTA with
+/// the axis mask 01, which no device is known to send (protocol.md §6.4).
+fn unreadable_page() -> Vec<u8> {
+    let scratch = SimTablet::slate_large();
+    with_pages(&scratch, 1);
+    let mut bytes = scratch.stored_pages()[0].bytes.clone();
+    bytes.extend_from_slice(&[0x04, 0x01]);
+    assert!(ardoise_proto::stroke::decode(&bytes).is_err());
+    bytes
+}
+
+/// Reference pages 2 to `count`.
+fn with_later_pages(tablet: &SimTablet, count: usize) {
+    let config = tablet.config();
+    for page in drawings::reference_pages(config.width, config.height)
+        .iter()
+        .take(count)
+        .skip(1)
+    {
+        tablet.draw_page(page);
+    }
+}
+
+/// The notes of the library made from only part of a page.
+fn partial_notes(root: &Path) -> Vec<(PathBuf, ardoise_core::format::NoteFile)> {
+    let library = Library::open(root).unwrap();
+    notes(root)
+        .into_iter()
+        .map(|path| {
+            let file = library.read(&path).unwrap().file;
+            (path, file)
+        })
+        .filter(|(_, file)| is_partial_page(file))
+        .collect()
+}
+
+fn stem(path: &Path) -> String {
+    path.file_stem().unwrap().to_string_lossy().into_owned()
 }
 
 /// The app's page store without the app: `LibrarySink` in the library root. `refuse` makes
@@ -547,6 +587,620 @@ fn a_page_already_saved_is_deleted_without_a_second_note() {
     assert_eq!(notes(library.path()).len(), 2);
     assert_eq!(tablet.stored_page_count(), 0);
     run.service.shutdown();
+}
+
+#[test]
+fn a_page_that_cannot_be_decoded_becomes_a_note_and_the_sync_goes_on() {
+    let _report = common::report("service: a page that cannot be decoded");
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    let raw = unreadable_page();
+    tablet.store_raw_page(raw.clone());
+    with_later_pages(&tablet, 3);
+    registered_beforehand(&tablet, library.path());
+    let mut run = Running::virtual_time(
+        &tablet,
+        library.path(),
+        TabletOptions::default(),
+        library_store(None, None),
+    );
+    let status = run.wait(|s| s.last_sync.is_some());
+
+    // Three notes, the tablet empty, on one connection.
+    let last = status.last_sync.clone().unwrap();
+    assert_eq!((last.saved.len(), last.deleted), (3, 3));
+    assert_eq!(tablet.stored_page_count(), 0);
+    let written = notes(library.path());
+    assert_eq!(written.len(), 3);
+
+    // The note of the first page: what could be read (here every stroke, the bad packet being the
+    // last), all its bytes, and the mark. The other notes are whole.
+    let partial = partial_notes(library.path());
+    assert_eq!(partial.len(), 1);
+    let (path, file) = &partial[0];
+    assert_eq!(file.original.as_deref(), Some(raw.as_slice()));
+    assert!(!file.note.strokes.is_empty());
+    assert_eq!(
+        file.note.strokes.len(),
+        ardoise_proto::stroke::decode(&raw[..raw.len() - 2])
+            .unwrap()
+            .strokes
+            .iter()
+            .filter(|s| !s.points.is_empty())
+            .count()
+    );
+    assert!(last.saved.contains(&path.display().to_string()));
+
+    // The user is told, with the note's name.
+    let error = last.error.clone().unwrap();
+    assert_eq!(error.code, "pagePartial");
+    assert_eq!(error.message, stem(path));
+    assert_eq!(status.error, Some(error.clone()));
+    assert_eq!(status.device.as_ref().unwrap().stored_pages, 0);
+
+    // Nothing to do the second time: the error goes.
+    run.seen.clear();
+    run.service.sync_now(false).unwrap();
+    run.wait(|s| s.connection == Connection::Syncing);
+    let status = run.connected();
+    let again = status.last_sync.unwrap();
+    assert_eq!((again.saved.len(), again.deleted), (0, 0));
+    assert_eq!((again.error, status.error), (None, None));
+    assert_eq!(notes(library.path()).len(), 3);
+    assert_eq!(tablet.stats().connections, 1);
+    run.service.shutdown();
+
+    // The log of the connection is kept: why, and the note's place.
+    let logs = library.path().join("_ardoise").join("diagnostics");
+    let files: Vec<_> = std::fs::read_dir(&logs).unwrap().flatten().collect();
+    assert_eq!(files.len(), 1);
+    let (_, entries) = ardoise_device::log::read_log(&files[0].path()).unwrap();
+    let infos: Vec<&str> = entries.iter().map(|e| e.info.as_str()).collect();
+    let line = infos
+        .iter()
+        .find(|i| i.starts_with("page 1 cannot be read whole"))
+        .unwrap_or_else(|| panic!("{infos:#?}"));
+    assert!(line.contains("reserved axis mask 01"), "{line}");
+    assert!(line.contains(&path.display().to_string()), "{line}");
+    assert!(
+        infos
+            .iter()
+            .any(|i| i.starts_with("sync finished: 3 of 3 pages saved, 3 deleted; only part")),
+        "{infos:#?}"
+    );
+    say!(
+        "page 1 of 3 unreadable: 3 notes, tablet empty, told {} ({}), log kept",
+        error.code,
+        error.message
+    );
+}
+
+/// Bytes that look like another tablet's page, or like nothing: an empty note that holds them.
+#[test]
+fn a_page_without_a_readable_stroke_becomes_an_empty_note_that_holds_its_bytes() {
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    // Whole 7-byte records of the blackboard, as far as the bytes can tell.
+    let raw = vec![0xa1; 21];
+    tablet.store_raw_page(raw.clone());
+    with_later_pages(&tablet, 2);
+    registered_beforehand(&tablet, library.path());
+    let mut run = Running::virtual_time(
+        &tablet,
+        library.path(),
+        TabletOptions::default(),
+        library_store(None, None),
+    );
+    let status = run.wait(|s| s.last_sync.is_some());
+    let last = status.last_sync.unwrap();
+    assert_eq!((last.saved.len(), last.deleted), (2, 2));
+    assert_eq!(last.error.unwrap().code, "pagePartial");
+    let partial = partial_notes(library.path());
+    assert_eq!(partial.len(), 1);
+    let file = &partial[0].1;
+    assert!(file.note.strokes.is_empty());
+    assert_eq!(file.original.as_deref(), Some(raw.as_slice()));
+    assert_eq!(
+        (file.note.page.width, file.note.page.height),
+        (29_700, 21_600),
+        "the Slate's page"
+    );
+    assert_eq!(tablet.stored_page_count(), 0);
+    run.service.shutdown();
+}
+
+#[test]
+fn without_deletion_a_page_read_in_part_is_imported_once() {
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    let raw = unreadable_page();
+    tablet.store_raw_page(raw.clone());
+    with_later_pages(&tablet, 3);
+    registered_beforehand(&tablet, library.path());
+    let keep = TabletOptions {
+        delete_after_import: false,
+        ..TabletOptions::default()
+    };
+    let mut run = Running::virtual_time(&tablet, library.path(), keep, library_store(None, None));
+    let status = run.wait(|s| s.last_sync.is_some());
+    let last = status.last_sync.unwrap();
+    assert_eq!((last.saved.len(), last.deleted), (1, 0));
+    assert_eq!(last.error.unwrap().code, "pagePartial");
+    assert_eq!(tablet.stored_page_count(), 3);
+    assert_eq!(tablet.stored_pages()[0].bytes, raw);
+
+    // Synced again, the note edited meanwhile: the page is recognised, nothing is written, the
+    // edits and the mark stay.
+    let opened = Library::open(library.path()).unwrap();
+    let path = notes(library.path())[0].clone();
+    let mut loaded = opened.read(&path).unwrap();
+    loaded.file.note.title = "Corrigée".into();
+    loaded.file.note.strokes.pop();
+    opened.save(&path, &loaded.file, &loaded.stamp).unwrap();
+    run.service.sync_now(false).unwrap();
+    run.wait(|s| s.connection == Connection::Syncing);
+    let status = run.connected();
+    let last = status.last_sync.unwrap();
+    assert_eq!((last.saved.len(), last.deleted, last.error), (0, 0, None));
+    let partial = partial_notes(library.path());
+    assert_eq!(partial.len(), 1);
+    assert_eq!(partial[0].1.note.title, "Corrigée");
+    assert_eq!(partial[0].1.note.strokes, loaded.file.note.strokes);
+    assert_eq!(partial[0].1.original.as_deref(), Some(raw.as_slice()));
+
+    // Deletion on: the page goes without a second note, and the later pages come.
+    run.service.set_options(TabletOptions::default());
+    run.service.sync_now(false).unwrap();
+    let status = run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.deleted == 3));
+    let last = status.last_sync.unwrap();
+    assert_eq!((last.saved.len(), last.error), (2, None));
+    assert_eq!(notes(library.path()).len(), 3);
+    assert_eq!(tablet.stored_page_count(), 0);
+    run.service.shutdown();
+}
+
+/// Its note in the trash, deletion off: not imported again (the rule of any page).
+#[test]
+fn a_page_read_in_part_whose_note_was_deleted_is_not_imported_again_without_deletion() {
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    tablet.store_raw_page(unreadable_page());
+    registered_beforehand(&tablet, library.path());
+    let keep = TabletOptions {
+        delete_after_import: false,
+        ..TabletOptions::default()
+    };
+    let mut run = Running::virtual_time(&tablet, library.path(), keep, library_store(None, None));
+    run.wait(|s| s.last_sync.is_some());
+    let opened = Library::open(library.path()).unwrap();
+    opened.trash(&notes(library.path())[0]).unwrap();
+    run.service.sync_now(false).unwrap();
+    run.wait(|s| s.connection == Connection::Syncing);
+    run.connected();
+    assert!(notes(library.path()).is_empty());
+    assert_eq!(tablet.stored_page_count(), 1);
+    run.service.shutdown();
+}
+
+/// A failure that stops the sync is said first; the page read in part is said at the end of the
+/// next sync, when nothing else is.
+#[test]
+fn a_page_read_in_part_never_hides_a_failure_and_is_said_afterwards() {
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    tablet.store_raw_page(unreadable_page());
+    with_later_pages(&tablet, 3);
+    registered_beforehand(&tablet, library.path());
+    let mut run = Running::virtual_time(
+        &tablet,
+        library.path(),
+        TabletOptions::default(),
+        library_store(Some(2), None),
+    );
+    let status = run.wait(|s| s.last_sync.is_some());
+    let last = status.last_sync.unwrap();
+    assert_eq!((last.saved.len(), last.deleted), (1, 1));
+    assert_eq!(last.error.unwrap().code, "libraryAccess");
+    assert_eq!(tablet.stored_page_count(), 2);
+    let partial = partial_notes(library.path());
+    assert_eq!(partial.len(), 1);
+
+    run.service.sync_now(false).unwrap();
+    let status = run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.deleted == 2));
+    let error = status.last_sync.unwrap().error.unwrap();
+    assert_eq!(
+        (error.code.as_str(), error.message),
+        ("pagePartial", stem(&partial[0].0))
+    );
+    assert_eq!(notes(library.path()).len(), 3);
+
+    // Said once.
+    run.service.sync_now(false).unwrap();
+    run.wait(|s| s.connection == Connection::Syncing);
+    assert_eq!(run.connected().last_sync.unwrap().error, None);
+    run.service.shutdown();
+}
+
+/// The link lost right after the note was written and before the deletion: the sync that resumes
+/// deletes the page without a second note, and says it.
+#[test]
+fn a_page_read_in_part_is_said_by_the_sync_that_resumes_after_a_lost_link() {
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    tablet.store_raw_page(unreadable_page());
+    with_later_pages(&tablet, 2);
+    registered_beforehand(&tablet, library.path());
+    let dropping = tablet.clone();
+    let before = move |n: u16| {
+        if n == 1 {
+            dropping.disconnect_after(Duration::ZERO);
+        }
+    };
+    let mut run = Running::virtual_time(
+        &tablet,
+        library.path(),
+        TabletOptions::default(),
+        library_store(None, Some(Box::new(before))),
+    );
+    let status = run.wait(|s| s.last_sync.is_some());
+    let last = status.last_sync.unwrap();
+    assert_eq!(last.error.unwrap().code, "tabletNotConnected");
+    assert_eq!((last.saved.len(), last.deleted), (1, 0));
+    let status = run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.deleted == 2));
+    let last = status.last_sync.unwrap();
+    assert_eq!(last.saved.len(), 1, "no second note of the first page");
+    assert_eq!(last.error.unwrap().code, "pagePartial");
+    assert_eq!(notes(library.path()).len(), 2);
+    assert_eq!(partial_notes(library.path()).len(), 1);
+    assert_eq!(tablet.stored_page_count(), 0);
+    run.service.shutdown();
+}
+
+/// A page finished meanwhile is synced at once, as after any other sync, and that second sync
+/// says the page read in part again: it would otherwise be shown for an instant.
+#[test]
+fn the_sync_of_a_page_finished_meanwhile_still_says_the_page_read_in_part() {
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    tablet.store_raw_page(unreadable_page());
+    registered_beforehand(&tablet, library.path());
+    let drawing = tablet.clone();
+    let before = move |n: u16| {
+        if n == 1 {
+            with_later_pages(&drawing, 2);
+        }
+    };
+    let mut run = Running::virtual_time(
+        &tablet,
+        library.path(),
+        TabletOptions::default(),
+        library_store(None, Some(Box::new(before))),
+    );
+    let first = run.wait(|s| s.last_sync.is_some()).last_sync.unwrap();
+    assert_eq!(first.saved.len(), 1);
+    assert_eq!(first.error.clone().unwrap().code, "pagePartial");
+    let second = run
+        .wait(|s| s.last_sync.as_ref().is_some_and(|l| l.saved != first.saved))
+        .last_sync
+        .unwrap();
+    assert_eq!((second.saved.len(), second.deleted), (1, 1));
+    assert_eq!(second.error, first.error);
+    assert_eq!(tablet.stored_page_count(), 0);
+    assert_eq!(tablet.stats().connections, 1, "the same connection");
+    run.service.shutdown();
+}
+
+/// The log of the one connection that was kept: its lines.
+fn kept_log(root: &Path) -> Vec<String> {
+    let logs = root.join("_ardoise").join("diagnostics");
+    let files: Vec<_> = std::fs::read_dir(&logs).unwrap().flatten().collect();
+    assert_eq!(files.len(), 1);
+    let (_, entries) = ardoise_device::log::read_log(&files[0].path()).unwrap();
+    entries.into_iter().map(|e| e.info).collect()
+}
+
+/// The tablet stops a transfer early, with the right CRC of what it sent: the page is asked once
+/// more, and the second transfer, whole, is what is stored and deleted.
+#[test]
+fn a_page_cut_short_once_is_downloaded_again() {
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    with_pages(&tablet, 2);
+    registered_beforehand(&tablet, library.path());
+    let raw = tablet.stored_pages()[0].bytes.clone();
+    tablet.cut_next_transfer(2);
+    let mut run = Running::virtual_time(
+        &tablet,
+        library.path(),
+        TabletOptions::default(),
+        library_store(None, None),
+    );
+    let status = run.wait(|s| s.last_sync.is_some());
+    let last = status.last_sync.unwrap();
+    assert_eq!((last.saved.len(), last.deleted, last.error), (2, 2, None));
+    assert_eq!(tablet.stats().downloads, 3);
+    assert_eq!(tablet.stored_page_count(), 0);
+    assert!(partial_notes(library.path()).is_empty());
+    let opened = Library::open(library.path()).unwrap();
+    let originals: Vec<_> = notes(library.path())
+        .iter()
+        .filter_map(|path| opened.read(path).unwrap().file.original)
+        .collect();
+    assert!(originals.contains(&raw));
+    run.service.shutdown();
+}
+
+/// Twice: a failed transfer. Nothing is stored, nothing deleted, and the user is told so; the next
+/// sync starts with that page again.
+#[test]
+fn a_page_cut_short_twice_stays_on_the_tablet() {
+    let _report = common::report("service: a page cut short by the tablet");
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    with_pages(&tablet, 2);
+    registered_beforehand(&tablet, library.path());
+    let raw = tablet.stored_pages()[0].bytes.clone();
+    let cut = raw.len() - 1;
+    assert!(ardoise_proto::stroke::decode(&raw[..cut]).is_err());
+    assert!(
+        !ardoise_proto::stroke::decode_partial(&raw[..cut])
+            .strokes
+            .is_empty(),
+        "strokes that would have been made into a note"
+    );
+    tablet.cut_next_transfer(cut);
+    tablet.cut_next_transfer(cut);
+    let mut run = Running::virtual_time(
+        &tablet,
+        library.path(),
+        TabletOptions::default(),
+        library_store(None, None),
+    );
+    let status = run.wait(|s| s.last_sync.is_some());
+    let last = status.last_sync.unwrap();
+    assert_eq!((last.saved.len(), last.deleted), (0, 0));
+    let error = last.error.unwrap();
+    assert_eq!(error.code, "pageCutShort");
+    assert!(
+        error
+            .message
+            .contains(&format!("{cut} of the {} bytes", raw.len())),
+        "{error:?}"
+    );
+    assert_eq!(tablet.stored_page_count(), 2);
+    assert_eq!(tablet.stored_pages()[0].bytes, raw);
+    assert!(notes(library.path()).is_empty());
+
+    run.service.sync_now(false).unwrap();
+    let status = run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.deleted == 2));
+    assert_eq!(status.last_sync.unwrap().error, None);
+    assert_eq!(notes(library.path()).len(), 2);
+    assert!(partial_notes(library.path()).is_empty());
+    run.service.shutdown();
+    // Announced against received, in the log kept for the failure.
+    let infos = kept_log(library.path());
+    assert!(
+        infos.contains(&format!(
+            "page 1: {0} bytes received, {0} announced",
+            raw.len()
+        )),
+        "{infos:#?}"
+    );
+    say!(
+        "cut twice: {} ({}), nothing stored",
+        error.code,
+        error.message
+    );
+}
+
+/// Shorter than announced but read to its end: asked once more (it may have been cut between two
+/// packets), then a page as it came.
+#[test]
+fn a_short_page_that_decodes_is_asked_once_more_then_stored() {
+    for cuts in [1, 2] {
+        let library = new_library();
+        let tablet = SimTablet::slate_large();
+        with_pages(&tablet, 1);
+        registered_beforehand(&tablet, library.path());
+        let raw = tablet.stored_pages()[0].bytes.clone();
+        // Without its last end mark.
+        let cut = raw.len() - ardoise_proto::stroke::STROKE_END_PACKET.len();
+        for _ in 0..cuts {
+            tablet.cut_next_transfer(cut);
+        }
+        let mut run = Running::virtual_time(
+            &tablet,
+            library.path(),
+            TabletOptions::default(),
+            library_store(None, None),
+        );
+        let last = run.wait(|s| s.last_sync.is_some()).last_sync.unwrap();
+        assert_eq!((last.saved.len(), last.deleted, last.error), (1, 1, None));
+        assert_eq!(tablet.stats().downloads, 2);
+        let opened = Library::open(library.path()).unwrap();
+        let file = opened.read(&notes(library.path())[0]).unwrap().file;
+        let kept = if cuts == 1 { raw.len() } else { cut };
+        assert_eq!(file.original.as_deref(), Some(&raw[..kept]));
+        assert!(!is_partial_page(&file));
+        run.service.shutdown();
+    }
+}
+
+/// A page the tablet announces without any byte: an empty note, nothing to warn about.
+#[test]
+fn a_page_without_any_byte_warns_of_nothing() {
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    tablet.store_raw_page(Vec::new());
+    with_later_pages(&tablet, 2);
+    registered_beforehand(&tablet, library.path());
+    let mut run = Running::virtual_time(
+        &tablet,
+        library.path(),
+        TabletOptions::default(),
+        library_store(None, None),
+    );
+    let last = run.wait(|s| s.last_sync.is_some()).last_sync.unwrap();
+    assert_eq!((last.saved.len(), last.deleted, last.error), (2, 2, None));
+    assert!(partial_notes(library.path()).is_empty());
+    assert_eq!(tablet.stored_page_count(), 0);
+    run.service.shutdown();
+}
+
+/// Cancelled while the page read in part is stored: that page is stored and deleted, the others
+/// stay, and the page is said all the same.
+#[test]
+fn a_sync_cancelled_after_a_page_read_in_part_still_says_it() {
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    tablet.store_raw_page(unreadable_page());
+    with_later_pages(&tablet, 3);
+    registered_beforehand(&tablet, library.path());
+    let (reached, page_reached) = mpsc::channel();
+    let (go, wait_go) = mpsc::channel::<()>();
+    let wait_go = Mutex::new(wait_go);
+    let reached = Mutex::new(reached);
+    let before = move |n: u16| {
+        if n == 1 {
+            reached.lock().unwrap().send(()).unwrap();
+            wait_go.lock().unwrap().recv_timeout(WAIT).unwrap();
+        }
+    };
+    let options = TabletOptions {
+        auto_sync: false,
+        ..TabletOptions::default()
+    };
+    let mut run = Running::virtual_time(
+        &tablet,
+        library.path(),
+        options,
+        library_store(None, Some(Box::new(before))),
+    );
+    run.connected();
+    run.service.sync_now(false).unwrap();
+    page_reached.recv_timeout(WAIT).unwrap();
+    run.service.cancel();
+    go.send(()).unwrap();
+    let status = run.wait(|s| s.last_sync.is_some());
+    let last = status.last_sync.unwrap();
+    assert_eq!((last.saved.len(), last.deleted), (1, 1));
+    let error = last.error.unwrap();
+    let partial = partial_notes(library.path());
+    assert_eq!(
+        (error.code.as_str(), error.message),
+        ("pagePartial", stem(&partial[0].0))
+    );
+    assert_eq!(tablet.stored_page_count(), 2);
+    // The others, when asked; said once.
+    run.service.sync_now(false).unwrap();
+    let status = run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.deleted == 2));
+    assert_eq!(status.last_sync.unwrap().error, None);
+    assert_eq!(notes(library.path()).len(), 3);
+    run.service.shutdown();
+}
+
+/// The tablet refuses to delete the page read in part: the note is there, the refusal is said; the
+/// next sync deletes the page without a second note, and says it.
+#[test]
+fn a_page_read_in_part_whose_deletion_is_refused_is_deleted_and_said_by_the_next_sync() {
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    let raw = unreadable_page();
+    tablet.store_raw_page(raw.clone());
+    with_later_pages(&tablet, 2);
+    registered_beforehand(&tablet, library.path());
+    tablet.refuse_next_requests(ardoise_proto::message::opcode::DELETE_OLDEST, 1);
+    let mut run = Running::virtual_time(
+        &tablet,
+        library.path(),
+        TabletOptions::default(),
+        library_store(None, None),
+    );
+    let status = run.wait(|s| s.last_sync.is_some());
+    let last = status.last_sync.unwrap();
+    assert_eq!((last.saved.len(), last.deleted), (1, 0));
+    assert_eq!(last.error.unwrap().code, "syncRefused");
+    assert_eq!(tablet.stored_page_count(), 2);
+    let partial = partial_notes(library.path());
+    assert_eq!(partial.len(), 1);
+    assert_eq!(partial[0].1.original.as_deref(), Some(raw.as_slice()));
+
+    run.service.sync_now(false).unwrap();
+    let status = run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.deleted == 2));
+    let last = status.last_sync.unwrap();
+    assert_eq!(last.saved.len(), 1, "no second note of the first page");
+    let error = last.error.unwrap();
+    assert_eq!(
+        (error.code.as_str(), error.message),
+        ("pagePartial", stem(&partial[0].0))
+    );
+    assert_eq!(notes(library.path()).len(), 2);
+    assert_eq!(tablet.stored_page_count(), 0);
+    run.service.shutdown();
+    // Said in the log although the deletion failed.
+    let infos = kept_log(library.path());
+    assert!(
+        infos
+            .iter()
+            .any(|i| i.starts_with("page 1 cannot be read whole")),
+        "{infos:#?}"
+    );
+}
+
+/// A page finished meanwhile asks for a sync at once, which cannot start (the tablet refuses, or
+/// the link is lost): what the first sync said is replaced or about to be, so the sync that works
+/// says it again.
+#[test]
+fn a_page_read_in_part_is_said_again_when_the_sync_that_follows_cannot_start() {
+    for lost in [false, true] {
+        let library = new_library();
+        let tablet = SimTablet::slate_large();
+        tablet.store_raw_page(unreadable_page());
+        registered_beforehand(&tablet, library.path());
+        let drawing = tablet.clone();
+        let before = move |n: u16| {
+            if n == 1 {
+                with_later_pages(&drawing, 2);
+                // The next count is the one after the sync; the one after that starts the sync
+                // of the page finished meanwhile.
+                let count = ardoise_proto::message::opcode::FILES_COUNT;
+                if lost {
+                    drawing.lose_link_at_request(count, 1);
+                } else {
+                    drawing.refuse_requests_after(count, 1, 1);
+                }
+            }
+        };
+        let mut run = Running::virtual_time(
+            &tablet,
+            library.path(),
+            TabletOptions::default(),
+            library_store(None, Some(Box::new(before))),
+        );
+        let told = run.wait(|s| s.last_sync.is_some()).last_sync.unwrap();
+        assert_eq!(told.deleted, 1);
+        assert_eq!(told.error.clone().unwrap().code, "pagePartial");
+        if !lost {
+            let failed = run
+                .wait(|s| s.last_sync.as_ref().is_some_and(|l| l.error != told.error))
+                .last_sync
+                .unwrap();
+            assert_eq!(failed.error.unwrap().code, "syncRefused");
+        }
+        let last = run
+            .wait(|s| {
+                s.last_sync
+                    .as_ref()
+                    .is_some_and(|l| l.deleted == 1 && l.saved != told.saved)
+            })
+            .last_sync
+            .unwrap();
+        assert_eq!(last.saved.len(), 1);
+        assert_eq!(last.error, told.error, "lost: {lost}");
+        assert_eq!(tablet.stats().connections, 2, "lost: {lost}");
+        assert_eq!(tablet.stored_page_count(), 0);
+        run.service.shutdown();
+    }
 }
 
 #[test]

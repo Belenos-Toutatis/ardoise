@@ -116,6 +116,35 @@ describe('editor commands in the browser stand-in', () => {
 });
 
 
+describe('a page read in part in the editor commands (Q27)', () => {
+  beforeEach(() => resetMockLibrary());
+
+  const open = () => mockNotesInvoke('open_note', { path: path() }) as OpenedNote;
+  const save = (partialPage?: boolean) => {
+    const { note, stamp } = open();
+    mockNotesInvoke('save_note', { path: path(), note, stamp, partialPage });
+    return open().partialPage;
+  };
+
+  it('is told when the note opens, and its mark goes only once the page is read whole', () => {
+    expect(open().partialPage).toBe(false);
+    const entry = mockLibrary().notes.get(path())!;
+    if (entry.original?.source !== 'tablet') throw new Error('a tablet note');
+    entry.partialPage = true;
+    entry.original = { ...entry.original, partial: true };
+    expect(save()).toBe(true);
+    expect(save(false)).toBe(true);
+    delete entry.original.partial;
+    expect(save()).toBe(true);
+    expect(save(false)).toBe(false);
+    expect(save(true)).toBe(true);
+    // A note without a tablet page never takes it.
+    entry.partialPage = undefined;
+    delete entry.original;
+    expect(save(true)).toBe(false);
+  });
+});
+
 describe('the narration of a note in the editor commands (M17)', () => {
   beforeEach(() => {
     resetMockLibrary();

@@ -12,6 +12,7 @@ import { nearestVisibleLayer, type Doc } from './state';
  * One exception for the paper: slate over a first version on other paper is what writing under
  * live mode's blackboard leaves, and the chalk that needed it is going. Nothing is selected
  * afterwards, and new ink goes on the top visible layer. `doc` itself without an original.
+ * The doc of a page read in part (`partialPage`) stays one, unless its original is now the whole page.
  */
 export function revertToOriginal(doc: Doc, original: NoteOriginal): Doc {
   if (original.source === 'none' || original.layers.length === 0) return doc;
@@ -33,6 +34,8 @@ export function revertToOriginal(doc: Doc, original: NoteOriginal): Doc {
   // The rest of the document (the background image's pixels) stays; nothing is selected.
   const reverted: Doc = { ...doc, note, selection: [], activeLayer: nearestVisibleLayer(note, top) ?? top };
   delete (reverted as { objectSelection?: readonly number[] }).objectSelection;
+  // A tablet page read whole: the note is no longer a part of it (Q27).
+  if (original.source === 'tablet' && !original.partial) delete (reverted as { partialPage?: boolean }).partialPage;
   return reverted;
 }
 

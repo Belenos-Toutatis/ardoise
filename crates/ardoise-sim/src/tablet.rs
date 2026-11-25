@@ -157,7 +157,8 @@ impl SimConfig {
 /// A page stored on the simulated tablet.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredPage {
-    /// The strokes as stored, stamped with the tablet's time since power-up.
+    /// The strokes as stored, stamped with the tablet's time since power-up; none for a page given
+    /// as bytes ([`SimTablet::store_raw_page`]).
     pub strokes: Vec<Stroke>,
     /// The file the tablet sends for this page (Slate format).
     pub bytes: Vec<u8>,
@@ -219,9 +220,30 @@ struct State {
     drop_at: Option<Duration>,
     /// Number of coming page downloads that send a corrupted byte.
     corrupt_transfers: u32,
-    /// Requests refused with `b3 01 02` whatever the state: (opcode, how many more).
-    refusals: Vec<(u8, u32)>,
+    /// How many bytes the coming page downloads stop after, in order.
+    cut_transfers: VecDeque<usize>,
+    /// Requests that fail whatever the state.
+    request_faults: Vec<RequestFault>,
     stats: SimStats,
+}
+
+/// Coming requests that fail ([`SimTablet::refuse_next_requests`]).
+#[derive(Debug)]
+struct RequestFault {
+    opcode: u8,
+    /// Requests with this opcode answered normally first.
+    skip: u32,
+    /// Requests that fail, then.
+    left: u32,
+    kind: RequestFaultKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RequestFaultKind {
+    /// Refused with `b3 01 02`.
+    Refused,
+    /// Not answered: the link is lost.
+    LinkLost,
 }
 
 /// The tablet side of one connection.
@@ -296,7 +318,8 @@ impl SimTablet {
                     next_link_id: 1,
                     drop_at: None,
                     corrupt_transfers: 0,
-                    refusals: Vec::new(),
+                    cut_transfers: VecDeque::new(),
+                    request_faults: Vec::new(),
                     stats: SimStats::default(),
                 }),
             }),
@@ -409,6 +432,19 @@ impl SimTablet {
         state.store_sketch(wall);
     }
 
+    /// Stores a page whose file is `bytes` as they are, readable or not (a page this version of
+    /// the decoder does not know): it is announced, sent with its CRC and deleted like any other.
+    pub fn store_raw_page(&self, bytes: Vec<u8>) {
+        let wall = self.wall_seconds();
+        let mut state = self.state();
+        let timestamp = wall + state.clock_offset;
+        state.pages.push_back(StoredPage {
+            strokes: Vec::new(),
+            bytes,
+            timestamp,
+        });
+    }
+
     /// Queues pen movement for live mode. It starts when live mode starts (or right away if
     /// live mode is streaming), after any movement queued before.
     pub fn draw_live(&self, script: PenScript) {
@@ -487,12 +523,45 @@ impl SimTablet {
         state.corrupt_transfers = state.corrupt_transfers.saturating_add(1);
     }
 
+    /// The next page download stops after `bytes` bytes (of those announced) and ends normally, with
+    /// the CRC of what was sent. Each call cuts one more download: call it twice to cut a download
+    /// and its retry.
+    pub fn cut_next_transfer(&self, bytes: usize) {
+        self.state().cut_transfers.push_back(bytes);
+    }
+
     /// The next `count` requests with this opcode (from an authenticated host) are refused with
     /// `b3 01 02`, whatever the state, as a tablet in an unexpected state would.
     pub fn refuse_next_requests(&self, opcode: u8, count: u32) {
+        self.refuse_requests_after(opcode, 0, count);
+    }
+
+    /// [`refuse_next_requests`](Self::refuse_next_requests), after `skip` requests with this opcode
+    /// answered normally.
+    pub fn refuse_requests_after(&self, opcode: u8, skip: u32, count: u32) {
+        self.set_request_fault(RequestFault {
+            opcode,
+            skip,
+            left: count,
+            kind: RequestFaultKind::Refused,
+        });
+    }
+
+    /// After `skip` requests with this opcode answered normally, the link is lost at the next one,
+    /// which gets no answer.
+    pub fn lose_link_at_request(&self, opcode: u8, skip: u32) {
+        self.set_request_fault(RequestFault {
+            opcode,
+            skip,
+            left: 1,
+            kind: RequestFaultKind::LinkLost,
+        });
+    }
+
+    fn set_request_fault(&self, fault: RequestFault) {
         let mut state = self.state();
-        state.refusals.retain(|(op, _)| *op != opcode);
-        state.refusals.push((opcode, count));
+        state.request_faults.retain(|f| f.opcode != fault.opcode);
+        state.request_faults.push(fault);
     }
 
     // --- inspection -----------------------------------------------------------------------
@@ -868,6 +937,11 @@ impl State {
                 | Request::DownloadOldestFile
                 | Request::DeleteOldestFile
         );
+        let fault = match request {
+            Request::Connect { .. } | Request::RegisterPressButton { .. } => None,
+            _ if authenticated => self.take_request_fault(bytes.first().copied()),
+            _ => None,
+        };
         match request {
             Request::Connect { uuid } => {
                 let accepted = self.registered == Some(uuid);
@@ -890,7 +964,11 @@ impl State {
                 Vec::new()
             }
             _ if !authenticated => status(StatusCode::InvalidState),
-            _ if self.take_refusal(bytes.first().copied()) => status(StatusCode::InvalidState),
+            _ if fault == Some(RequestFaultKind::Refused) => status(StatusCode::InvalidState),
+            _ if fault == Some(RequestFaultKind::LinkLost) => {
+                self.drop_at = Some(now);
+                Vec::new()
+            }
             _ if page_command && self.mode == Mode::Live => status(StatusCode::InvalidState),
             Request::GetName => Reply::name_chunks(&self.config.name)
                 .iter()
@@ -976,31 +1054,30 @@ impl State {
         }
     }
 
-    /// Whether a request with `opcode` must be refused ([`SimTablet::refuse_next_requests`]);
-    /// counts the refusal.
-    fn take_refusal(&mut self, opcode: Option<u8>) -> bool {
-        let Some(opcode) = opcode else {
-            return false;
-        };
-        match self
-            .refusals
+    /// How a request with `opcode` must fail ([`SimTablet::refuse_next_requests`]), if it must;
+    /// counts the request.
+    fn take_request_fault(&mut self, opcode: Option<u8>) -> Option<RequestFaultKind> {
+        let fault = self
+            .request_faults
             .iter_mut()
-            .find(|(op, left)| *op == opcode && *left > 0)
-        {
-            Some((_, left)) => {
-                *left -= 1;
-                true
-            }
-            None => false,
+            .find(|fault| Some(fault.opcode) == opcode && fault.left > 0)?;
+        if fault.skip > 0 {
+            fault.skip -= 1;
+            return None;
         }
+        fault.left -= 1;
+        Some(fault.kind)
     }
 
     fn download(&mut self) -> Vec<(Channel, Vec<u8>)> {
         let Some(page) = self.pages.front() else {
             return status(StatusCode::InvalidState);
         };
-        let crc = ardoise_proto::crc32(&page.bytes);
         let mut data = page.bytes.clone();
+        if let Some(bytes) = self.cut_transfers.pop_front() {
+            data.truncate(bytes);
+        }
+        let crc = ardoise_proto::crc32(&data);
         if self.corrupt_transfers > 0 {
             self.corrupt_transfers -= 1;
             if let Some(byte) = data.get_mut(page.bytes.len() / 2) {

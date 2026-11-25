@@ -3658,6 +3658,66 @@ fn a_later_error_is_not_replaced_by_an_earlier_doubtful_page() {
     assert!(logs(library.path()).contains("kept apart as doubtful"));
 }
 
+/// A page of the blackboard set apart as doubtful by a sync cut short by a lost link, then a sync
+/// of the Slate that reads a page in part: the doubtful page is said first (its page may be lost,
+/// the Slate's is safe in its note), and the other by the Slate's next sync.
+#[test]
+fn a_page_of_the_slate_read_in_part_never_hides_an_earlier_doubtful_page() {
+    let library = new_library();
+    let (tablet, board) = both_known(library.path());
+    board.draw_page(&reference_board_pages()[0]);
+    board.draw_page(&reference_board_pages()[1]);
+    let taken = board.stored_pages()[0].time;
+    board.stall_next_download(70);
+    let elsewhere = board.clone();
+    board.on_next_download(move || elsewhere.page_taken_elsewhere(taken));
+    board.power_on();
+    // The link is lost while the second page is stored, before its deletion.
+    let lost = board.clone();
+    let mut run = Running::start(
+        vec![
+            SimDevice::Slate(tablet.clone()),
+            SimDevice::Board(board.clone()),
+        ],
+        library.path(),
+        TabletOptions::default(),
+        Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+        store_with(move |n| {
+            if n == 1 {
+                lost.power_off();
+            }
+            Ok(())
+        }),
+    );
+    let cut = run.wait(|s| s.last_sync.is_some()).last_sync.unwrap();
+    assert_eq!(cut.error.unwrap().code, "tabletNotConnected");
+    assert_eq!(rescued(library.path(), RescueKind::Doubtful).len(), 1);
+
+    tablet.store_raw_page(vec![0x62, 0x38, 0x62, 0x74, 0x04, 0x01]);
+    tablet.power_on();
+    let status = run.wait(|s| {
+        s.last_sync
+            .as_ref()
+            .is_some_and(|l| l.at != cut.at || l.deleted == 1)
+    });
+    let first = status.last_sync.unwrap();
+    assert_eq!((first.saved.len(), first.deleted), (1, 1));
+    assert_eq!(first.error.unwrap().code, "pageDoubtful");
+    assert_eq!(tablet.stored_page_count(), 0);
+
+    run.service.sync_now(false).unwrap();
+    let status = run.wait(|s| {
+        s.last_sync
+            .as_ref()
+            .is_some_and(|l| l.error.as_ref().is_none_or(|e| e.code != "pageDoubtful"))
+    });
+    assert_eq!(status.last_sync.unwrap().error.unwrap().code, "pagePartial");
+    run.service.sync_now(false).unwrap();
+    let status = run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.error.is_none()));
+    assert_eq!(status.error, None, "each is said once");
+    run.service.shutdown();
+}
+
 /// Pages held in memory (nothing could be written anywhere) all stay held when the first of them
 /// cannot be written again; each comes once it can (finding 6 of the review).
 #[test]

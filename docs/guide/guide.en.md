@@ -386,6 +386,13 @@ tablet). The panel then summarises: **3 notes saved.**, **3 pages deleted from t
 Each page becomes a *note* at the root of the library, untitled (the card shows the date), at the tablet's size. You
 can title it, file it, tag it (chapter 7).
 
+Ardoise may not know how to read a page of the Bamboo Slate to its end. The page still becomes a note, with what could be
+read and all the tablet's data: nothing is lost. It does not keep the pages after it from coming, as long as **Delete from
+the tablet after import** is ticked (see "The options"). The panel says so at the end of the sync, and the editor shows
+**Page read in part** when you open the note. Keep the diagnostic log (the `_ardoise\diagnostics` folder of the library): a
+later version of Ardoise may be able to read the rest, with **Back to the original** (chapter 8). If the tablet stops
+sending a page before its end, Ardoise asks for it once more, then leaves it on the tablet and says so.
+
 ### The options
 
 In the **Settings** tab of the **Tablet** panel (and in **Settings**, **Tablet** section), you set one tablet at a time:

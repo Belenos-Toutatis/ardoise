@@ -76,6 +76,10 @@ pub struct DraftRecord {
     pub session: String,
     #[serde(default)]
     pub image: Option<DraftImage>,
+    /// Whether the edited note held only part of its tablet page (Q27): `None` for a note that was
+    /// never read in part, and in the drafts written before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partial_page: Option<bool>,
     pub note: Note,
 }
 
@@ -99,6 +103,8 @@ pub struct Draft {
     pub saved_at: i64,
     pub base_stamp: Option<FileStamp>,
     pub has_image: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub partial_page: Option<bool>,
     pub note: Note,
 }
 
@@ -122,6 +128,7 @@ impl From<DraftRecord> for Draft {
             title: record.note.title.clone(),
             saved_at: record.saved_at,
             base_stamp: record.base_stamp,
+            partial_page: record.partial_page,
             note: record.note,
         }
     }
@@ -396,11 +403,14 @@ pub fn draft_of(
                 width: staged.width,
                 height: staged.height,
             }),
+        partial_page: None,
         note,
     }
 }
 
-/// Keeps the editor's unsaved note (`imageKey`: its staged background pixels).
+/// Keeps the editor's unsaved note (`imageKey`: its staged background pixels; `partialPage`: for a
+/// note that was read in part, whether it still holds only part of its tablet page).
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn draft_write(
     context: State<'_, AppContext>,
@@ -410,6 +420,7 @@ pub async fn draft_write(
     note: Note,
     base_stamp: Option<FileStamp>,
     image_key: Option<String>,
+    partial_page: Option<bool>,
 ) -> CommandResult<()> {
     let library = library_text(&context)?;
     let store = runtime.store.clone();
@@ -418,7 +429,7 @@ pub async fn draft_write(
         let staged = image_key
             .as_deref()
             .and_then(|key| background::staging().get(key).map(|staged| (key, staged)));
-        let record = draft_of(
+        let mut record = draft_of(
             &library,
             &path,
             &note_id,
@@ -427,6 +438,7 @@ pub async fn draft_write(
             &session,
             staged.as_ref().map(|(key, staged)| (*key, staged.as_ref())),
         );
+        record.partial_page = partial_page;
         let member = staged.as_ref().map(|(_, staged)| &staged.file);
         store.write(&record, member).map_err(failed)
     })

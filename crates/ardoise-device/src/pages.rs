@@ -8,6 +8,12 @@
 //! as imported ([`LibrarySink::store`]). Points are turned to the way the tablet is held ([`orient`]: landscape
 //! or portrait, either way up), in synced pages and in live mode alike.
 //!
+//! A page of the Slate that does not decode is not refused (it would block every later page: the
+//! tablet only gives its oldest one): it becomes a note holding the strokes read before the
+//! problem, if any, and the tablet's bytes untouched ([`partial_note_from_page`],
+//! [`Stored::Partial`]). The note records it ([`PARTIAL_PAGE_FIELD`]), so that "back to the
+//! original" reads its bytes again the same way, and whole once a later version can.
+//!
 //! A page of the Xiaomi blackboard ([`DownloadedPage::kind`]) is read as its 7-byte records
 //! ([`blackboard_note`]): its page is the blackboard's own, turned upright for the way it is held
 //! ([`orient_board`], [`BoardPosition`]: portrait, or landscape held on a side), and its times
@@ -116,6 +122,53 @@ fn record_board_position(file: &mut NoteFile, position: BoardPosition) {
     );
 }
 
+/// The top-level field of `note.json` that says the note was made from only part of its
+/// `original.bin`, a page of the Slate that could not be decoded whole: `true`. Absent otherwise,
+/// and from a note without `original.bin` (it describes those bytes). A field the format itself
+/// does not know, so every reader keeps it as it is (docs/file-format.md).
+pub const PARTIAL_PAGE_FIELD: &str = "partialPage";
+
+/// Whether `file` was made from only part of its `original.bin` ([`PARTIAL_PAGE_FIELD`]): the
+/// field is there, with any value but `false` or `null`, and so are the bytes.
+pub fn is_partial_page(file: &NoteFile) -> bool {
+    use serde_json::Value;
+    file.original.is_some()
+        && !matches!(
+            file.unknown_fields.get(PARTIAL_PAGE_FIELD),
+            None | Some(Value::Null | Value::Bool(false))
+        )
+}
+
+/// Records in `file` whether it was made from only part of its `original.bin`
+/// ([`PARTIAL_PAGE_FIELD`]); a note without one never takes the field.
+pub fn record_partial_page(file: &mut NoteFile, partial: bool) {
+    if partial && file.original.is_some() {
+        file.unknown_fields
+            .insert(PARTIAL_PAGE_FIELD.to_owned(), serde_json::Value::Bool(true));
+    } else {
+        file.unknown_fields.remove(PARTIAL_PAGE_FIELD);
+    }
+}
+
+/// Whether this version reads the `original.bin` of `file`, a page of the Slate, to its end (a
+/// page without any byte has nothing to read: [`partial_note_from_page`]).
+pub fn slate_page_is_whole(file: &NoteFile) -> bool {
+    file.original
+        .as_deref()
+        .is_some_and(|bytes| bytes.is_empty() || stroke::decode(bytes).is_ok())
+}
+
+/// The tablet whose page the `original.bin` of `file` is: the Slate for a note made from part of a
+/// page ([`is_partial_page`]), whatever its bytes look like (only the Slate's pages are imported
+/// that way); else what they look like ([`page_kind`]).
+pub fn original_kind(file: &NoteFile) -> TabletKind {
+    if is_partial_page(file) {
+        TabletKind::Slate
+    } else {
+        page_kind(file.original.as_deref().unwrap_or_default())
+    }
+}
+
 /// A blackboard page dated before this (2020-01-01 00:00:00 UTC, Unix seconds) has a clock that
 /// was never set: its note is dated by the import ([`blackboard_note`]). The tablet was sold from
 /// December 2021 (research note §1).
@@ -130,9 +183,10 @@ const SLATE_CLOCK_WRAP_MS: u64 = 327_680;
 /// Pause assumed before a stroke whose header gives no usable time.
 const UNKNOWN_GAP_MS: u64 = 100;
 
-/// Why a page could not become a note. The page then stays on the tablet.
+/// Why a page could not become a note.
 #[derive(Debug, thiserror::Error)]
 pub enum PageError {
+    /// Never out of a synchronisation, which keeps what can be read ([`partial_note_from_page`]).
     #[error("the page cannot be decoded: {0}")]
     Decode(#[from] StrokeError),
     #[error("cannot make a note id: {0}")]
@@ -385,11 +439,11 @@ impl ImportedPages {
 /// Start time of each stroke in milliseconds since the first one, from the stroke headers.
 /// The Slate's clock counts from power-up and wraps every 327.68 s: it is unwrapped assuming
 /// strokes are in order and less than one wrap apart.
-fn stroke_starts(file: &stroke::StrokeFile) -> Vec<u64> {
-    let mut starts = Vec::with_capacity(file.strokes.len());
+fn stroke_starts(strokes: &[stroke::Stroke]) -> Vec<u64> {
+    let mut starts = Vec::with_capacity(strokes.len());
     let mut elapsed = 0u64;
     let mut previous: Option<(StrokeTime, u64)> = None;
-    for s in &file.strokes {
+    for s in strokes {
         let samples = s.points.len() as u64 * SAMPLE_MS;
         let start = match (previous, s.time) {
             (None, _) => 0,
@@ -451,6 +505,8 @@ pub fn page_kind(bytes: &[u8]) -> TabletKind {
 ///
 /// A page of the blackboard (`page.kind`) ignores `size` and `orientation` and is turned for
 /// `board_position` instead: see [`blackboard_note`].
+///
+/// Fails when the page cannot be decoded whole; [`partial_note_from_page`] does not.
 pub fn note_from_page(
     page: &DownloadedPage,
     size: PageSize,
@@ -460,19 +516,55 @@ pub fn note_from_page(
     layer_name: &str,
     now_ms: i64,
 ) -> Result<NoteFile, PageError> {
-    if page.kind == TabletKind::Blackboard {
-        return Ok(blackboard_note(
-            page,
-            id,
-            layer_name,
-            now_ms,
-            board_position,
-        ));
+    let made = partial_note_from_page(
+        page,
+        size,
+        orientation,
+        board_position,
+        id,
+        layer_name,
+        now_ms,
+    );
+    match made.problem {
+        None => Ok(made.file),
+        Some(error) => Err(error.into()),
     }
-    let file = stroke::decode(&page.bytes)?;
-    let starts = stroke_starts(&file);
+}
+
+/// A note made from as much of a page as could be read ([`partial_note_from_page`]).
+#[derive(Debug, Clone)]
+pub struct PageNote {
+    pub file: NoteFile,
+    /// What stopped the reading of the page: `file` then holds the strokes before it, if any, and
+    /// says so ([`PARTIAL_PAGE_FIELD`]). `None` for a page read whole.
+    pub problem: Option<StrokeError>,
+}
+
+/// [`note_from_page`] that never fails: a page of the Slate that cannot be decoded gives the note
+/// of the strokes read before the problem, an empty one when there is none, marked as such; its
+/// `original.bin` is the bytes received, all of them. A page without any byte (announced as such:
+/// [`crate::session::Session::download_page`]) is an empty page, not one read in part: nothing of
+/// it is missing.
+pub fn partial_note_from_page(
+    page: &DownloadedPage,
+    size: PageSize,
+    orientation: Orientation,
+    board_position: BoardPosition,
+    id: String,
+    layer_name: &str,
+    now_ms: i64,
+) -> PageNote {
+    if page.kind == TabletKind::Blackboard {
+        return PageNote {
+            file: blackboard_note(page, id, layer_name, now_ms, board_position),
+            problem: None,
+        };
+    }
+    let read = stroke::decode_partial(&page.bytes);
+    let problem = read.error.filter(|_| !page.bytes.is_empty());
+    let starts = stroke_starts(&read.strokes);
     let max_pressure = f32::from(SLATE_MAX_PRESSURE);
-    let strokes = file
+    let strokes = read
         .strokes
         .iter()
         .zip(starts)
@@ -523,7 +615,11 @@ pub fn note_from_page(
     };
     let mut note_file = NoteFile::new(note);
     note_file.original = Some(page.bytes.clone());
-    Ok(note_file)
+    record_partial_page(&mut note_file, problem.is_some());
+    PageNote {
+        file: note_file,
+        problem,
+    }
 }
 
 /// The note of a page of the Xiaomi blackboard held as `position`: black ballpoint strokes, the
@@ -617,6 +713,15 @@ type TamperHook<'a> = Box<dyn Fn(&std::path::Path) + 'a>;
 /// clock is set at each connection and was right an hour later: research note §6).
 pub const CANDIDATE_MARGIN_MS: i64 = 86_400_000;
 
+/// A new note made from a page ([`LibrarySink::store_page`]).
+struct Created {
+    path: PathBuf,
+    /// The note's creation time.
+    created: i64,
+    /// What stopped the reading of the page, when its note holds only part of it.
+    problem: Option<StrokeError>,
+}
+
 /// What an update of an earlier note came to ([`LibrarySink::store_page`]).
 enum Update {
     /// Updated: its place, its creation time (kept).
@@ -632,6 +737,10 @@ enum Update {
 pub enum Stored {
     /// A new note.
     New,
+    /// A new note that holds only what could be read of the page, a page of the Slate that cannot
+    /// be decoded whole: why (for the log). The page is safe all the same, its bytes are in the
+    /// note.
+    Partial(String),
     /// A new note, although the page replaces an earlier store of its screen: why the note of
     /// that store was not updated (for the log).
     NewNotUpdated(String),
@@ -840,9 +949,11 @@ impl<'a> LibrarySink<'a> {
     /// ([`DownloadedPage::previous`]) updates the note of that store when there is exactly one,
     /// unedited since its import, and the new page holds it whole (SPEC §4.1,
     /// docs/design/blackboard.md §9.6); otherwise, and for every other page, a new note (id:
-    /// [`page_note_id`]). An `Err` keeps the page on the tablet (the session does not delete
-    /// it); a new note that failed its check is put aside ([`discard`](Self::discard)) so that
-    /// it never counts as imported: the next sync writes the page again.
+    /// [`page_note_id`]). A page of the Slate that cannot be decoded gives a note too, of what
+    /// could be read ([`Stored::Partial`], [`partial_note_from_page`]). An `Err` keeps the page on
+    /// the tablet (the session does not delete it); a new note that failed its check is put aside
+    /// ([`discard`](Self::discard)) so that it never counts as imported: the next sync writes the
+    /// page again.
     pub fn store_page(&mut self, page: DownloadedPage) -> Result<StoredPage, String> {
         let not_updated = match page.previous {
             Some(previous) if page.kind == TabletKind::Blackboard => {
@@ -860,14 +971,15 @@ impl<'a> LibrarySink<'a> {
             }
             _ => None,
         };
-        let (saved, created) = self.create(page)?;
-        let how = match not_updated {
-            Some(why) => Stored::NewNotUpdated(why),
-            None => Stored::New,
+        let made = self.create(page)?;
+        let how = match (made.problem, not_updated) {
+            (Some(error), _) => Stored::Partial(error.to_string()),
+            (None, Some(why)) => Stored::NewNotUpdated(why),
+            (None, None) => Stored::New,
         };
         Ok(StoredPage {
-            path: saved.path,
-            created,
+            path: made.path,
+            created: made.created,
             how,
         })
     }
@@ -947,11 +1059,10 @@ impl<'a> LibrarySink<'a> {
         Update::Done(saved, back.file.note.created)
     }
 
-    /// Saves `page` as a new note and checks it reads back identical; its place and its
-    /// creation time.
-    fn create(&mut self, page: DownloadedPage) -> Result<(SavedNote, i64), String> {
+    /// Saves `page` as a new note and checks it reads back identical.
+    fn create(&mut self, page: DownloadedPage) -> Result<Created, String> {
         let id = page_note_id(&page);
-        let mut file = note_from_page(
+        let PageNote { mut file, problem } = partial_note_from_page(
             &page,
             self.size,
             self.orientation,
@@ -959,8 +1070,7 @@ impl<'a> LibrarySink<'a> {
             id,
             &self.layer_name,
             (self.now_ms)(),
-        )
-        .map_err(|e| e.to_string())?;
+        );
         if let Some(maker) = &self.thumbnail {
             file.thumbnail = maker(&file.note);
         }
@@ -988,6 +1098,7 @@ impl<'a> LibrarySink<'a> {
         if back.file.note != expected.note
             || back.file.original != file.original
             || back.file.thumbnail != file.thumbnail
+            || is_partial_page(&back.file) != problem.is_some()
         {
             self.discard(&saved, &written);
             return Err(format!(
@@ -999,7 +1110,11 @@ impl<'a> LibrarySink<'a> {
             hook(&saved, &back.file.note);
         }
         self.saved.push(saved.clone());
-        Ok((saved, back.file.note.created))
+        Ok(Created {
+            path: saved.path,
+            created: back.file.note.created,
+            problem,
+        })
     }
 
     /// Reads back the note just written.
@@ -1138,7 +1253,8 @@ mod tests {
         let back = library.read(&first.path).unwrap();
         assert_eq!(back.file.note.origin, Origin::Tablet);
 
-        // An undecodable page is refused: it stays on the tablet.
+        // An undecodable page becomes a note too, empty when nothing of it can be read: it never
+        // blocks the pages after it on the tablet.
         let mut sink = LibrarySink::new(&library, "", A4_LANDSCAPE, "Layer 1", || 7);
         let bad = DownloadedPage {
             bytes: vec![1, 2, 3],
@@ -1147,8 +1263,246 @@ mod tests {
             kind: TabletKind::Slate,
             previous: None,
         };
-        assert!(sink.store(bad).is_err());
-        assert_eq!(library.list().notes.len(), 2);
+        let saved = sink.store(bad).unwrap();
+        assert_eq!(library.list().notes.len(), 3);
+        let back = library.read(&saved.path).unwrap().file;
+        assert!(back.note.strokes.is_empty());
+        assert_eq!(back.original, Some(vec![1, 2, 3]));
+        assert!(is_partial_page(&back));
+    }
+
+    /// A DELTA with the axis mask 01, which no device is known to send.
+    const BAD_PACKET: [u8; 2] = [0x04, 0x01];
+
+    /// A page whose second stroke is followed by a packet that does not decode, then by a third
+    /// stroke.
+    fn broken_page() -> DownloadedPage {
+        let mut broken = page(&[raw_stroke(0, 100, 5), raw_stroke(900, 300, 2)]);
+        broken.bytes.extend_from_slice(&BAD_PACKET);
+        let third = stroke::encode_slate(&[raw_stroke(2_000, 500, 4)]);
+        broken.bytes.extend_from_slice(&third[SLATE_MAGIC.len()..]);
+        broken.announced_size = broken.bytes.len() as u32;
+        broken
+    }
+
+    fn store_slate(library: &Library, page: DownloadedPage) -> StoredPage {
+        LibrarySink::new(library, "", A4_LANDSCAPE, "Calque 1", || 7)
+            .store_page(page)
+            .unwrap()
+    }
+
+    fn made_of(page: &DownloadedPage) -> PageNote {
+        partial_note_from_page(
+            page,
+            A4_LANDSCAPE,
+            Orientation::Landscape,
+            BoardPosition::ButtonsBottom,
+            page_note_id(page),
+            "Calque 1",
+            5,
+        )
+    }
+
+    #[test]
+    fn a_page_that_does_not_decode_gives_the_strokes_before_the_problem() {
+        let broken = broken_page();
+        let made = made_of(&broken);
+        assert!(matches!(
+            made.problem,
+            Some(StrokeError::ReservedMask { .. })
+        ));
+        // Exactly the note of the page cut before the bad packet, but for the mark, the id and
+        // the bytes: all of them are kept.
+        let whole = page(&[raw_stroke(0, 100, 5), raw_stroke(900, 300, 2)]);
+        let expected = made_of(&whole);
+        assert_eq!(expected.problem, None);
+        assert_eq!(made.file.note.strokes, expected.file.note.strokes);
+        assert_eq!(made.file.note.strokes.len(), 2);
+        assert_eq!(made.file.note.created, expected.file.note.created);
+        assert_eq!(made.file.note.origin, Origin::Tablet);
+        assert_eq!(made.file.original.as_deref(), Some(broken.bytes.as_slice()));
+        assert!(is_partial_page(&made.file) && !is_partial_page(&expected.file));
+        assert!(!slate_page_is_whole(&made.file) && slate_page_is_whole(&expected.file));
+        // Strictly, it is still an error.
+        let strict = note_from_page(
+            &broken,
+            A4_LANDSCAPE,
+            Orientation::Landscape,
+            BoardPosition::ButtonsBottom,
+            "id".into(),
+            "L",
+            5,
+        );
+        assert!(matches!(
+            strict,
+            Err(PageError::Decode(StrokeError::ReservedMask { .. }))
+        ));
+    }
+
+    #[test]
+    fn a_page_read_in_part_is_stored_once() {
+        let dir = tempfile::tempdir().unwrap();
+        ardoise_core::library::init(dir.path()).unwrap();
+        let library = Library::open(dir.path()).unwrap();
+        let broken = broken_page();
+        assert_eq!(ImportedPages::scan(&library).find(&library, &broken), None);
+        let stored = store_slate(&library, broken.clone());
+        match &stored.how {
+            Stored::Partial(why) => assert!(why.contains("reserved axis mask 01"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+        let file = library.read(&stored.path).unwrap().file;
+        assert!(is_partial_page(&file));
+        assert_eq!(file.unknown_fields[PARTIAL_PAGE_FIELD], true);
+
+        // The same page again: its note, edited or not, is found; nothing overwrites it.
+        let imported = ImportedPages::scan(&library);
+        assert_eq!(imported.find(&library, &broken), Some(stored.path.clone()));
+        let mut loaded = library.read(&stored.path).unwrap();
+        loaded.file.note.strokes.clear();
+        loaded.file.note.title = "Edited".into();
+        let title_path = loaded.path.clone();
+        library
+            .save(&title_path, &loaded.file, &loaded.stamp)
+            .unwrap();
+        let imported = ImportedPages::scan(&library);
+        assert_eq!(imported.find(&library, &broken), Some(title_path.clone()));
+        let edited = library.read(&title_path).unwrap().file;
+        assert!(is_partial_page(&edited));
+        assert_eq!(edited.original.as_deref(), Some(broken.bytes.as_slice()));
+
+        // A page cut elsewhere is another page.
+        let mut other = broken.clone();
+        other.bytes.pop();
+        assert_eq!(imported.find(&library, &other), None);
+
+        // In the trash: the rule of any page.
+        library.trash(&title_path).unwrap();
+        let imported = ImportedPages::scan(&library);
+        assert_eq!(imported.find(&library, &broken), None);
+        assert!(imported.in_trash(&broken));
+
+        // A copy of the note carries the same bytes and the same mark.
+        let again = store_slate(&library, broken.clone());
+        let (copy, _) = library.duplicate(&again.path, "copy-id", "copie").unwrap();
+        let copy = library.read(&copy.path).unwrap().file;
+        assert!(is_partial_page(&copy));
+        assert_eq!(copy.original, Some(broken.bytes));
+    }
+
+    #[test]
+    fn the_mark_of_a_page_read_in_part_goes_with_its_bytes_and_makes_it_a_slate_page() {
+        // Bytes that look like a page of the blackboard.
+        let mut page = broken_page();
+        page.bytes = vec![blackboard::record::TOUCH; blackboard::record::RECORD_LEN * 3];
+        assert_eq!(page_kind(&page.bytes), TabletKind::Blackboard);
+        let mut file = made_of(&page).file;
+        assert!(is_partial_page(&file));
+        assert_eq!(original_kind(&file), TabletKind::Slate);
+        // Any value but false or null is the mark (a later version may say more).
+        for (value, marked) in [
+            (serde_json::json!(true), true),
+            (serde_json::json!({ "offset": 4 }), true),
+            (serde_json::json!(false), false),
+            (serde_json::Value::Null, false),
+        ] {
+            file.unknown_fields
+                .insert(PARTIAL_PAGE_FIELD.into(), value.clone());
+            assert_eq!(is_partial_page(&file), marked, "{value}");
+        }
+        // Without it, the bytes are taken for what they look like.
+        record_partial_page(&mut file, false);
+        assert!(!file.unknown_fields.contains_key(PARTIAL_PAGE_FIELD));
+        assert_eq!(original_kind(&file), TabletKind::Blackboard);
+        // A note without the bytes never carries it.
+        file.original = None;
+        record_partial_page(&mut file, true);
+        assert!(!file.unknown_fields.contains_key(PARTIAL_PAGE_FIELD));
+        file.unknown_fields
+            .insert(PARTIAL_PAGE_FIELD.into(), true.into());
+        assert!(!is_partial_page(&file));
+        assert!(!slate_page_is_whole(&file));
+    }
+
+    /// A page without any byte has nothing that could not be read: an empty note, not marked,
+    /// recognised when synced again, whose original is an empty page.
+    #[test]
+    fn a_page_without_any_byte_is_an_empty_page_not_a_part_of_one() {
+        let dir = tempfile::tempdir().unwrap();
+        ardoise_core::library::init(dir.path()).unwrap();
+        let library = Library::open(dir.path()).unwrap();
+        let mut empty = page(&[]);
+        empty.bytes.clear();
+        empty.announced_size = 0;
+        let stored = store_slate(&library, empty.clone());
+        assert_eq!(stored.how, Stored::New);
+        let file = library.read(&stored.path).unwrap().file;
+        assert!(file.note.strokes.is_empty());
+        assert_eq!(file.original, Some(Vec::new()));
+        assert!(!is_partial_page(&file) && slate_page_is_whole(&file));
+        assert!(
+            note_from_page(
+                &empty,
+                A4_LANDSCAPE,
+                Orientation::Landscape,
+                BoardPosition::ButtonsBottom,
+                "id".into(),
+                "L",
+                5,
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            ImportedPages::scan(&library).find(&library, &empty),
+            Some(stored.path)
+        );
+    }
+
+    /// The mark is part of what the note just written must hold.
+    #[test]
+    fn a_partial_note_written_without_its_mark_fails_its_check() {
+        let dir = tempfile::tempdir().unwrap();
+        ardoise_core::library::init(dir.path()).unwrap();
+        let library = Library::open(dir.path()).unwrap();
+        let mut sink = LibrarySink::new(&library, "", A4_LANDSCAPE, "Layer 1", || 7);
+        sink.tamper = Some(Box::new(|path| {
+            let mut file = format::read_note(path).unwrap();
+            record_partial_page(&mut file, false);
+            std::fs::write(path, format::to_bytes(&file).unwrap()).unwrap();
+        }));
+        let error = sink.store_page(broken_page()).unwrap_err();
+        assert!(error.contains("does not read back"), "{error}");
+        assert!(library.list().notes.is_empty());
+    }
+
+    /// Whatever the tablet sends becomes a note that can be written and read back, with its bytes.
+    #[test]
+    fn every_truncation_and_mutation_of_a_page_makes_a_note_that_holds_its_bytes() {
+        let intact = page(&[raw_stroke(327_000, 1000, 6), raw_stroke(1_000, 2000, 3)]);
+        let check = |bytes: Vec<u8>| -> bool {
+            let mut page = intact.clone();
+            page.bytes = bytes;
+            let made = made_of(&page);
+            let written = format::to_bytes(&made.file).unwrap();
+            let back = format::read_from_bytes(&written).unwrap();
+            assert_eq!(back.original.as_deref(), Some(page.bytes.as_slice()));
+            assert_eq!(is_partial_page(&back), made.problem.is_some());
+            assert_eq!(slate_page_is_whole(&back), made.problem.is_none());
+            made.problem.is_some()
+        };
+        for len in 0..intact.bytes.len() {
+            check(intact.bytes[..len].to_vec());
+        }
+        let mut partial = 0;
+        for at in 0..intact.bytes.len() {
+            for value in [0x00, 0x01, 0x04, 0x08, 0x7f, 0x80, 0xaa, 0xfc, 0xff] {
+                let mut bytes = intact.bytes.clone();
+                bytes[at] = value;
+                partial += u32::from(check(bytes));
+            }
+        }
+        assert!(partial > 0);
+        assert!(!check(intact.bytes.clone()));
     }
 
     #[test]

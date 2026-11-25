@@ -51,6 +51,8 @@
   const waiting = $derived(pagesOnTablet(status));
   const sync = $derived(status?.sync ?? null);
   const lastSync = $derived(status?.lastSync ?? null);
+  /** Nothing stopped the last sync, but a page of the Slate could only be read in part (Q27): not a failed sync. */
+  const syncedInPart = $derived(lastSync?.error?.code === 'pagePartial');
   /**
    * Pages left on the tablet after a sync that deleted nothing: the tablet hands over only its
    * oldest page, the next one is reachable once that one is deleted.
@@ -256,7 +258,15 @@
       {/if}
     </section>
 
-    {#if lastSync?.error}
+    {#if lastSync?.error && syncedInPart}
+      <!-- Said here only (not as an error of the panel too): each page received is a note, what is missing is a part of one. -->
+      <p class="small banner notice last-sync partial" role="status" data-slot="last-sync" data-partial="true">
+        <span>{t('tablet.sync.last', { date: formatDate(lastSync.at, currentLocale()) })}</span>
+        <span>{errorMessage(lastSync.error)}</span>
+        {#if lastSync.saved.length > 0}<span>{savedText(lastSync.saved.length)}</span>{/if}
+        {#if lastSync.deleted > 0}<span>{deletedText(lastSync.deleted)}</span>{/if}
+      </p>
+    {:else if lastSync?.error}
       <p class="small last-sync failed error" role="alert" data-slot="last-sync" data-failed="true">
         <span>
           {t('tablet.sync.failed', {
@@ -439,7 +449,8 @@
     accent-color: var(--accent);
   }
 
-  .last-sync.failed span {
+  .last-sync.failed span,
+  .last-sync.partial span {
     display: block;
   }
 

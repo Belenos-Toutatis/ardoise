@@ -105,6 +105,11 @@ export interface Doc {
    * the image.
    */
   readonly backgroundPixels?: PixelsRef;
+  /**
+   * The note holds only part of its tablet page (Q27, `OpenedNote.partialPage`); absent otherwise. Going back to the
+   * original says it again (`lib/editor/original.ts`), and undo brings it back with the ink.
+   */
+  readonly partialPage?: boolean;
 }
 
 export interface EditorState extends Doc {

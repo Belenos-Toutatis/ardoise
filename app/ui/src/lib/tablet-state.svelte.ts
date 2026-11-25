@@ -97,9 +97,14 @@ export class TabletState {
    * race with the connection): not a failure to show, the confirmation to ask.
    */
   readonly confirmDeleteAsked = $derived(this.status?.error?.code === 'blackboardConfirmDelete');
-  /** The service's own failure, translated (the request for the confirmation is not one). */
+  /**
+   * The service's own failure, translated. Not the request for the confirmation; nor a page read in part (Q27), which
+   * stopped nothing: the last sync says it, once (`TabletUse.svelte`).
+   */
   readonly statusError = $derived(
-    this.status?.error && !this.confirmDeleteAsked ? errorMessage(this.status.error) : null,
+    this.status?.error && !this.confirmDeleteAsked && this.status.error.code !== 'pagePartial'
+      ? errorMessage(this.status.error)
+      : null,
   );
   /** What to show as the failure: the last action's, else the service's. */
   readonly error = $derived(this.actionError ?? this.statusError);

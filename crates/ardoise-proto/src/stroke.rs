@@ -39,6 +39,14 @@
 //! A real Slate sometimes ends a stroke on a pressure slightly below zero (-1 and -3 seen on a
 //! page of 2026-11-24, always on the last sample, as the pen lifts). Such a sample has a
 //! pressure of 0; the value kept for the next sample is the one the tablet coded.
+//!
+//! # Pages that do not decode
+//!
+//! [`decode`] is strict: the first packet that makes no sense fails the whole file. Nothing in the
+//! stream allows finding the next packet after such a one (no length, no marker that could not be
+//! data), so [`decode_partial`] stops there too, but gives the strokes read before it. The bytes
+//! of a page are checked by the transfer's CRC: such a page is most likely something this decoder
+//! does not know yet.
 
 /// Magic bytes of a Spark or Slate file (`b8bt`); the file header is these 4 bytes.
 pub const SLATE_MAGIC: [u8; 4] = [0x62, 0x38, 0x62, 0x74];
@@ -297,12 +305,83 @@ pub fn parse_packet(bytes: &[u8]) -> Result<(Packet, usize), StrokeError> {
 /// Points that come before any stroke header, or after a STROKE_END without a new header,
 /// open a stroke of unknown time.
 pub fn decode(data: &[u8]) -> Result<StrokeFile, StrokeError> {
-    let (format, mut offset) = file_header(data)?;
-    let mut builder = Builder::default();
-    let mut unknown_packets = 0;
-    let mut eof = false;
-    while offset < data.len() && !eof {
-        let (packet, size) = packet_at(data, offset)?;
+    let (format, offset) = file_header(data)?;
+    let mut reader = Reader::new(data, offset);
+    reader.read()?;
+    Ok(reader.file(format))
+}
+
+/// What [`decode_partial`] read of a page file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartialFile {
+    /// The strokes read before the error, in order; the last one may be cut short by it. All the
+    /// strokes of the file when there is no error.
+    pub strokes: Vec<Stroke>,
+    /// What stopped the reading; `None` when [`decode`] accepts the file.
+    pub error: Option<StrokeError>,
+}
+
+/// [`decode`] that keeps what comes before the first error instead of failing: the strokes read
+/// up to it (none when the file header itself is wrong), and that error. Never panics, whatever
+/// the bytes.
+pub fn decode_partial(data: &[u8]) -> PartialFile {
+    let offset = match file_header(data) {
+        Ok((_, offset)) => offset,
+        Err(error) => {
+            return PartialFile {
+                strokes: Vec::new(),
+                error: Some(error),
+            };
+        }
+    };
+    let mut reader = Reader::new(data, offset);
+    let error = reader.read().err();
+    PartialFile {
+        strokes: reader.builder.strokes,
+        error,
+    }
+}
+
+/// Reads the packets of a page file, after its header.
+struct Reader<'a> {
+    data: &'a [u8],
+    offset: usize,
+    builder: Builder,
+    unknown_packets: usize,
+    eof: bool,
+}
+
+impl<'a> Reader<'a> {
+    fn new(data: &'a [u8], offset: usize) -> Self {
+        Self {
+            data,
+            offset,
+            builder: Builder::default(),
+            unknown_packets: 0,
+            eof: false,
+        }
+    }
+
+    /// Reads up to the end of the file or the first error; what was read is in the builder either
+    /// way, its last stroke closed.
+    fn read(&mut self) -> Result<(), StrokeError> {
+        let result = self.packets();
+        self.builder.close();
+        result
+    }
+
+    fn packets(&mut self) -> Result<(), StrokeError> {
+        while self.offset < self.data.len() && !self.eof {
+            let size = self.packet()?;
+            self.offset += size;
+        }
+        Ok(())
+    }
+
+    /// Reads the packet at `offset` into the builder; its size.
+    fn packet(&mut self) -> Result<usize, StrokeError> {
+        let (packet, size) = packet_at(self.data, self.offset)?;
+        let builder = &mut self.builder;
         match packet {
             Packet::SlateStrokeHeader { time_ticks } => {
                 let time =
@@ -325,23 +404,26 @@ pub fn decode(data: &[u8]) -> Result<StrokeFile, StrokeError> {
                 builder.start(StrokeTime::Unix { seconds, subsecond }, Some(pen));
             }
             Packet::Point { x, y, pressure } | Packet::Delta { x, y, pressure } => {
-                builder.sample([x, y, pressure], offset)?;
+                builder.sample([x, y, pressure], self.offset)?;
             }
             Packet::LostPoint { count } => builder.lost(count),
             Packet::StrokeEnd => builder.close(),
-            Packet::Eof => eof = true,
-            Packet::Unknown { .. } => unknown_packets += 1,
+            Packet::Eof => self.eof = true,
+            Packet::Unknown { .. } => self.unknown_packets += 1,
         }
-        offset += size;
+        Ok(size)
     }
-    builder.close();
-    Ok(StrokeFile {
-        format,
-        strokes: builder.strokes,
-        unknown_packets,
-        eof,
-        trailing_bytes: data.len().saturating_sub(offset),
-    })
+
+    /// The file read whole.
+    fn file(self, format: FileFormat) -> StrokeFile {
+        StrokeFile {
+            format,
+            strokes: self.builder.strokes,
+            unknown_packets: self.unknown_packets,
+            eof: self.eof,
+            trailing_bytes: self.data.len().saturating_sub(self.offset),
+        }
+    }
 }
 
 /// Encodes strokes as a Slate page file, as the tablet would store them (used by the
@@ -1111,6 +1193,130 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn a_partial_decoding_keeps_what_comes_before_the_first_error() {
+        let first = slate_stroke(100, vec![point(1, 2, 3), point(4, 5, 6)]);
+        let second = slate_stroke(200, vec![point(7, 8, 9), point(10, 11, 12)]);
+        let whole = encode_slate(&[first.clone(), second.clone()]);
+
+        // A page that decodes: the same strokes, no error.
+        let partial = decode_partial(&whole);
+        assert_eq!(partial.strokes, decode(&whole).unwrap().strokes);
+        assert_eq!(partial.error, None);
+
+        // A DELTA with the reserved axis mask 01 after the strokes, then another stroke: what
+        // comes after it is not read.
+        let bad = whole.len();
+        let mut data = whole.clone();
+        data.extend_from_slice(&bytes("04 01"));
+        data.extend_from_slice(
+            encode_slate(&[slate_stroke(0, vec![point(1, 1, 1)])])[4..].as_ref(),
+        );
+        let error = StrokeError::ReservedMask { offset: bad };
+        assert_eq!(decode(&data), Err(error.clone()));
+        let partial = decode_partial(&data);
+        assert_eq!(partial.strokes, [first.clone(), second.clone()]);
+        assert_eq!(partial.error, Some(error));
+
+        // Inside the second stroke: it is cut short, its points before the error are kept.
+        let header_and_point = 9 + 9;
+        let first_len = encode_slate(std::slice::from_ref(&first)).len();
+        let mut data = whole[..first_len + header_and_point].to_vec();
+        data.extend_from_slice(&bytes("04 01"));
+        let partial = decode_partial(&data);
+        assert_eq!(
+            partial.strokes,
+            [first, slate_stroke(200, vec![point(7, 8, 9)])]
+        );
+        assert_eq!(
+            partial.error,
+            Some(StrokeError::ReservedMask {
+                offset: first_len + header_and_point
+            })
+        );
+
+        // Nothing readable: no stroke, and why.
+        assert_eq!(
+            decode_partial(&[]),
+            PartialFile {
+                strokes: Vec::new(),
+                error: Some(StrokeError::TooShort { len: 0 }),
+            }
+        );
+        let partial = decode_partial(&bytes("01 02 03 04 05"));
+        assert!(partial.strokes.is_empty());
+        assert_eq!(
+            partial.error,
+            Some(StrokeError::UnknownFormat {
+                magic: [1, 2, 3, 4]
+            })
+        );
+    }
+
+    /// Whatever the bytes: no panic, `decode` and `decode_partial` agree, and what a partial
+    /// decoding gives is the beginning of the whole page, point for point.
+    #[test]
+    fn no_truncation_or_mutation_of_a_page_breaks_the_decoder() {
+        fn check(data: &[u8]) -> PartialFile {
+            let partial = decode_partial(data);
+            match decode(data) {
+                Ok(file) => {
+                    assert_eq!(partial.error, None);
+                    assert_eq!(partial.strokes, file.strokes);
+                }
+                Err(error) => assert_eq!(partial.error, Some(error)),
+            }
+            partial
+        }
+        let strokes = [
+            slate_stroke(
+                1000,
+                (0..12u16)
+                    .map(|i| point(1000 + i * i, 2000 + i * 3, 500 + i * 100))
+                    .collect(),
+            ),
+            Stroke {
+                lost_points: 3,
+                ..slate_stroke(
+                    2000,
+                    vec![point(9000, 2000, 2047), point(0, 21_000, 0), point(1, 2, 3)],
+                )
+            },
+            slate_stroke(3000, vec![point(15_000, 10_000, 800)]),
+        ];
+        let page = encode_slate(&strokes);
+        let all: Vec<Point> = strokes.iter().flat_map(|s| s.points.clone()).collect();
+
+        for len in 0..=page.len() {
+            let partial = check(&page[..len]);
+            let read: Vec<Point> = partial
+                .strokes
+                .iter()
+                .flat_map(|s| s.points.clone())
+                .collect();
+            assert_eq!(read, all[..read.len()], "cut at {len}");
+        }
+        let mut refused = 0;
+        for at in 0..page.len() {
+            let mut mutated = page.clone();
+            for value in 0..=u8::MAX {
+                mutated[at] = value;
+                refused += u32::from(check(&mutated).error.is_some());
+            }
+        }
+        assert!(refused > 0, "some mutations cannot be decoded");
+        // Pages of one repeated byte, and an Intuos Pro header cut anywhere.
+        for value in 0..=u8::MAX {
+            check(&[value; 64]);
+            check(&[&SLATE_MAGIC[..], &[value; 40]].concat());
+            check(&[&INTUOS_PRO_MAGIC[..], &[value; 40]].concat());
+        }
+        for len in 0..=40 {
+            let intuos = [&INTUOS_PRO_MAGIC[..], &bytes("ff fa 80 01 02 03 04 05 06")].concat();
+            check(&intuos[..len.min(intuos.len())]);
+        }
     }
 
     #[test]

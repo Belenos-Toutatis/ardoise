@@ -7,7 +7,10 @@
 //!   the orientation of the settings). A page of the Xiaomi blackboard is recognised from its bytes
 //!   ([`page_kind`]) and comes back on the blackboard's own page, turned for the position the note
 //!   records it was made in ([`board_position_of`]: upright for a note made before the positions),
-//!   whatever the position set now.
+//!   whatever the position set now. A page of the Slate that could only be read in part when it was
+//!   synced ([`is_partial_page`]) is read again the same way, and whole as soon as this version
+//!   reads it whole: the original says which it is, and the note's mark goes once the editor saves
+//!   the whole page ([`settle_partial_page`]).
 //! - Any other note (live mode, Inkspace import, made in Ardoise) gets `original.ardoise` when
 //!   the editor first saves a change of its ink over it ([`keep_original`], called by
 //!   `notes::save_in`), or when live mode first writes new ink on it ([`keep_resumed_original`],
@@ -37,8 +40,12 @@ use ardoise_core::library::Library;
 use ardoise_core::note::{BackgroundImage, Layer, Note, PageObject, PageSize, Paper};
 use ardoise_core::settings::{Orientation, Settings};
 use ardoise_device::identity;
-use ardoise_device::pages::{board_position_of, note_from_page, page_kind};
+use ardoise_device::pages::{
+    board_position_of, is_partial_page, note_from_page, original_kind, partial_note_from_page,
+    record_partial_page, slate_page_is_whole,
+};
 use ardoise_device::session::DownloadedPage;
+use ardoise_device::transport::TabletKind;
 use ardoise_ink::Stroke;
 use serde::Serialize;
 use tauri::State;
@@ -62,6 +69,9 @@ pub enum NoteOriginal {
         /// Always empty (a tablet's page has none), given all the same: the note's page objects
         /// are replaced by these, as its strokes are.
         objects: Vec<PageObject>,
+        /// The page still cannot be read to its end: these are the strokes before the problem.
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        partial: bool,
     },
     /// As it was before its first edit in Ardoise (`original.ardoise`), with the placement of
     /// the background image it had then (its pixels are the note file's, if it still has them).
@@ -172,23 +182,38 @@ pub fn original_of(file: &NoteFile, tablet: &TabletContext) -> CommandResult<Not
             bytes: bytes.clone(),
             timestamp: None,
             announced_size: u32::try_from(bytes.len()).unwrap_or(u32::MAX),
-            kind: page_kind(bytes),
+            kind: original_kind(file),
             previous: None,
         };
         // A page of the blackboard comes back the way up it was made in (its note says how the
         // blackboard was held; a position this version does not know: upright, the tablet's
         // own frame).
         let board_position = board_position_of(file).unwrap_or_default();
-        let decoded = note_from_page(
-            &page,
-            tablet.size,
-            tablet.orientation,
-            board_position,
-            file.note.id.clone(),
-            tablet.layer_name,
-            now_ms(),
-        )
-        .map_err(|e| damaged(&e))?;
+        let id = file.note.id.clone();
+        let (decoded, partial) = if is_partial_page(file) {
+            let made = partial_note_from_page(
+                &page,
+                tablet.size,
+                tablet.orientation,
+                board_position,
+                id,
+                tablet.layer_name,
+                now_ms(),
+            );
+            (made.file, made.problem.is_some())
+        } else {
+            let made = note_from_page(
+                &page,
+                tablet.size,
+                tablet.orientation,
+                board_position,
+                id,
+                tablet.layer_name,
+                now_ms(),
+            )
+            .map_err(|e| damaged(&e))?;
+            (made, false)
+        };
         // As the synced note was stored: positions and pressures as the format keeps them.
         let stored = to_bytes(&NoteFile::new(decoded.note))
             .and_then(|bytes| read_from_bytes(&bytes))
@@ -199,6 +224,7 @@ pub fn original_of(file: &NoteFile, tablet: &TabletContext) -> CommandResult<Not
             layers: note.layers,
             strokes: note.strokes,
             objects: note.objects,
+            partial,
         });
     }
     if let Some(bytes) = &file.original_note {
@@ -213,6 +239,21 @@ pub fn original_of(file: &NoteFile, tablet: &TabletContext) -> CommandResult<Not
         });
     }
     Ok(NoteOriginal::None)
+}
+
+/// What the editor says of the tablet page of the note it saves over `file` (`partial`: the note
+/// holds only part of it; `false` once "back to the original" gave it whole, `true` again when that
+/// was undone). The mark goes only when this version does read the page whole, and is never put on
+/// a note that has no page of the Slate.
+pub fn settle_partial_page(file: &mut NoteFile, partial: bool) {
+    let settled = if partial {
+        original_kind(file) == TabletKind::Slate
+    } else {
+        slate_page_is_whole(file)
+    };
+    if settled {
+        record_partial_page(file, partial);
+    }
 }
 
 /// The original of the note at `path`, which must be a note of the library.

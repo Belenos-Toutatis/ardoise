@@ -132,6 +132,17 @@ pub enum DeviceError {
     /// came is kept apart (a doubtful copy), never made into a note on its own.
     #[error("the page stored at {time} was not received cleanly: what came is kept apart")]
     PageDoubtful { time: u32 },
+    /// A page of the Slate came shorter than announced, twice, with a right CRC, and what came does
+    /// not decode: a transfer the tablet cut short, not a page. Nothing is kept, nothing deleted.
+    #[error(
+        "the tablet sent {received} of the {announced} bytes of a page, and they cannot be read: the page stays on the tablet"
+    )]
+    PageCutShort { announced: u32, received: usize },
+    /// Pages of the Slate that could only be read in part (`cause`: what stopped the reading of
+    /// the first one): each is a note (`notes`, their names) that holds what could be read and all
+    /// the tablet's bytes. They stop no sync.
+    #[error("only part of a page could be read ({cause}): what was read, and all the tablet's bytes, are in its note ({})", notes.join(", "))]
+    PagePartial { notes: Vec<String>, cause: String },
     /// A page of the blackboard that the tablet may no longer hold could be written neither as a
     /// note nor as a rescue copy (`cause`): it stays in memory until the next sync.
     #[error("the page stored at {time} could be written nowhere and is held in memory: {cause}")]
@@ -167,6 +178,14 @@ pub struct DownloadedPage {
     /// screen, which this page holds whole: `PageInfo::previous`); `None` otherwise, and always
     /// for the Slate.
     pub previous: Option<u32>,
+}
+
+/// What [`Session::download_page`] brought.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Download {
+    pub page: DownloadedPage,
+    /// Why a first transfer was refused, when the page comes from a second one.
+    pub retried: Option<DeviceError>,
 }
 
 /// A notification received during live mode, stamped when it came out of the transport.
@@ -562,6 +581,48 @@ impl Session {
         }
     }
 
+    /// The oldest page as a sync takes it: [`Session::download_oldest`], tried once more when the
+    /// transfer was corrupted (notifications can be lost on the way: BLE stack buffers) or shorter
+    /// than announced (perhaps cut short by the tablet).
+    ///
+    /// The CRC is the tablet's own, over the bytes it sent: a tablet that stops early sends a right
+    /// one (and the CRC of nothing is 0). A page shorter than announced that does not decode to its
+    /// end is therefore taken for a failed transfer ([`DeviceError::PageCutShort`] the second time):
+    /// made into a note and deleted, its other bytes would be lost. A shorter page that decodes is
+    /// asked once more too (it may have been cut between two packets), then is a page: on the Slate the two sizes are equal in every real download so far, but on a trace of
+    /// an Intuos Pro the announced one is 12 bytes more than the file (docs/research/protocol.md
+    /// §5.1).
+    pub fn download_page(&mut self) -> Result<Download, DeviceError> {
+        let first = match self.download_whole() {
+            Ok(page) => match missing(&page) {
+                None => {
+                    return Ok(Download {
+                        page,
+                        retried: None,
+                    });
+                }
+                Some(error) => error,
+            },
+            Err(error @ (DeviceError::CrcMismatch { .. } | DeviceError::PageCutShort { .. })) => {
+                error
+            }
+            Err(error) => return Err(error),
+        };
+        Ok(Download {
+            page: self.download_whole()?,
+            retried: Some(first),
+        })
+    }
+
+    /// [`Session::download_oldest`], refused when it is cut short.
+    fn download_whole(&mut self) -> Result<DownloadedPage, DeviceError> {
+        let page = self.download_oldest()?;
+        match missing(&page) {
+            Some(error) if ardoise_proto::stroke::decode(&page.bytes).is_err() => Err(error),
+            _ => Ok(page),
+        }
+    }
+
     /// Deletes the oldest stored page (the one [`Session::download_oldest`] returns).
     pub fn delete_oldest(&mut self) -> Result<(), DeviceError> {
         self.expect_success(&Request::DeleteOldestFile)
@@ -586,11 +647,7 @@ impl Session {
         let to_read = if delete { available } else { available.min(1) };
         for index in 1..=to_read {
             self.check_cancel()?;
-            let page = match self.download_oldest() {
-                // Notifications can be lost on the way (BLE stack buffers): try once more.
-                Err(DeviceError::CrcMismatch { .. }) => self.download_oldest()?,
-                other => other?,
-            };
+            let page = self.download_page()?.page;
             sink(page, index, available).map_err(DeviceError::Storage)?;
             summary.downloaded += 1;
             if delete {
@@ -869,6 +926,15 @@ pub fn valid_name(name: &str) -> bool {
 
 fn is_name_chunk(reply: &Reply) -> bool {
     matches!(reply, Reply::NameChunk(_))
+}
+
+/// [`DeviceError::PageCutShort`] for a page shorter than announced.
+fn missing(page: &DownloadedPage) -> Option<DeviceError> {
+    let announced = usize::try_from(page.announced_size).unwrap_or(usize::MAX);
+    (page.bytes.len() < announced).then_some(DeviceError::PageCutShort {
+        announced: page.announced_size,
+        received: page.bytes.len(),
+    })
 }
 
 fn unexpected(reply: &Reply) -> DeviceError {

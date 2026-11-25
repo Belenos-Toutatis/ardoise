@@ -106,7 +106,13 @@ export function mockNotesInvoke(command: string, args: Record<string, unknown>):
       const path = args.path as string;
       const entry = stored(path);
       const revision = entry.revision ? { ...entry.revision, source: sourceOf(entry.revision.of) } : null;
-      return copy({ note: entry.note, stamp: entry.stamp, revision, narration: mockNarrationOf(path) }) satisfies OpenedNote;
+      return copy({
+        note: entry.note,
+        stamp: entry.stamp,
+        revision,
+        narration: mockNarrationOf(path),
+        partialPage: entry.partialPage === true,
+      }) satisfies OpenedNote;
     }
     case 'revision_source':
       return sourceOf(args.id as string);
@@ -122,6 +128,11 @@ export function mockNotesInvoke(command: string, args: Record<string, unknown>):
       if (!sameStamp(entry.stamp, args.stamp as FileStamp)) throw { code: 'noteConflict', message: path };
       const note = copy(args.note as Note);
       keepOriginal(entry, note);
+      // Like `original::settle_partial_page`: the mark goes only once the page can be read whole, and is never put on a
+      // note without a tablet page.
+      if (typeof args.partialPage === 'boolean' && entry.original?.source === 'tablet') {
+        if (args.partialPage || !entry.original.partial) entry.partialPage = args.partialPage;
+      }
       // Like `save_in`: the file keeps its own id.
       note.id = entry.note.id;
       note.modified = Date.now();

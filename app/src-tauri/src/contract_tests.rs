@@ -311,6 +311,7 @@ fn every_error_code_of_the_tablet_paths_has_a_text_in_both_languages() {
         "sheetOtherTablet",
         "simulationOnly",
         "syncRefused",
+        "pagePartial",
         "blackboardPagesFirst",
         "pageRescued",
         "pageDoubtful",
@@ -338,6 +339,37 @@ fn every_error_code_of_the_tablet_paths_has_a_text_in_both_languages() {
             );
         }
     }
+}
+
+// --- Q27: a page of the Slate that could only be read in part ----------------------------------------------------------
+
+/// The editor is told when it opens the note (`OpenedNote.partialPage`, `lib/note.ts`), gives it back in `save_note`
+/// (`partialPage`, which Tauri turns into `partial_page`), and the sync ends with `{ code: 'pagePartial', message }`,
+/// `message` being the names of the notes.
+#[test]
+fn a_page_read_in_part_is_told_to_the_interface() {
+    use ardoise_device::session::DeviceError;
+    let source = include_str!("notes.rs");
+    let arguments = |source: &'static str, command: &str| -> &'static str {
+        source
+            .split(&format!("pub async fn {command}("))
+            .nth(1)
+            .and_then(|rest| rest.split(") ->").next())
+            .unwrap_or_default()
+    };
+    assert!(arguments(source, "save_note").contains("partial_page: Option<bool>"));
+    assert!(
+        arguments(include_str!("drafts.rs"), "draft_write").contains("partial_page: Option<bool>")
+    );
+    assert!(source.contains("#[serde(rename = \"partialPage\")]"));
+    let error = ardoise_device::service::sync_error(&DeviceError::PagePartial {
+        notes: vec!["2026-10-24".into()],
+        cause: "packet at offset 4 uses the reserved axis mask 01".into(),
+    });
+    assert_eq!(
+        serde_json::to_value(error).unwrap(),
+        json!({ "code": "pagePartial", "message": "2026-10-24" })
+    );
 }
 
 // --- H8, Q17: the four positions of the blackboard (docs/design/blackboard.md, « Positions ») ---------------------------

@@ -289,10 +289,17 @@ export const api = {
    * pixels of the note's background image (`backgroundMissing` if they are gone); without it the
    * file's own image is kept. `narrationKey` (M17): the sound of a recording made while writing, kept
    * in memory (`NarrationSaved.staged`), written in the same save (`noStagedNarration` if it is gone;
-   * nothing is written then).
+   * nothing is written then). `partialPage` (Q27), for a note opened with it (`OpenedNote.partialPage`)
+   * only: whether it still holds only part of its tablet page; without it the file keeps what it says.
    */
-  saveNote: (path: string, note: Note, stamp: FileStamp, imageKey?: string, narrationKey?: string) =>
-    call<FileStamp>('save_note', { path, note, stamp, imageKey, narrationKey }),
+  saveNote: (
+    path: string,
+    note: Note,
+    stamp: FileStamp,
+    imageKey?: string,
+    narrationKey?: string,
+    partialPage?: boolean,
+  ) => call<FileStamp>('save_note', { path, note, stamp, imageKey, narrationKey, partialPage }),
   /**
    * PNG data URL of a page background (paper, template, texture) `widthPx` pixels wide, with the
    * background image `image` over the paper (its pixels staged under `key`).
@@ -803,6 +810,7 @@ export const api = {
       note: snapshot.note,
       baseStamp: snapshot.baseStamp,
       imageKey: snapshot.imageKey,
+      partialPage: snapshot.partialPage,
     }),
   /** The draft kept for a note of the library, if any. */
   draftFind: (noteId: string) => call<Draft | null>('draft_find', { noteId }),

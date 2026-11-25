@@ -389,6 +389,7 @@ export function mockLibraryInvoke(command: string, args: Record<string, unknown>
       const stored: StoredNote = { ...source, note: copy, stamp: freshStamp(), binder: source.binder };
       // The original's tablet page and sound are the copy's too (docs/design/library-order.md).
       if (source.original) stored.original = JSON.parse(JSON.stringify(source.original));
+      if (source.partialPage) stored.partialPage = true;
       const path = freePath(library, source.binder, fileName(copy));
       library.notes.set(path, stored);
       // A copy goes right after its original in the binder's order, when the binder has one.
