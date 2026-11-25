@@ -127,6 +127,12 @@ fn fix_once(name: &str) -> String {
         }
     }
     let mut name: String = chars.into_iter().collect();
+    // A title ending in `(conflit … 2026-11-03)` would make a file name that `parse_conflict_name`
+    // takes for a sync client's conflict copy (a badge on the card): brackets instead.
+    if let Some((open, end)) = super::conflicts::conflict_group(&name) {
+        name.replace_range(open..=open, "[");
+        name.replace_range(end - 1..end, "]");
+    }
     let lower = name.to_ascii_lowercase();
     if lower.starts_with("~$") || (lower.starts_with('~') && lower.ends_with(".tmp")) {
         name = name.trim_start_matches('~').to_owned();
@@ -163,6 +169,8 @@ fn fix_once(name: &str) -> String {
 /// and the `~` of a leading `~$` dropped, the dot of an excluded extension turned into `_`
 /// (`Plan.part` → `Plan_part`), `.~`, `.sb-`, `.gnucash.tmp-` and conflict markers broken with
 /// a `-`, `_` after the stem of `Thumbs.db`, `desktop.ini`…, the last `#` of `#…#` dropped.
+/// A last `(…)` group with a conflict word and a date, which would pass for a sync client's
+/// conflict copy, gets brackets (`Incident [conflit 2026-11-03]`).
 /// The result also never makes a note file name (`date title.ardoise`) Nextcloud excludes.
 pub fn sanitize_name(text: &str) -> String {
     let replaced: String = text
@@ -507,6 +515,46 @@ mod tests {
         assert_eq!(sanitize_name("a.~ ~"), "a-");
         assert_eq!(sanitize_name("CON~"), "CON_");
         assert_eq!(sanitize_name("~.tmp"), "tmp");
+    }
+
+    #[test]
+    fn a_title_never_makes_a_file_name_that_passes_for_a_conflict_copy() {
+        use crate::library::parse_conflict_name;
+        let file_name = |title: &str| format!("{}.{NOTE_EXTENSION}", note_file_stem(0, title));
+        // The wording of a conflict and a date, in a title the user typed.
+        assert_eq!(
+            sanitize_name("Incident (conflit entre élèves 2026-11-03)"),
+            "Incident [conflit entre élèves 2026-11-03]"
+        );
+        assert_eq!(
+            sanitize_name("(conflit 2026-11-03)"),
+            "[conflit 2026-11-03]"
+        );
+        for title in [
+            "Incident (conflit entre élèves 2026-11-03)",
+            "(conflit 2026-11-03)",
+            "Note (conflict 2026-10-24 101530)",
+            "Cours 2 (Konflikt 2026-10-24) (conflit 2026-10-25)",
+        ] {
+            let name = file_name(title);
+            assert_eq!(parse_conflict_name(&name), None, "{title} -> {name}");
+            assert_eq!(invalid_name_reason(&sanitize_name(title)), None, "{title}");
+        }
+        // The sanitised form of a sync client's own marker is not taken for one either.
+        for name in NEVER_SYNCED {
+            let name = file_name(name);
+            assert_eq!(parse_conflict_name(&name), None, "{name}");
+        }
+        // Titles that merely look alike are left as they are.
+        for fine in [
+            "Gestion de conflit (cours 2)",
+            "Incident (conflit 2026)",
+            "Incident (réunion 2026-11-03)",
+            "Incident (conflit) du 2026-11-03",
+            "Conflits (2)",
+        ] {
+            assert_eq!(sanitize_name(fine), fine, "{fine}");
+        }
     }
 
     #[test]

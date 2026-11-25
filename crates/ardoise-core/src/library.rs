@@ -843,7 +843,11 @@ impl Library {
     fn move_unique(&self, from: &Path, dir: &Path, stem: &str) -> Result<PathBuf, LibraryError> {
         for n in 1..=MAX_SUFFIX {
             let target = note_path(dir, &with_suffix(stem, n));
-            if exists(&target) {
+            // Windows names ignore case: `cours (2)` is the note's own `Cours (2)`, which is
+            // renamed in place, not a name taken by another file.
+            let itself =
+                target.to_string_lossy().to_lowercase() == from.to_string_lossy().to_lowercase();
+            if exists(&target) && !itself {
                 continue;
             }
             match rename_no_replace(from, &target) {

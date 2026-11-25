@@ -125,8 +125,9 @@ fn legacy_tag(stem: &str) -> Option<Tag> {
     })
 }
 
-/// A last `(…)` group holding a conflict word and a date.
-fn other_tag(stem: &str) -> Option<Tag> {
+/// The place (byte offsets of its `(` and just after its `)`) of a last `(…)` group of `stem`
+/// that holds a conflict word and a date.
+pub(super) fn conflict_group(stem: &str) -> Option<(usize, usize)> {
     let trimmed = stem.trim_end();
     if !trimmed.ends_with(')') {
         return None;
@@ -135,9 +136,14 @@ fn other_tag(stem: &str) -> Option<Tag> {
     let inner = trimmed.get(open + 1..trimmed.len() - 1)?;
     let lower = inner.to_lowercase();
     let worded = CONFLICT_WORDS.iter().any(|w| lower.contains(w));
-    (worded && contains_date(inner)).then(|| Tag {
+    (worded && contains_date(inner)).then_some((open, trimmed.len()))
+}
+
+/// A last `(…)` group holding a conflict word and a date.
+fn other_tag(stem: &str) -> Option<Tag> {
+    conflict_group(stem).map(|(open, end)| Tag {
         start: with_leading_space(stem, open),
-        end: trimmed.len(),
+        end,
         kind: ConflictKind::Other,
     })
 }

@@ -206,6 +206,8 @@ fn show_temp_file(temp: &Path) {
     {
         use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_ARCHIVE, SetFileAttributesW};
+        // Verbatim: the raw path fails past MAX_PATH, which would leave a long-path note hidden.
+        let temp = verbatim(temp).unwrap_or_else(|_| temp.to_path_buf());
         let wide: Vec<u16> = temp.as_os_str().encode_wide().chain([0]).collect();
         let mut attempt = 1;
         // SAFETY: `wide` is a NUL-terminated UTF-16 path that outlives the call.
@@ -705,6 +707,25 @@ mod tests {
         let moved = root.path().join("moved");
         rename_no_replace(&dir, &moved).unwrap();
         assert_eq!(entries(&moved), ["a.txt", "b.txt"]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_note_written_on_a_long_path_is_not_left_hidden() {
+        use std::os::windows::fs::MetadataExt;
+        const HIDDEN: u32 = 0x2;
+        let root = tempfile::tempdir().unwrap();
+        let dir = deep_folder(root.path());
+        let target = dir.join("a.txt");
+        assert!(target.as_os_str().len() > 300);
+        write_atomic(&target, b"x").unwrap();
+        assert_eq!(fs::metadata(&target).unwrap().file_attributes() & HIDDEN, 0);
+        let new_target = dir.join("b.txt");
+        write_atomic_new(&new_target, b"x").unwrap();
+        assert_eq!(
+            fs::metadata(&new_target).unwrap().file_attributes() & HIDDEN,
+            0
+        );
     }
 
     #[test]

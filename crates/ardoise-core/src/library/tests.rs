@@ -551,6 +551,36 @@ fn retitle_renames_the_file() {
     assert!(cased.path.exists());
 }
 
+/// Windows ignores case: retitling `Cours (2)` to `cours` must not count the note's own name as
+/// taken (it used to become `(3)`).
+#[cfg(windows)]
+#[test]
+fn retitling_a_suffixed_note_in_another_case_keeps_its_suffix() {
+    let (dir, library) = new_library();
+    let first = library
+        .create(Path::new(""), &note_file("a", "Cours"))
+        .unwrap();
+    let second = library
+        .create(Path::new(""), &note_file("b", "Cours"))
+        .unwrap();
+    assert!(second.path.ends_with("2026-10-24 Cours (2).ardoise"));
+    let renamed = library.retitle(&second.path, "cours", None).unwrap();
+    assert_eq!(
+        renamed.path.file_name().unwrap(),
+        "2026-10-24 cours (2).ardoise"
+    );
+    assert_eq!(library.read(&renamed.path).unwrap().file.note.id, "b");
+    assert_eq!(library.read(&first.path).unwrap().file.note.id, "a");
+    assert_eq!(
+        names_in(dir.path()),
+        [
+            "2026-10-24 Cours.ardoise",
+            "2026-10-24 cours (2).ardoise",
+            "_ardoise"
+        ]
+    );
+}
+
 #[test]
 fn move_to_another_binder() {
     let (dir, library) = new_library();
