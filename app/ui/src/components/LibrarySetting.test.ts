@@ -7,6 +7,7 @@ import { api, type AppState } from '../lib/api';
 import { setLocale } from '../lib/i18n.svelte';
 import { sameFolder } from '../lib/library-choice';
 import { mockFolders } from '../lib/mock';
+import { beginWork } from '../lib/work';
 import LibrarySetting from './LibrarySetting.svelte';
 import Wizard from './Wizard.svelte';
 
@@ -54,12 +55,12 @@ async function settle() {
   }
 }
 
-function render(component: typeof LibrarySetting | typeof Wizard, locale: 'fr' | 'en' = 'fr', shown: AppState = app) {
+function render(component: typeof LibrarySetting | typeof Wizard, locale: 'fr' | 'en' = 'fr', shown: AppState = app, extra: Record<string, unknown> = {}) {
   setLocale(locale);
   const target = document.createElement('div');
   document.body.append(target);
   const onchange = vi.fn();
-  const mounted = mount(component, { target, props: { app: shown, onchange } });
+  const mounted = mount(component, { target, props: { app: shown, onchange, ...extra } });
   cleanup = () => {
     unmount(mounted);
     target.remove();
@@ -160,5 +161,34 @@ describe('sameFolder', () => {
     expect(sameFolder('C:\\A\\B', 'c:/a/b/')).toBe(true);
     expect(sameFolder('C:\\A\\B', 'C:\\A\\BC')).toBe(false);
     expect(sameFolder(null, 'C:\\A')).toBe(false);
+  });
+});
+
+describe('Settings › change library during a batch of work', () => {
+  it('is refused while the library runs an operation on its notes, and says why', async () => {
+    const setLibrary = vi.spyOn(api, 'setLibrary');
+    const ui = render(LibrarySetting, 'fr', app, { workBusy: true });
+    expect(ui.button('Changer').disabled).toBe(true);
+    expect(ui.target.textContent).toContain('Un travail est en cours sur vos notes');
+    await ui.click(ui.button('Changer'));
+    expect(ui.target.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(setLibrary).not.toHaveBeenCalled();
+  });
+
+  it('is refused while a dialog or the tablet test has work under way, in English too', async () => {
+    const end = beginWork();
+    try {
+      const ui = render(LibrarySetting, 'en');
+      expect(ui.button('Change').disabled).toBe(true);
+      expect(ui.target.textContent).toContain('Work is under way on your notes');
+    } finally {
+      end();
+    }
+  });
+
+  it('is allowed again once nothing runs', () => {
+    const ui = render(LibrarySetting, 'fr', app, { workBusy: false });
+    expect(ui.button('Changer').disabled).toBe(false);
+    expect(ui.target.textContent).not.toContain('Un travail est en cours');
   });
 });

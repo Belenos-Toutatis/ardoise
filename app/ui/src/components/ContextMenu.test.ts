@@ -216,6 +216,25 @@ describe('the context menu', () => {
     }
   });
 
+  it('stays open when its own list is scrolled with the wheel (a menu taller than the window)', async () => {
+    const view = await open();
+    const entry = view.entries()[1];
+    entry.dispatchEvent(new Event('wheel', { bubbles: true }));
+    view.menu()!.dispatchEvent(new Event('scroll'));
+    await tick();
+    expect(view.menu()).toBeTruthy();
+    expect(view.closed).not.toHaveBeenCalled();
+  });
+
+  it('lets the browser scroll the entry the arrows reach into view', async () => {
+    const view = await open();
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+    key(view.entries()[0], 'ArrowDown');
+    await tick();
+    expect(document.activeElement).toBe(view.entries()[1]);
+    expect(focus.mock.calls.some(([init]) => init?.preventScroll === true)).toBe(false);
+  });
+
   it('does not close on a press inside it', async () => {
     const view = await open();
     view.entries()[0].dispatchEvent(new Event('pointerdown', { bubbles: true }));

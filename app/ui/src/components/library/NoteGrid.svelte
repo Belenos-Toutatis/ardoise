@@ -178,7 +178,7 @@
     <div class="empty-state">
       {#if searching}
         <p class="lead">{t('library.empty.search', { query: lib.query.trim() })}</p>
-      {:else if lib.view.kind === 'all'}
+      {:else if lib.view.kind === 'all' && lib.tagFilter.length === 0}
         <p class="lead">{t('home.empty')}</p>
         <p class="muted">{t('home.emptyHint')}</p>
         <button type="button" class="button primary" onclick={onnew}>{t('library.newNote')}</button>

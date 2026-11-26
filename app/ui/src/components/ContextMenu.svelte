@@ -66,12 +66,17 @@
     finish(false, event.type === 'pointerdown' && event.target instanceof Node && !!returnTo?.contains(event.target));
   };
   const shut = () => finish(false);
+  /** The page scrolling closes the menu; its own list scrolling (a menu taller than the window) does not. */
+  const scrolled = (event: Event) => {
+    if (event.target instanceof Node && list?.contains(event.target)) return;
+    finish(false);
+  };
 
   function attach() {
     window.addEventListener('pointerdown', outside, true);
     window.addEventListener('contextmenu', outside, true);
-    window.addEventListener('scroll', shut, true);
-    window.addEventListener('wheel', shut, { capture: true, passive: true });
+    window.addEventListener('scroll', scrolled, true);
+    window.addEventListener('wheel', scrolled, { capture: true, passive: true });
     window.addEventListener('resize', shut);
     window.addEventListener('blur', shut);
   }
@@ -79,8 +84,8 @@
   function detach() {
     window.removeEventListener('pointerdown', outside, true);
     window.removeEventListener('contextmenu', outside, true);
-    window.removeEventListener('scroll', shut, true);
-    window.removeEventListener('wheel', shut, true);
+    window.removeEventListener('scroll', scrolled, true);
+    window.removeEventListener('wheel', scrolled, true);
     window.removeEventListener('resize', shut);
     window.removeEventListener('blur', shut);
   }
@@ -125,7 +130,8 @@
     else if (event.key === 'End') next = all.length - 1;
     else return;
     event.preventDefault();
-    all[(next + all.length) % all.length]?.focus({ preventScroll: true });
+    // Scrolling allowed: in a menu taller than the window the entry reached must come into view.
+    all[(next + all.length) % all.length]?.focus();
   }
 </script>
 

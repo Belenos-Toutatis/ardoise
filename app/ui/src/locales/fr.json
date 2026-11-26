@@ -503,7 +503,8 @@
       "title": "Changer de bibliothèque",
       "hint": "Ardoise affichera aussitôt les notes de ce dossier, sur ce PC seulement ({machine}). Les notes de la bibliothèque actuelle restent dans leur dossier.",
       "confirm": "Utiliser ce dossier",
-      "current": "C'est déjà la bibliothèque de ce PC : rien ne change."
+      "current": "C'est déjà la bibliothèque de ce PC : rien ne change.",
+      "working": "Un travail est en cours sur vos notes : attendez qu'il se termine (ou arrêtez-le) pour changer de bibliothèque."
     },
     "tabletAdded": "Ajoutée le",
     "boardForgetConfirm": "Oublier la tablette Xiaomi ? Ardoise ne la cherchera plus et elle devra être ajoutée de nouveau, sur tous vos ordinateurs. Elle reste liée à Mi Home."
@@ -523,7 +524,8 @@
     "readOnlyHint": "L'assistant pourra lire et voir vos notes, mais ni les modifier ni piloter Ardoise. Conseillé quand il n'a besoin que de lire.",
     "code": {
       "title": "Claude Code",
-      "hint": "Une seule fois, dans PowerShell ou l'invite de commandes (Ardoise sera disponible dans tous vos projets). Copiez la commande telle quelle, guillemets autour de -- compris :"
+      "hint": "Une seule fois, dans PowerShell ou l'invite de commandes (Ardoise sera disponible dans tous vos projets). Copiez la commande telle quelle, guillemets autour de -- compris :",
+      "pathWarning": "Le chemin d'Ardoise contient un caractère ($, accent grave ou %) que PowerShell ou l'invite de commandes transforment : cette commande enregistrerait un chemin faux. Corrigez le chemin à la main dans la commande, ou utilisez plutôt l'entrée JSON de Claude Desktop ci-dessous, qui est exacte."
     },
     "desktop": {
       "title": "Claude Desktop",
@@ -771,6 +773,7 @@
       "title": "Tablettes",
       "notConnected": "Pas connectée",
       "add": "Ajouter une tablette",
+      "addUnavailable": "Impossible d'ajouter une tablette pour le moment.",
       "forgetLabel": "Oublier la tablette « {name} »"
     },
     "board": {
@@ -1550,7 +1553,7 @@
     },
     "export": {
       "button": "Exporter…",
-      "hint": "Exporter la note en PNG, JPG, SVG ou PDF"
+      "hint": "Exporter la note en PNG, JPG, WebP, SVG ou PDF"
     },
     "print": {
       "button": "Imprimer…",
@@ -2110,7 +2113,7 @@
       "damaged": "Fichier endommagé : supprimez-le, puis téléchargez-le de nouveau"
     },
     "download": "Télécharger depuis Cisco",
-    "downloadHint": "Le fichier vient du serveur de Cisco ; son empreinte est vérifiée avant l'installation. Sa licence figure ci-dessous.",
+    "downloadHint": "Le fichier vient du serveur de Cisco ; son empreinte est vérifiée avant l'installation. Sa licence figure ci-dessus.",
     "downloading": "Téléchargement…",
     "downloadProgress": "{received} sur {total} Mo",
     "downloadReceived": "{received} Mo reçus",

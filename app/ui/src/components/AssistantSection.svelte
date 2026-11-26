@@ -7,7 +7,7 @@
    */
   import { onMount } from 'svelte';
   import { api, errorMessage, genericError, type BridgeStatus } from '../lib/api';
-  import { claudeCodeCommand, claudeDesktopConfig } from '../lib/assistant-setup';
+  import { claudeCodeCommand, claudeDesktopConfig, pathChangedByShell } from '../lib/assistant-setup';
   import { openGuide } from '../lib/guide.svelte';
   import { t } from '../lib/i18n.svelte';
 
@@ -86,6 +86,9 @@
     <h4 class="assistant-target">{t('assistant.code.title')}</h4>
     <p class="muted small">{t('assistant.code.hint')}</p>
     <pre class="assistant-snippet" data-snippet="claude-code"><code>{command}</code></pre>
+    {#if pathChangedByShell(exe)}
+      <p class="error small" role="alert" data-slot="assistant-path-warning">{t('assistant.code.pathWarning')}</p>
+    {/if}
     <button type="button" class="button" data-action="copy-claude-code" onclick={() => copy('claudeCode')}>
       {copied === 'claudeCode' ? t('assistant.copied') : t('assistant.copy')}
     </button>

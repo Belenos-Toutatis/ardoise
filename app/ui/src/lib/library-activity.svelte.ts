@@ -333,6 +333,8 @@ export class LibraryActivity {
     }
     this.offers = id === undefined ? [] : this.offers.filter((offer) => offer.id !== id);
     if (this.offers.length === 0) this.#held = false;
+    // The notice under the pointer (its « Fermer » button) is gone without a `mouseleave`: the others must not wait for one.
+    else if (id !== undefined) this.release();
   }
 
   dismissFailures(): void {

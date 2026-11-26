@@ -118,3 +118,25 @@ describe('Settings > Assistant (MCP)', () => {
     expect(root.querySelector('[role="alert"]')?.textContent).toBe(t('assistant.copyFailed'));
   });
 });
+
+describe('Settings > Assistant (MCP): a path the shells would change', () => {
+  const launch = async (exe: string) => {
+    const real = await api.mcpLaunchInfo();
+    vi.spyOn(api, 'mcpLaunchInfo').mockResolvedValue({ ...real, exe });
+  };
+
+  it('warns, in both languages, only when the path holds $, a backtick or %', async () => {
+    for (const locale of ['fr', 'en'] as const) {
+      await launch('C:\Users\prof$1\Ardoise\ardoise.exe');
+      const root = await render(locale);
+      const warning = root.querySelector('[data-slot="assistant-path-warning"]');
+      expect(warning?.textContent).toBe(t('assistant.code.pathWarning'));
+      expect(warning?.textContent).toContain('Claude Desktop');
+      cleanup?.();
+      cleanup = null;
+      vi.restoreAllMocks();
+    }
+    const root = await render('fr');
+    expect(root.querySelector('[data-slot="assistant-path-warning"]')).toBeNull();
+  });
+});

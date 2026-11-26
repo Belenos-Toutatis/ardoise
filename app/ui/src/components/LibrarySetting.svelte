@@ -8,18 +8,23 @@
   import { t } from '../lib/i18n.svelte';
   import { pickFolder } from '../lib/library';
   import { sameFolder } from '../lib/library-choice';
+  import { workInProgress } from '../lib/work';
   import LibraryFolderFacts from './LibraryFolderFacts.svelte';
 
-  let { app, onchange }: { app: AppState; onchange: (next: AppState) => void } = $props();
+  /** `workBusy`: the library is running an operation on its notes (its paths are relative to this library's folder). */
+  let { app, onchange, workBusy = false }: { app: AppState; onchange: (next: AppState) => void; workBusy?: boolean } = $props();
 
   let chosen = $state<{ folder: string; inspection: LibraryInspection } | null>(null);
   let error = $state<string | null>(null);
   let busy = $state(false);
 
+  /** Work under way would go on in the new library, with paths read from the old one: no switching meanwhile. */
+  const working = () => workBusy || workInProgress();
+
   const current = $derived(chosen !== null && sameFolder(chosen.folder, app.library));
 
   async function choose() {
-    if (busy) return;
+    if (busy || working()) return;
     busy = true;
     error = null;
     try {
@@ -34,7 +39,7 @@
   }
 
   async function confirm() {
-    if (!chosen || busy) return;
+    if (!chosen || busy || working()) return;
     busy = true;
     error = null;
     try {
@@ -51,8 +56,11 @@
 <div class="field">
   <span>{t('settings.library')}</span>
   <code>{app.library}</code>
-  <button class="button" data-action="change-library" disabled={busy} onclick={choose}>{t('common.change')}</button>
+  <button class="button" data-action="change-library" disabled={busy || working()} onclick={choose}>{t('common.change')}</button>
 </div>
+{#if working()}
+  <p class="muted small" role="status">{t('settings.librarySwitch.working')}</p>
+{/if}
 
 {#if chosen}
   <div class="confirm library-switch" role="alertdialog" aria-label={t('settings.librarySwitch.title')}>
@@ -65,7 +73,7 @@
     {:else}
       <p class="muted small">{t('settings.librarySwitch.hint', { machine: app.machine })}</p>
       <div class="actions">
-        <button class="button primary" disabled={busy} onclick={confirm}>{t('settings.librarySwitch.confirm')}</button>
+        <button class="button primary" disabled={busy || working()} onclick={confirm}>{t('settings.librarySwitch.confirm')}</button>
         <button class="button" onclick={() => (chosen = null)}>{t('settings.cancel')}</button>
       </div>
     {/if}

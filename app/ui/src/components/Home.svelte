@@ -360,7 +360,7 @@
       return;
     }
     // Not under the editor, live mode or a dialog of the library (« Depuis un PDF » would be unmounted).
-    if (away || lib.dialog || fromFile || share.panelOpen || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
+    if (away || lib.dialog || fromFile || share.panelOpen || modalOpen() || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
     const key = event.key.toLowerCase();
     if (key === 'f') {
       event.preventDefault();
@@ -508,10 +508,10 @@
         {:else}
           <NoteGrid {lib} onopen={open} onnew={newNote} onresume={(note) => resumeLive(note.path)} />
         {/if}
-        <ActivityBanner activity={lib.activity} />
+        <ActivityBanner activity={lib.activity} active={!away} />
       </div>
       {#if panel === 'settings'}
-        <Settings {app} {onchange} onclose={() => (panel = null)} ontest={() => (panel = 'diagnostic')} />
+        <Settings {app} {onchange} onclose={() => (panel = null)} ontest={() => (panel = 'diagnostic')} workBusy={lib.activity.busy} />
       {:else if panel === 'diagnostic'}
         <Diagnostic onclose={() => (panel = null)} />
       {:else if panel === 'tablet'}

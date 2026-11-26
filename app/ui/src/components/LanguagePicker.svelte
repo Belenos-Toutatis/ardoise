@@ -10,10 +10,13 @@
   } = $props();
 
   async function select(event: Event) {
-    const language = (event.currentTarget as HTMLSelectElement).value as LanguagePreference;
+    const select = event.currentTarget as HTMLSelectElement;
+    const language = select.value as LanguagePreference;
     try {
       onchange(await api.setLanguage(language));
     } catch (error) {
+      // Nothing was saved: the field must not go on showing the choice.
+      select.value = app.language;
       onerror?.(errorMessage(error));
     }
   }

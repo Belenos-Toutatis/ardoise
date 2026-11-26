@@ -503,7 +503,8 @@
       "title": "Change the library",
       "hint": "Ardoise will show the notes of this folder at once, on this PC only ({machine}). The notes of the current library stay in their folder.",
       "confirm": "Use this folder",
-      "current": "This is already the library of this PC: nothing changes."
+      "current": "This is already the library of this PC: nothing changes.",
+      "working": "Work is under way on your notes: wait for it to finish (or stop it) before changing the library."
     },
     "tabletAdded": "Added on",
     "boardForgetConfirm": "Forget the Xiaomi tablet? Ardoise will no longer look for it and it will have to be added again, on every computer. It stays linked to Mi Home."
@@ -523,7 +524,8 @@
     "readOnlyHint": "The assistant can read and see your notes, but neither change them nor drive Ardoise. Recommended when it only needs to read.",
     "code": {
       "title": "Claude Code",
-      "hint": "Once, in PowerShell or the command prompt (Ardoise is then available in all your projects). Copy the command as it is, quotes around -- included:"
+      "hint": "Once, in PowerShell or the command prompt (Ardoise is then available in all your projects). Copy the command as it is, quotes around -- included:",
+      "pathWarning": "The path of Ardoise holds a character ($, backtick or %) that PowerShell or the command prompt change: this command would register a wrong path. Fix the path by hand in the command, or use the Claude Desktop JSON entry below instead, which is exact."
     },
     "desktop": {
       "title": "Claude Desktop",
@@ -771,6 +773,7 @@
       "title": "Tablets",
       "notConnected": "Not connected",
       "add": "Add a tablet",
+      "addUnavailable": "No tablet can be added for now.",
       "forgetLabel": "Forget the tablet “{name}”"
     },
     "board": {
@@ -1550,7 +1553,7 @@
     },
     "export": {
       "button": "Export…",
-      "hint": "Export the note as PNG, JPG, SVG or PDF"
+      "hint": "Export the note as PNG, JPG, WebP, SVG or PDF"
     },
     "print": {
       "button": "Print…",
@@ -2110,7 +2113,7 @@
       "damaged": "Damaged file: remove it, then download it again"
     },
     "download": "Download from Cisco",
-    "downloadHint": "The file comes from Cisco's server; its fingerprint is checked before it is installed. Its licence is shown below.",
+    "downloadHint": "The file comes from Cisco's server; its fingerprint is checked before it is installed. Its licence is shown above.",
     "downloading": "Downloading…",
     "downloadProgress": "{received} of {total} MB",
     "downloadReceived": "{received} MB received",

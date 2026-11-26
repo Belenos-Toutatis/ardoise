@@ -5,7 +5,7 @@
    * in millimetres (comma or point). Widths are in device units, hundredths of a millimetre. `oninput` follows the
    * slider while it is dragged; `onchange` is the value that is kept (slider let go, a button, a typed value).
    */
-  import { t } from '../lib/i18n.svelte';
+  import { currentLocale, t } from '../lib/i18n.svelte';
 
   let {
     value,
@@ -28,7 +28,8 @@
     onchange: (width: number) => void;
   } = $props();
 
-  const mm = (units: number) => (units / 100).toFixed(2);
+  /** The width as the language writes it (0,60 in French, 0.60 in English); the field reads a comma or a point. */
+  const mm = (units: number) => new Intl.NumberFormat(currentLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(units / 100);
   const clamp = (units: number) => Math.min(max, Math.max(min, Math.round(units)));
 
   /** One step down or up, landing on the steps' grid (0.62 mm goes to 0.60 or 0.65, not to 0.57 or 0.67). */

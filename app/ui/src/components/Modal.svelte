@@ -56,7 +56,8 @@
 
   onMount(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    (dialog?.querySelector<HTMLElement>('[data-autofocus]') ?? focusable()[0] ?? dialog)?.focus();
+    // Without scrolling: the button asked for (« Exporter… ») is at the bottom of a tall dialog, which must open on its title.
+    (dialog?.querySelector<HTMLElement>('[data-autofocus]') ?? focusable()[0] ?? dialog)?.focus({ preventScroll: true });
     stack.push(id);
     const watcher = new MutationObserver(recoverFocus);
     if (dialog) watcher.observe(dialog, { attributes: true, subtree: true, attributeFilter: ['disabled'] });
