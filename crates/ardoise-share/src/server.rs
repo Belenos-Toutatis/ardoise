@@ -33,7 +33,7 @@ use tokio::time::{Instant, MissedTickBehavior, timeout, timeout_at};
 
 use crate::access::{self, Access, StreamRate, Verdict};
 use crate::content::{Content, Frame, JoinRefused, Viewer, end_frame};
-use crate::http::{self, ContentLength, Head, HeadError, ResponseHead};
+use crate::http::{self, ContentLength, ForwardedFor, Head, HeadError, ResponseHead};
 use crate::journal::Journal;
 use crate::{Assets, Limits, LiveFeed, OnChange, ShareConfig, ShareError, ShareStatus};
 
@@ -670,15 +670,21 @@ impl Server {
         let Ok(JoinBody { code }) = serde_json::from_slice::<JoinBody>(&body) else {
             return Some(bad_request());
         };
+        // Behind a proxy, each PC it names has its attempts and tokens (the proxy's address has
+        // its own limits too: the name is the browser's word).
+        let client = access::Client {
+            connection: address,
+            device: head.forwarded_for.address(),
+        };
         let mut access = lock(&self.access);
-        let answer = match access.try_code(address, &code, std::time::Instant::now()) {
+        let answer = match access.try_code(client, &code, std::time::Instant::now()) {
             Verdict::Right => match access::random_token() {
                 Ok(token) => {
                     let cookie = format!(
                         "{}={token}; Path=/; HttpOnly; SameSite=Strict",
                         http::COOKIE
                     );
-                    access.add_token(address, token);
+                    access.add_token(client, token);
                     // `200` with a body and its length, not `204`: through a school's filtering
                     // proxy, a `204` (which has no length) held the browser 2 minutes
                     // (2026-11-03).
@@ -866,10 +872,17 @@ fn describe(head: &Head) -> String {
     } else {
         "?"
     };
-    let proxy = if head.proxied {
-        " (through a proxy)"
-    } else {
-        ""
+    // The PC a proxy names is written only once read as an address, never the header's text: at
+    // a school, it tells whether the proxy names the PCs, so whether they count apart.
+    let proxy = match (head.proxied, head.forwarded_for) {
+        (false, _) => String::new(),
+        (true, ForwardedFor::Address(address, header)) => {
+            format!(" (through a proxy, for {address} from {header})")
+        }
+        (true, ForwardedFor::Unreadable(header)) => {
+            format!(" (through a proxy, no address in {header})")
+        }
+        (true, ForwardedFor::Absent) => " (through a proxy that names no PC)".to_owned(),
     };
     format!("{method} {route}{proxy}")
 }

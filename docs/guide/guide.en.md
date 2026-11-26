@@ -1011,7 +1011,8 @@ network. Ardoise never changes the firewall itself.
 
 **Privacy.** The share starts only when you click, and stops with **Stop sharing** or when Ardoise closes (the port is
 then closed again). The code changes at each share. After 5 wrong codes in 5 minutes, the computer concerned has to
-wait (the page says how long), without bothering the others. The exchanges are *not encrypted* (it is plain `http` on
+wait (the page says how long), without bothering the others (except sometimes behind a school's web filter, see
+below). The exchanges are *not encrypted* (it is plain `http` on
 the local network): use this sharing only on a network you trust, and not for confidential notes on an open network.
 The writing and the image of the shared notes can be seen by anyone who has the address *and* the code.
 
@@ -1022,6 +1023,10 @@ The writing and the image of the shared notes can be seen by anyone who has the 
   the port may have changed if another program held 8765.
 - Has the firewall been allowed for this type of network (see above)? This is the most frequent cause.
 - The page says the code is wrong: read the panel's code again (there is no `0`, `O`, `1`, `I` or `L`).
+- The page asks to wait although this computer typed no wrong code: at school, computers often go through the web
+  filter, and the share tells them apart only if the filter says which computer the page comes from. Otherwise, or
+  after many wrong codes in a short time (40 in 5 minutes), all those going through it wait together. Wait for the
+  time shown.
 - The page says there are too many screens: the share accepts 32 screens at a time (4 per computer). It tries again
   by itself every 5 seconds.
 - The browser only shows "Misdirected Request": type the address in figures that the panel shows. For safety, the

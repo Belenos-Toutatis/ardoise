@@ -1,7 +1,8 @@
 //! The share's journal (diagnostics): one line per connection event, so that a share that is
 //! slow or refused on a real network can be understood afterwards (docs/design/lan-share.md,
 //! "Journal"). It never holds the code, a cookie, a token, a query string or a header's value:
-//! only what was asked for, from which address, and how long each step took.
+//! only what was asked for, from which address (and for which PC a proxy says it forwards it,
+//! once read as an address), and how long each step took.
 
 use std::fmt;
 use std::fs::File;

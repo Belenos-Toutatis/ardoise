@@ -1073,7 +1073,8 @@ lui-même.
 
 **Confidentialité.** Le partage ne démarre que si vous cliquez, et s'arrête avec **Arrêter le partage** ou à la
 fermeture d'Ardoise (le port est alors refermé). Le code change à chaque partage. Après 5 codes faux en 5 minutes,
-l'ordinateur concerné doit attendre (la page dit combien de temps), sans gêner les autres. Les échanges ne sont *pas
+l'ordinateur concerné doit attendre (la page dit combien de temps), sans gêner les autres (sauf parfois derrière le
+filtre web d'une école, voir plus bas). Les échanges ne sont *pas
 chiffrés* (c'est du `http` sur le réseau local) : n'utilisez ce partage que sur un réseau de confiance, et pas pour des
 notes confidentielles sur un réseau ouvert. L'écriture et l'image des notes partagées sont visibles par quiconque a
 l'adresse *et* le code.
@@ -1086,6 +1087,10 @@ l'adresse *et* le code.
   autre jour : le port peut avoir changé si un autre programme tenait le 8765.
 - Le pare-feu a-t-il été autorisé pour ce type de réseau (voir plus haut) ? C'est la cause la plus fréquente.
 - La page dit que le code est incorrect : relisez le code du panneau (il n'y a ni `0`, ni `O`, ni `1`, ni `I`, ni `L`).
+- La page demande d'attendre alors que cet ordinateur n'a tapé aucun code faux : à l'école, les ordinateurs passent
+  souvent par le filtre web, et le partage ne les distingue que si le filtre dit de quel ordinateur vient la page.
+  Sinon, ou après beaucoup de codes faux en peu de temps (40 en 5 minutes), tous ceux qui passent par lui attendent
+  ensemble. Attendez le temps indiqué.
 - La page dit qu'il y a trop d'écrans : le partage accepte 32 écrans à la fois (4 par ordinateur). Elle réessaie
   toute seule toutes les 5 secondes.
 - Le navigateur affiche seulement « Misdirected Request » : tapez l'adresse en chiffres que montre le panneau. Par

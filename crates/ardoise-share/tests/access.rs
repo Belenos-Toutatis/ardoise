@@ -437,3 +437,192 @@ fn event_streams_are_limited() {
     assert_eq!(again.next_event(SOON), Some(SseEvent::Retry(2000)));
     assert_eq!(again.expect(), waiting());
 }
+
+/// A school's filtering proxy, as the share sees it: one address for every browser of the school
+/// (e2guardian, `docs/design/lan-share.md`, "Through a school's filtering proxy").
+fn proxy() -> std::net::Ipv4Addr {
+    pc(9)
+}
+
+/// `POST /join` with `code`, as a browser sends it, plus `headers` (each ending with CRLF).
+fn join_through(headers: &str, code: &str) -> Vec<u8> {
+    let body = serde_json::json!({ "code": code }).to_string();
+    join_with(&format!("Host: 127.0.0.1\r\n{JSON}{headers}"), &body)
+}
+
+/// The header a proxy adds for the PC at `address`.
+fn forwarded_for(address: &str) -> String {
+    format!("X-Forwarded-For: {address}\r\n")
+}
+
+/// Joins through the proxy for the PC named by `headers`: the cookie.
+fn cookie_through(port: u16, headers: &str) -> String {
+    let answer = exchange_from(proxy(), port, &join_through(headers, CODE)).unwrap();
+    assert_eq!(answer.status, 200, "{headers:?}: {answer:?}");
+    session_cookie(&answer)
+}
+
+#[test]
+fn behind_a_proxy_a_pc_that_types_five_wrong_codes_does_not_lock_out_the_others() {
+    let h = Harness::start();
+    let port = h.port();
+    let pupil = forwarded_for("192.168.228.37");
+    for remaining in (0..5).rev() {
+        let wrong = exchange_from(proxy(), port, &join_through(&pupil, "WRONG2")).unwrap();
+        assert_eq!(
+            wrong.json(),
+            serde_json::json!({ "error": "wrongCode", "remaining": remaining })
+        );
+    }
+    let refused = exchange_from(proxy(), port, &join_through(&pupil, CODE)).unwrap();
+    assert_eq!(refused.status, 429);
+    // The projector's PC, through the same proxy, has attempts of its own.
+    let projector = forwarded_for("192.168.228.12");
+    let wrong = exchange_from(proxy(), port, &join_through(&projector, "WRONG2")).unwrap();
+    assert_eq!(
+        wrong.json(),
+        serde_json::json!({ "error": "wrongCode", "remaining": 4 })
+    );
+    let right = exchange_from(proxy(), port, &join_through(&projector, CODE)).unwrap();
+    assert_eq!(right.status, 200);
+    // The pupil's PC still waits, whatever its browser puts before the address that the proxy
+    // adds last, behind a second proxy on the same machine, and under the standard header too.
+    for headers in [
+        forwarded_for("10.9.9.9, 192.168.228.37"),
+        forwarded_for("192.168.228.37, 127.0.0.1"),
+        "Forwarded: for=192.168.228.37;proto=http\r\n".to_owned(),
+    ] {
+        let refused = exchange_from(proxy(), port, &join_through(&headers, CODE)).unwrap();
+        assert_eq!(refused.status, 429, "{headers:?}");
+    }
+    // A request from the proxy that names no PC counts for the proxy, as before.
+    let wrong = exchange_from(
+        proxy(),
+        port,
+        &join_through("Via: 1.1 e2guardian\r\n", "WRONG2"),
+    )
+    .unwrap();
+    assert_eq!(
+        wrong.json(),
+        serde_json::json!({ "error": "wrongCode", "remaining": 4 })
+    );
+}
+
+#[test]
+fn behind_a_proxy_a_pcs_ninth_token_does_not_push_out_another_pcs() {
+    let h = Harness::start();
+    let port = h.port();
+    let projector = cookie_through(port, &forwarded_for("192.168.228.12"));
+    let pupil: Vec<String> = (0..9)
+        .map(|_| cookie_through(port, &forwarded_for("192.168.228.37")))
+        .collect();
+    // The pupil's PC keeps its last eight tokens…
+    let refused = open_events_from(proxy(), port, Some(&pupil[0])).expect_err("refused");
+    assert_eq!(refused.status, 401);
+    // …and the projector's is still valid.
+    let mut stream = open_events_from(proxy(), port, Some(&projector)).expect("200");
+    assert_eq!(stream.next_event(SOON), Some(SseEvent::Retry(2000)));
+    assert_eq!(stream.expect(), waiting());
+    drop(stream);
+    let mut stream = open_events_from(proxy(), port, Some(&pupil[8])).expect("200");
+    assert_eq!(stream.next_event(SOON), Some(SseEvent::Retry(2000)));
+}
+
+#[test]
+fn a_client_that_names_another_pc_at_each_try_meets_the_limit_of_its_connection() {
+    let h = Harness::start();
+    let port = h.port();
+    // Eight PCs' five wrong codes (40 in all), whichever PCs the header names, even from a client
+    // that is no proxy and makes the header up…
+    let forger = proxy();
+    for i in 0..40u32 {
+        let headers = forwarded_for(&format!("10.0.0.{}", i / 5));
+        let wrong = exchange_from(forger, port, &join_through(&headers, "WRONG2")).unwrap();
+        let remaining = (4 - i % 5).min(39 - i);
+        assert_eq!(
+            wrong.json(),
+            serde_json::json!({ "error": "wrongCode", "remaining": remaining }),
+            "{i}"
+        );
+    }
+    // …then every request of that connection waits, a new PC, the right code and no header alike.
+    for headers in [forwarded_for("10.0.200.1"), String::new()] {
+        let refused = exchange_from(forger, port, &join_through(&headers, CODE)).unwrap();
+        assert_eq!(refused.status, 429, "{headers:?}");
+        let retry_after: u64 = refused.header("retry-after").unwrap().parse().unwrap();
+        assert!((290..=300).contains(&retry_after), "{retry_after}");
+    }
+    // Another address is not affected.
+    let right = exchange_from(pc(10), port, &join_request(CODE)).unwrap();
+    assert_eq!(right.status, 200);
+}
+
+#[test]
+fn a_proxy_header_without_an_address_counts_for_the_connection() {
+    let h = Harness::start();
+    let port = h.port();
+    let huge = forwarded_for(&"9".repeat(8 * 1024));
+    // Five headers that name no PC, each different: one record, the connection's.
+    let unreadable = [
+        "X-Forwarded-For: \r\n".to_owned(),
+        forwarded_for("unknown"),
+        forwarded_for("192.168.228.37, "),
+        "Forwarded: for=_hidden;proto=http\r\n".to_owned(),
+        huge,
+    ];
+    for (headers, remaining) in unreadable.iter().zip((0..5).rev()) {
+        let wrong = exchange_from(proxy(), port, &join_through(headers, "WRONG2")).unwrap();
+        assert_eq!(
+            wrong.json(),
+            serde_json::json!({ "error": "wrongCode", "remaining": remaining }),
+            "{:.60}",
+            headers
+        );
+    }
+    for headers in [forwarded_for("192.168.228.300"), String::new()] {
+        let refused = exchange_from(proxy(), port, &join_through(&headers, CODE)).unwrap();
+        assert_eq!(refused.status, 429, "{headers:?}");
+    }
+}
+
+#[test]
+fn the_journal_names_the_pc_a_proxy_forwards_for() {
+    use std::sync::Arc;
+
+    use ardoise_share::{LiveFeed, Share, ShareConfig};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("share.log");
+    let share = Share::start(
+        ShareConfig {
+            journal: Some(path.clone()),
+            ..test_config()
+        },
+        assets(),
+        Arc::new(FakeFeed::default()) as Arc<dyn LiveFeed>,
+        Box::new(|_| {}),
+    )
+    .unwrap();
+    let port = share.port();
+    let through = |headers: &str| exchange_from(proxy(), port, &join_through(headers, "WRONG2"));
+    through(&forwarded_for("10.9.9.9, 192.168.228.37")).unwrap();
+    through("Forwarded: for=\"[2001:db8::17]:4711\"\r\n").unwrap();
+    through("Via: 1.1 e2guardian\r\n").unwrap();
+    through(&forwarded_for("unknown")).unwrap();
+    exchange(port, &join_request("WRONG2")).unwrap();
+    share.stop();
+    let text = std::fs::read_to_string(&path).unwrap();
+    for wanted in [
+        "POST /join (through a proxy, for 192.168.228.37 from X-Forwarded-For) after",
+        "POST /join (through a proxy, for 2001:db8::17 from Forwarded) after",
+        "POST /join (through a proxy that names no PC) after",
+        "POST /join (through a proxy, no address in X-Forwarded-For) after",
+        "POST /join after",
+    ] {
+        assert!(text.contains(wanted), "{wanted:?} missing from:\n{text}");
+    }
+    // What the browser put before the proxy's own entry is never written.
+    for secret in ["10.9.9.9", "unknown", "e2guardian", "WRONG2"] {
+        assert!(!text.contains(secret), "{secret:?} in:\n{text}");
+    }
+}
