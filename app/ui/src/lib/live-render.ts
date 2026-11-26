@@ -184,7 +184,7 @@ export function effectiveBackground(background: Background, board: boolean): Bac
 }
 
 /** Opacity of a tool's flat fill (look.rs), before the colour's alpha. */
-function toolOpacity(tool: Tool): number {
+export function toolOpacity(tool: Tool): number {
   switch (tool) {
     case 'feltTip':
       return 0.9;

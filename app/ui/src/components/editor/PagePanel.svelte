@@ -95,7 +95,7 @@
     {/each}
   </div>
   <p class="pane-help">{t('editor.page.orientationHint')}</p>
-  <label class="pane-row">
+  <label class="pane-row size-row">
     <span>{t('editor.page.size')}</span>
     <select value={preset ?? 'custom'} {disabled} data-field="paper-size" onchange={(e) => setPaperSize(e.currentTarget.value)}>
       {#each PAPER_SIZE_IDS as id (id)}
@@ -198,6 +198,18 @@
 </section>
 
 <style>
+  /* The longest format name (« Tablette (216 × 297 mm) ») does not fit beside its label in the narrow pane: the menu
+     goes under it, over the whole width. */
+  .size-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.25rem;
+  }
+
+  .size-row select {
+    max-width: none;
+  }
+
   .dimensions {
     display: flex;
     flex-wrap: wrap;

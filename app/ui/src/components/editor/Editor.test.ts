@@ -980,6 +980,25 @@ describe('note editor', () => {
     expect(stored.strokes).toHaveLength(2);
   });
 
+  it('writes the eraser size with the language’s decimal separator (audit R10-6)', async () => {
+    const { target, button } = await render('Liste de courses');
+    button('Gomme').click();
+    await tick();
+    const size = () => target.querySelector('.toolbar label.slider .value')?.textContent?.trim();
+    expect(size()).toBe('6,0 mm');
+  });
+
+  it('renames with Ctrl+S from the title field when only the title changed (audit R10-5)', async () => {
+    const { path, typeTitle, titleInput, onsaved } = await render('Liste de courses');
+    typeTitle('Courses du lundi');
+    // No stroke, no blur: the title is the only change.
+    titleInput().dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(onsaved).toHaveBeenCalled());
+    const renamed = onsaved.mock.calls[0][0] as string;
+    expect(renamed).not.toBe(path);
+    expect(mockLibrary().notes.get(renamed)?.note.title).toBe('Courses du lundi');
+  });
+
   it('goes back once a rename under way is done, after announcing the new path', async () => {
     const { button, typeTitle, blurTitle, onclose, onsaved } = await render('Liste de courses');
     typeTitle('Courses du samedi');

@@ -136,6 +136,7 @@
   import { nextStrokeBase, type StrokeClock } from '../../lib/editor/writing-clock';
   import { t } from '../../lib/i18n.svelte';
   import type { Ink, InkPoint } from '../../lib/ink';
+  import { isDarkPaper, toolOpacity } from '../../lib/live-render';
   import {
     cssColor,
     equationPathData,
@@ -317,6 +318,7 @@
 
   const shown = $derived(transient ?? doc);
   const page = $derived(shown.note.page);
+  const darkPaper = $derived(isDarkPaper(doc.note.background.paper));
   const pageKey = $derived(`${doc.note.page.width}x${doc.note.page.height}`);
   // The paper and the background image with the key of its pixels (undo can bring another back).
   const backgroundKey = $derived(JSON.stringify([doc.note.background, placedImage(doc) ?? null]));
@@ -366,6 +368,8 @@
     d: string;
     fill: string;
     highlighter: boolean;
+    /** A stroke's fill opacity, the exports' and the live view's (`toolOpacity`; the pencil's pressure and grain are not drawn here); absent for an object. */
+    alpha?: number;
     selected: boolean;
     side: Side;
     faded: boolean;
@@ -425,6 +429,7 @@
         i,
         fill: cssColor(stroke.color),
         highlighter: stroke.tool === 'highlighter',
+        alpha: toolOpacity(stroke.tool),
         selected: selected.has(i),
         faded: faded.has(i),
       };
@@ -834,6 +839,16 @@
     }
   }
 
+  /**
+   * The back of the pen and the barrel button change the note whatever the tool: a typing in progress (a frame's
+   * `<textarea>` too, which keeps the focus as the pointerdown's default is prevented) ends first, so that its step
+   * comes before theirs in the history.
+   */
+  function endTyping() {
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) active.blur();
+  }
+
   /** The pen's barrel button is down: a lasso that ends with the button (or with the contact). */
   function startBarrelLasso(e: PointerEvent, id: number, p: Vec) {
     const combine: Combine = e.ctrlKey || e.metaKey ? 'remove' : e.shiftKey ? 'add' : 'replace';
@@ -881,7 +896,7 @@
     // The back of the pen erases and the barrel button lassoes, whatever the tool.
     if (!readonly && !split && (kind === 'eraser' || barrelHeld(e))) {
       e.preventDefault();
-      if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
+      endTyping();
       capture(id);
       const p = pagePoint(e);
       if (kind === 'eraser') {
@@ -996,7 +1011,7 @@
     // releasing the button ends it.
     if (!drag && kind === 'pen' && barrelHeld(e) && !readonly && !split) {
       e.preventDefault();
-      if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
+      endTyping();
       capture(pointerId(e));
       startBarrelLasso(e, pointerId(e), pagePoint(e));
       return;
@@ -1245,6 +1260,7 @@
     class="canvas mode-{split?.tracing ? 'zone' : tools.mode}"
     class:space={spacePan}
     class:eraser-end={eraserEnd}
+    class:dark-paper={darkPaper}
     class:dragging={dragKind === 'pan'}
     role="application"
     aria-label={t('editor.canvas')}
@@ -1308,6 +1324,7 @@
           <path
             d={item.d}
             fill={item.fill}
+            fill-opacity={item.alpha}
             fill-rule="nonzero"
             data-stroke={item.i}
             class:highlighter={item.highlighter}
@@ -1324,6 +1341,7 @@
           class:highlighter={tools.tool === 'highlighter'}
           d={livePath}
           fill={cssColor(tools.color)}
+          fill-opacity={toolOpacity(tools.tool)}
           fill-rule="nonzero"
         />
       {/if}
@@ -1532,6 +1550,11 @@
 
   .highlighter {
     mix-blend-mode: multiply;
+  }
+
+  /* A highlighter multiplied with a dark paper is nearly invisible: it is screened there, as in the exports and the live view. */
+  .dark-paper .highlighter {
+    mix-blend-mode: screen;
   }
 
   .selection,

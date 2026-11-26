@@ -204,6 +204,27 @@ describe('drafts in the editor', () => {
     expect(await api.draftList()).toHaveLength(1);
   });
 
+  it('keeps the editor keys quiet behind the recovery question (audit R10-2)', async () => {
+    const path = demoPath('Cours de physique');
+    await leaveADraft(path);
+    const editor = await render(path);
+    await vi.waitFor(() => expect(editor.dialog()).toBeTruthy());
+    const tool = () => editor.target.querySelector('.toolbar .tool[aria-pressed="true"]')?.getAttribute('title');
+    const before = tool();
+    const press = async (key: string, init: KeyboardEventInit = {}) => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }));
+      await tick();
+    };
+    // E chooses the eraser, Alt + → goes to the next page (or note): neither while the question is shown.
+    await press('e');
+    await press('ArrowRight', { altKey: true });
+    expect(tool()).toBe(before);
+    expect(editor.dialog()).toBeTruthy();
+    // The question still answers as before.
+    editor.action('draft-later')!.click();
+    await vi.waitFor(() => expect(editor.onclose).toHaveBeenCalled());
+  });
+
   it('removes the draft when the changes are discarded on leaving, and tells Windows nothing is unsaved', async () => {
     const path = demoPath('Cours de physique');
     const editor = await render(path);

@@ -169,7 +169,7 @@
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
       <li
         class="layer"
-        class:chosen={isChosen}
+        class:layer-chosen={isChosen}
         data-layer={index}
         data-chosen={isChosen ? 'true' : undefined}
         data-hidden={layer.visible ? undefined : 'true'}
@@ -361,7 +361,8 @@
     background: var(--surface-2);
   }
 
-  .layer.chosen {
+  /* Not `.chosen`: app.css gives that name (the wizard's folder) a top margin. */
+  .layer.layer-chosen {
     border-color: var(--accent);
     background: color-mix(in srgb, var(--accent) 12%, var(--surface));
   }
