@@ -225,6 +225,16 @@ Errors keep the `{ code, message }` shape. New codes (translated in `errorCodes.
 `narrationBusy` (a recording or monitor already runs), `noRecording`, `openh264DownloadFailed`, `liveNotRunning`
 (exists), `noteConflict` (exists).
 
+`videoEncoderFailed`: a Media Foundation error of an MP4 export other than a place problem (file creation, or a
+Win32 code such as disk full or access denied, which stay `videoExportFailed`), for instance a hardware encoder
+failing in `WriteSample` or `Finalize`; its sentence says to retry, check the disk space, then install OpenH264 or
+choose WebM. Nothing is retried automatically: `Auto` tries OpenH264 only when no Media Foundation writer can be
+created, so after a `videoEncoderFailed` (a process-wide flag, `WINDOWS_ENCODER_FAILED` in `video.rs`, kept until the
+application restarts) the next MP4 exports of that run use `Mp4Backend::OpenH264` when it is installed and allowed
+(`mp4_backend`), and stay on `Auto` otherwise; OpenH264 failing in turn is reported as it is. The failing export
+itself is not redone, and a real driver failure cannot be reproduced without the faulty driver: to reconsider if
+the failure is observed.
+
 `video.rs` (`VideoExportOptions` etc. are the TypeScript types of `app/ui/src/lib/video.ts`, camelCase):
 
 | Command | Arguments | Returns |

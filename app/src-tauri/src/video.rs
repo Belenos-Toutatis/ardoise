@@ -20,9 +20,9 @@ use ardoise_core::library::{Library, LibraryError};
 use ardoise_core::note::Note;
 use ardoise_media::replay::{MAX_SPEED, MIN_SPEED, ReplayOptions};
 use ardoise_media::{
-    AnimationExport, AnimationFormat, ExportProgress, FormatOptions, GifOptions, MediaError,
-    Mp4Options, Narration, OpenH264Codec, WebmOptions, WebpOptions, decode_narration,
-    estimate_export_time, export_animation, narration_header, page_frame_size,
+    AnimationExport, AnimationFormat, CodecStatus, ExportProgress, FormatOptions, GifOptions,
+    MediaError, Mp4Backend, Mp4Options, Narration, OpenH264Codec, WebmOptions, WebpOptions,
+    decode_narration, estimate_export_time, export_animation, narration_header, page_frame_size,
     plan_export_from_header,
 };
 use ardoise_render::{Backdrop, NoteView, Picture};
@@ -44,6 +44,9 @@ pub const INVALID_VIDEO_SETTINGS: &str = "invalidVideoSettings";
 /// Error code of an MP4 export without any H.264 encoder (no Media Foundation, and the OpenH264
 /// fallback not installed or not allowed).
 pub const CODEC_UNAVAILABLE: &str = "codecUnavailable";
+/// Error code of an MP4 export where Media Foundation (the H.264 encoder of Windows, often a
+/// hardware one) failed after the writer was created, while encoding or finishing the file.
+pub const VIDEO_ENCODER_FAILED: &str = "videoEncoderFailed";
 
 /// Frame rates offered by the interface (`FRAME_RATES` in `video.ts`).
 pub const FRAME_RATES: [u32; 5] = [10, 15, 24, 30, 60];
@@ -199,6 +202,40 @@ pub fn duration_ms(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
+/// Whether a Media Foundation failure comes from the place the file is written (it cannot be
+/// created, the disk is full, the folder is read-only or gone) rather than from the encoder.
+/// Media Foundation passes file errors on as Win32 codes wrapped in an HRESULT; a code it does
+/// not translate that way counts as the encoder's, and its sentence still mentions the space.
+fn place_failure(step: &str, code: u32) -> bool {
+    // The sink writer creates the file there: whatever fails is about the file.
+    if step == "MFCreateSinkWriterFromURL" {
+        return true;
+    }
+    // HRESULT_FROM_WIN32 (0x8007_xxxx), HRESULT_FROM_NT (0xD000_xxxx) or a bare Win32 code.
+    let win32 = match code >> 16 {
+        0x8007 => code & 0xFFFF,
+        0 => code,
+        _ => return code == 0xD000_007F, // STATUS_DISK_FULL
+    };
+    matches!(
+        win32,
+        2 // ERROR_FILE_NOT_FOUND
+            | 3 // ERROR_PATH_NOT_FOUND
+            | 5 // ERROR_ACCESS_DENIED
+            | 19 // ERROR_WRITE_PROTECT
+            | 21 // ERROR_NOT_READY
+            | 32 // ERROR_SHARING_VIOLATION
+            | 33 // ERROR_LOCK_VIOLATION
+            | 39 // ERROR_HANDLE_DISK_FULL
+            | 53 // ERROR_BAD_NETPATH
+            | 64 // ERROR_NETNAME_DELETED
+            | 112 // ERROR_DISK_FULL
+            | 123 // ERROR_INVALID_NAME
+            | 206 // ERROR_FILENAME_EXCED_RANGE
+            | 1117 // ERROR_IO_DEVICE
+    )
+}
+
 /// Error for the interface from the media pipeline, for an export to `format`.
 pub(crate) fn video_error(error: MediaError, format: AnimationFormat) -> CommandError {
     let mp4 = format == AnimationFormat::Mp4;
@@ -212,6 +249,9 @@ pub(crate) fn video_error(error: MediaError, format: AnimationFormat) -> Command
             if mp4 =>
         {
             CODEC_UNAVAILABLE
+        }
+        MediaError::MediaFoundation { step, code, .. } if mp4 && !place_failure(step, *code) => {
+            VIDEO_ENCODER_FAILED
         }
         MediaError::MicrophoneNotFound(_) => crate::narration::MICROPHONE_NOT_FOUND,
         MediaError::MicrophoneSilent => crate::narration::MICROPHONE_SILENT,
@@ -469,6 +509,30 @@ impl Throttle {
     }
 }
 
+/// Set once the video encoder of Windows failed during an MP4 export of this run of the
+/// application (`videoEncoderFailed`); never cleared, a new run starts afresh.
+static WINDOWS_ENCODER_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// Raises `flag` when `error` is `videoEncoderFailed`; gives `error` back as it is.
+fn remember_encoder_failure(flag: &AtomicBool, error: CommandError) -> CommandError {
+    if error.is_code(VIDEO_ENCODER_FAILED) {
+        flag.store(true, Ordering::Relaxed);
+    }
+    error
+}
+
+/// Back end of an MP4 export. `Auto` tries Media Foundation first and OpenH264 only when no
+/// Media Foundation writer can be created, so once Media Foundation failed while encoding, the
+/// next exports use OpenH264 directly when it is installed and allowed; they stay on Media
+/// Foundation otherwise. OpenH264 failing in turn is reported as it is, nothing is retried.
+fn mp4_backend(windows_encoder_failed: bool, openh264_installed: bool) -> Mp4Backend {
+    if windows_encoder_failed && openh264_installed {
+        Mp4Backend::OpenH264
+    } else {
+        Mp4Backend::Auto
+    }
+}
+
 /// Exports `source` with `options` to `destination` (replaced only once complete); `progress`
 /// gets at most 10 reports a second plus the last one; `cancel` stops it (`cancelled`, nothing
 /// written). `openh264`: the fallback library for MP4, when the user allows it.
@@ -496,7 +560,12 @@ pub fn export_video_in(
     }
     let format = options.format.animation();
     let source = load_video_source(library, source, wants_narration(options))?;
-    let export = animation_export(&source.note, options)?;
+    let mut export = animation_export(&source.note, options)?;
+    if let FormatOptions::Mp4(mp4) = &mut export.format {
+        let installed =
+            openh264.is_some_and(|codec| matches!(codec.status(), CodecStatus::Installed { .. }));
+        mp4.backend = mp4_backend(WINDOWS_ENCODER_FAILED.load(Ordering::Relaxed), installed);
+    }
     let started = Instant::now();
     let mut throttle = Throttle::new(PROGRESS_INTERVAL);
     let elapsed = |started: Instant| duration_ms(started.elapsed());
@@ -518,7 +587,9 @@ pub fn export_video_in(
         &mut report,
         cancel,
     )
-    .map_err(|error| video_error(error, format))?;
+    .map_err(|error| {
+        remember_encoder_failure(&WINDOWS_ENCODER_FAILED, video_error(error, format))
+    })?;
     if !throttle.finished() {
         progress(VideoProgress {
             frames_done: summary.frames,
@@ -888,6 +959,77 @@ mod tests {
         );
         assert_eq!(
             code_of(MediaError::Io(std::io::Error::other("disk full")), gif),
+            VIDEO_EXPORT_FAILED
+        );
+    }
+
+    #[test]
+    fn after_a_windows_encoder_failure_mp4_goes_through_openh264_when_it_is_there() {
+        // Nothing failed, or OpenH264 is not installed (or not allowed): as before.
+        assert_eq!(mp4_backend(false, true), Mp4Backend::Auto);
+        assert_eq!(mp4_backend(false, false), Mp4Backend::Auto);
+        assert_eq!(mp4_backend(true, false), Mp4Backend::Auto);
+        assert_eq!(mp4_backend(true, true), Mp4Backend::OpenH264);
+
+        // Only `videoEncoderFailed` raises the flag; the error itself is not changed.
+        let flag = AtomicBool::new(false);
+        for code in [VIDEO_EXPORT_FAILED, CODEC_UNAVAILABLE, CANCELLED] {
+            remember_encoder_failure(&flag, CommandError::new(code, "x"));
+            assert!(!flag.load(Ordering::Relaxed), "{code}");
+        }
+        let error = remember_encoder_failure(&flag, CommandError::new(VIDEO_ENCODER_FAILED, "x"));
+        assert_eq!(error.code(), VIDEO_ENCODER_FAILED);
+        assert!(flag.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_media_foundation_failure_while_encoding_is_not_told_as_a_place_problem() {
+        let mp4 = AnimationFormat::Mp4;
+        let failure = |step: &'static str, code: u32| MediaError::MediaFoundation {
+            step,
+            code,
+            message: "x".into(),
+        };
+        let code_of = |error: MediaError, format| video_error(error, format).code();
+        // The encoder gives up while samples are written, the file is finished or it starts:
+        // E_FAIL, MF_E_TRANSFORM_STREAM_CHANGE, MF_E_HW_MFT_FAILED_START_STREAMING.
+        for (step, code) in [
+            ("IMFSinkWriter::WriteSample", 0x8000_4005),
+            ("IMFSinkWriter::Finalize", 0xC00D_6D61),
+            ("IMFSinkWriter::BeginWriting", 0xC00D_3EA2),
+            ("IMFSinkWriter::AddStream (H.264)", 0x8000_4005),
+        ] {
+            assert_eq!(
+                code_of(failure(step, code), mp4),
+                VIDEO_ENCODER_FAILED,
+                "{step} {code:#x}"
+            );
+        }
+        // The place is at fault: the file cannot be created, the disk is full (ERROR_DISK_FULL,
+        // ERROR_HANDLE_DISK_FULL, STATUS_DISK_FULL), the folder is read-only or gone.
+        for (step, code) in [
+            ("MFCreateSinkWriterFromURL", 0x8000_4005),
+            ("MFCreateSinkWriterFromURL", 0x8007_0003),
+            ("IMFSinkWriter::WriteSample", 0x8007_0070),
+            ("IMFSinkWriter::WriteSample", 0x8007_0027),
+            ("IMFSinkWriter::Finalize", 0xD000_007F),
+            ("IMFSinkWriter::Finalize", 0x8007_0005),
+            ("IMFSinkWriter::Finalize", 0x8007_0013),
+            ("IMFSinkWriter::Finalize", 0x8007_0070),
+            ("IMFSinkWriter::WriteSample", 0x70),
+        ] {
+            assert_eq!(
+                code_of(failure(step, code), mp4),
+                VIDEO_EXPORT_FAILED,
+                "{step} {code:#x}"
+            );
+        }
+        // Only an MP4 goes through Media Foundation.
+        assert_eq!(
+            code_of(
+                failure("IMFSinkWriter::WriteSample", 0x8000_4005),
+                AnimationFormat::Gif
+            ),
             VIDEO_EXPORT_FAILED
         );
     }
