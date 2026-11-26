@@ -12,7 +12,8 @@ Application portable pour Windows (Rust + Tauri 2) qui remplace Wacom Inkspace p
 - `cargo xtask check` : vérification complète (dépendances npm, compilation de l'interface, formatage, clippy sans avertissement, tests Rust, svelte-check + vitest, compilation release). Se termine par `CHECK OK`. `--quick` saute la compilation release.
 - `cargo xtask selftest` : taille de `target\release\ardoise.exe` (< 40 Mo) puis `ardoise.exe --self-test`. Se termine par `SELFTEST OK`.
 - `cargo xtask e2e` : parcours de bout en bout sur l'exe de production (bibliothèque de démonstration, fenêtre pilotée par le port de débogage de WebView2), en français et en anglais. Se termine par `E2E OK`. Lancer `cargo xtask check` avant.
-- `cargo xtask perf [--write]` : mesure les objectifs de performance de SPEC §8 sur l'exe de production (démarrage, bibliothèque de 1 000 notes, mode direct, export MP4 1080p de 2 min, taille) et affiche un tableau ; `--write` met à jour `docs/performance.md`. Se termine par `PERF OK` ou `PERF MISSED`. Lancer `cargo xtask check` avant, sur un PC au repos.
+- `cargo xtask golden` : régénère les images de référence du rendu (`testdata/golden/*.png`) puis les compare. À lancer seulement quand un changement de rendu est voulu ; regarder les images avant de les committer.
+- `cargo xtask perf [--write] [--only …]` : mesure les objectifs de performance de SPEC §8 sur l'exe de production (démarrage, bibliothèque de 1 000 notes, mode direct, export MP4 1080p de 2 min, taille) et affiche un tableau ; `--write` met à jour `docs/performance.md`. Se termine par `PERF OK` ou `PERF MISSED`. Lancer `cargo xtask check` avant, sur un PC au repos.
 - `cargo xtask licenses [--write]` : vérifie la licence de chaque dépendance Rust et npm (liste blanche compatible GPL v3, aucune AGPL ; se termine par `LICENSES OK`) et que `THIRD-PARTY-NOTICES` est à jour ; `--write` le régénère (à committer). `check` le lance.
 - `cargo xtask privacy` : parcourt tout l'historique git (chemins, adresses e-mail, jetons, adresses Bluetooth, identifiants lus dans `testdata/private/`) et échoue si une donnée personnelle y figure ; liste aussi les identités des commits (information) ; se termine par `PRIVACY OK`. `check` le lance.
 - `cargo xtask dist [--reuse]` : archive de distribution `target/dist/ardoise-<version>-windows-x64.zip` (`ardoise.exe`, `LICENSE`, `THIRD-PARTY-NOTICES`, `LISEZMOI.txt`, guides `docs/guide/*.md` en HTML), reproductible ; affiche taille et SHA-256 ; compile l'exe de production sauf avec `--reuse` ; ne publie rien. Se termine par `DIST OK`.
@@ -29,7 +30,8 @@ Application portable pour Windows (Rust + Tauri 2) qui remplace Wacom Inkspace p
 - `crates/ardoise-*` : bibliothèques Rust (rôle de chacune : SPEC §6.1 et en tête de chaque `lib.rs`).
 - `app/src-tauri/` : l'exécutable `ardoise` (fenêtres, commandes appelées par l'interface, `--self-test`).
 - `app/ui/src/` : interface Svelte 5 + TypeScript ; textes dans `locales/fr.json` et `locales/en.json` ; appels à Rust regroupés dans `lib/api.ts`.
-- `xtask/` : automatisation (`check`, `selftest`).
+- `xtask/` : automatisation (`check`, `selftest`, `e2e`, `perf`, `golden`, `licenses`, `privacy`, `dist`) ; `cargo xtask` sans argument les liste.
+- `app/e2e/` : les parcours de bout en bout lancés par `cargo xtask e2e`.
 - Erreurs envoyées à l'interface : `{ code, message }` ; le code choisit une phrase traduite `errorCodes.*`.
 
 ## Conventions
@@ -39,6 +41,8 @@ Application portable pour Windows (Rust + Tauri 2) qui remplace Wacom Inkspace p
 - Bibliothèques : erreurs typées (`thiserror`) ; `anyhow` seulement dans l'exécutable et `xtask`. Pas de `unwrap()`/`expect()` hors des tests sur des données venant de la tablette, de fichiers ou de l'utilisateur.
 - Toute écriture dans la bibliothèque de l'utilisateur est **atomique** (SPEC §3.4).
 - Le protocole est réimplémenté à partir de `docs/research/protocol.md` et de nos captures, sans traduire le code de Tuhi ligne à ligne (SPEC §6.2).
+- Tout changement visible par l'utilisateur a son entrée dans `CHANGELOG.md` (en français, sous « Non publié »), écrite avec le changement.
+- **Fins de ligne** : garder celles du fichier. Une quinzaine de fichiers sont en CRLF dans git (`git ls-files --eol | grep i/crlf`, dont `app/src-tauri/src/tablet.rs` et `ROADMAP.md`) ; un outil d'édition ou `cargo fmt --all` peut les réécrire en LF, ce qui donne un diff du fichier entier. Avant chaque commit : `git ls-files --eol -m`, et remettre le CRLF si besoin.
 
 ## Règles
 
@@ -48,6 +52,8 @@ Application portable pour Windows (Rust + Tauri 2) qui remplace Wacom Inkspace p
 - La tablette n'est pas sur le poste de développement : tout ce qui la concerne doit être testable avec `ardoise-sim` ou des captures rejouées. Les tests réels passent par `docs/hardware-tests.md` ; les journaux de diagnostic reviennent par Nextcloud dans `<bibliothèque>/_ardoise/diagnostics/`.
 - Demander avant tout téléchargement d'outil (ex. `nasm`) ou installation globale.
 - Git : un commit par tâche cochée ou par groupe cohérent de changements, message en anglais. Le dépôt GitHub `origin` (Belenos-Toutatis/ardoise) est **public** avec l'accord de l'utilisateur (recréé le 2026-11-12 avec un historique sans donnée personnelle) : y pousser des branches de travail est autorisé, et `main` seulement après la vérification Windows (`cargo xtask check` et `cargo xtask e2e` réussis sur le PC). Tout ce qui est poussé est public. Les commits sont signés avec l'adresse no-reply de GitHub (`user.email` du dépôt), jamais avec une adresse personnelle ; pas de nom ni de chemin personnel dans le code, les tests ou la documentation (exemples : `C:\Users\prof\…`). L'ancien dépôt `ardoise-archive` reste privé et ne doit jamais être publié. **Jamais** créer une release ou publier quoi que ce soit d'autre sans accord explicite de l'utilisateur.
+- **Branche `docs-final`** (copie de travail `.claude/worktrees/docs-final`, à garder) : elle porte les notes de version (`docs/notes-de-version.md`), le README et les phrases de `SPEC.md` de la version 0.1.0. Y fusionner `main` après chaque changement poussé, y mettre à jour les notes de version, la pousser ; elle n'est fusionnée dans `main` qu'à la publication.
+- **Copie chez l'utilisateur** : ne jamais copier un exe dans le dossier d'où l'utilisateur lance Ardoise sans son accord, redemandé à chaque fois. Copier le contenu de l'archive de `cargo xtask dist --reuse` (exe vérifié, guides, licences), garder l'exe précédent comme seule sauvegarde (`ardoise-ancienne-version-….exe`), ne jamais toucher à son `ardoise.toml`, et lui dire de redémarrer Ardoise et l'assistant.
 
 ## Ménage du disque
 
