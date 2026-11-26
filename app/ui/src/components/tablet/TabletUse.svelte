@@ -98,8 +98,15 @@
             ? 'tablet.hint.adding'
             : null,
   );
-  /** Registering or searching for a blackboard is blocked by a library that is missing. */
-  const noLibrary = $derived(connection === 'unavailable' && status?.error?.code === 'noLibrary');
+  /**
+   * Registering or searching for a blackboard is blocked while the tablet is unavailable (Bluetooth off or missing, no
+   * library): the service would refuse it with the error it shows already, and so say nothing at all.
+   */
+  const addUnavailable = $derived(status !== null && connection === 'unavailable');
+  /** Why, under the buttons (a missing library is said by the panel's banner, in a sentence of its own). */
+  const addRefusal = $derived(
+    addUnavailable && status?.error && status.error.code !== 'noLibrary' ? errorMessage(status.error) : null,
+  );
 
   // The question has no meaning once the sync cannot start, or once the Xiaomi is no longer the connected tablet (the
   // « Sync and delete » that followed would send no flag and wait for nothing).
@@ -152,19 +159,22 @@
       <h3 id="tablet-register">{t('tablet.register.none')}</h3>
       <p class="muted">{t('tablet.register.intro')}</p>
       <div class="actions">
-        <button type="button" class="button primary" data-action="register" disabled={noLibrary || connection === 'adding'} onclick={() => (wizardOpen = 'slate')}>
+        <button type="button" class="button primary" data-action="register" disabled={addUnavailable || connection === 'adding'} onclick={() => (wizardOpen = 'slate')}>
           {t('tablet.register.open')}
         </button>
         <button
           type="button"
           class="button primary"
           data-action="add-blackboard"
-          disabled={noLibrary || connection === 'adding'}
+          disabled={addUnavailable || connection === 'adding'}
           onclick={() => (wizardOpen = 'blackboard')}
         >
           {t('tablet.board.open')}
         </button>
       </div>
+      {#if addRefusal}
+        <p class="muted small" data-slot="add-unavailable">{t('tablet.known.addUnavailable')} {addRefusal}</p>
+      {/if}
       {#if connection === 'adding'}
         <p class="muted small" data-slot="hint">{t('tablet.hint.adding')}</p>
         <div class="actions">

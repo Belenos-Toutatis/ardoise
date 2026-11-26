@@ -476,15 +476,18 @@ impl Page {
 
     /// Changed since it was written, and worth a file: a note is created only once a stroke
     /// ended on the page, or once it has an image (M17: a worksheet shown in class is kept, ink or
-    /// not; paper alone is not worth a note) or a page object, then rewritten whenever it changes.
-    /// A resumed sheet has its file from the start: written at its first change, whatever it
-    /// holds (strokes, text frames only, nothing).
+    /// not; paper alone is not worth a note), a page object or a narration (given only to a page
+    /// where a stroke was begun, [`set_audio`](Self::set_audio): one dropped since leaves no ink,
+    /// and the sound would be lost), then rewritten whenever it changes. A resumed sheet has its
+    /// file from the start: written at its first change, whatever it holds (strokes, text frames
+    /// only, nothing).
     pub fn needs_write(&self) -> bool {
         self.version != self.saved_version
             && (self.file.is_some()
                 || !self.note.strokes.is_empty()
                 || !self.note.objects.is_empty()
-                || self.image.is_some())
+                || self.image.is_some()
+                || self.audio.is_some())
     }
 
     /// Takes the strokes at `indices` (ascending, all on the page) off the page. A viewer is told of
@@ -1922,10 +1925,11 @@ impl LiveSession {
     /// its description checked already but for how far it reaches from this page
     /// ([`within_reach`]). `set`: these pixels, placed so; `place`: the same image (same name and
     /// page of the PDF) placed otherwise; `remove`: no image any more. Nothing when it changes
-    /// nothing; else one snapshot. Not a step of the page's history, no stroke in progress ends,
-    /// no index moves. A page of the session whose image goes no longer stays fixed under the
-    /// tablet ([`Page::held_fixed`]): it turns at once to the way the tablet is held, if it was
-    /// written another way, so that the pen's points land where they should.
+    /// nothing; else one snapshot. Not a step of the page's history, no index moves. A page of the
+    /// session whose image goes no longer stays fixed under the tablet ([`Page::held_fixed`]): it
+    /// turns at once to the way the tablet is held, if it was written another way, so that the
+    /// pen's points land where they should; the strokes in progress end before it turns. Otherwise
+    /// no stroke in progress ends.
     pub fn set_page_image(
         &mut self,
         page_index: usize,
@@ -1975,6 +1979,13 @@ impl LiveSession {
         }
         page.image_changed();
         if removed {
+            // The page is no longer held fixed and turns: as in `hold`, both strokes end first, in
+            // the frame they were written in, so that they turn with its ink.
+            let page = self.current_page();
+            if page.orientation != self.orientation && !page.held_fixed() {
+                self.end_strokes(out);
+                self.hover_end(out);
+            }
             self.follow();
             self.fit_view(size);
         }
@@ -2857,6 +2868,26 @@ mod tests {
             &mut out,
         );
         assert_eq!(session.style().width, Tool::Brush.default_width());
+    }
+
+    /// The windows do not wait for the echo of a view or a style that changes nothing
+    /// (`LiveState`, `lib/live-state.svelte.ts`; its browser stand-in `lib/mock-live.ts` sends
+    /// none either): none comes, once kept within bounds.
+    #[test]
+    fn a_view_or_a_style_that_changes_nothing_sends_nothing() {
+        let mut session = running();
+        let mut out = Vec::new();
+        let view = session.view();
+        session.set_view(view, &mut out);
+        session.set_view(LiveViewState { zoom: 0.5, ..view }, &mut out);
+        session.set_style(session.style(), &mut out);
+        assert!(out.is_empty(), "{out:?}");
+        let laser = LiveViewState {
+            laser: true,
+            ..view
+        };
+        session.set_view(laser, &mut out);
+        assert_eq!(events(&out), [&LiveEvent::View { view: laser }]);
     }
 
     #[test]

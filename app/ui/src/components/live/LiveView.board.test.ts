@@ -218,6 +218,9 @@ describe('live mode with the Xiaomi blackboard', () => {
     expect(view.target.textContent).toContain('Allumez la tablette Xiaomi pour la connecter');
     expect(view.target.textContent).toContain('Fermez Mi Home');
     expect(view.target.textContent).not.toContain('Appuyez brièvement sur le bouton de la tablette');
+    // The switch is the blackboard's already, never the Slate's (a click there would change the Slate's setting).
+    expect(boardButtons(view.target)).toHaveLength(4);
+    expect(view.target.querySelector('[data-slot="orientation"]')).toBeNull();
   });
 
   it('asks for either tablet while it waits, when both are known', async () => {

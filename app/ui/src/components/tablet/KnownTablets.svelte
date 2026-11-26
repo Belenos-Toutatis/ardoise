@@ -6,6 +6,7 @@
    * Nothing here assumes a Slate: the list is `status.known`. The panel's « Tablets » tab adds what the connected tablet
    * reported (`readings`), the settings the address and the date (`detailed`).
    */
+  import { errorMessage } from '../../lib/api';
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { formatDate } from '../../lib/library-logic';
   import type { TabletKind } from '../../lib/tablet';
@@ -39,12 +40,20 @@
   const connection = $derived(status?.connection ?? 'unavailable');
   /** What the last connected tablet said about itself (it is about one tablet only: see `device.kind`). */
   const device = $derived(status?.device ?? null);
+  /**
+   * Also while the tablet is unavailable (Bluetooth off or missing, no library): the service would refuse with the error
+   * it shows already, and so say nothing at all.
+   */
   const addBlocked = $derived(
     connection === 'registering' ||
       connection === 'adding' ||
       connection === 'syncing' ||
       connection === 'live' ||
-      (connection === 'unavailable' && status?.error?.code === 'noLibrary'),
+      (status !== null && connection === 'unavailable'),
+  );
+  /** Why, under the buttons (a missing library is said where the library is chosen). */
+  const addRefusal = $derived(
+    status?.connection === 'unavailable' && status.error && status.error.code !== 'noLibrary' ? errorMessage(status.error) : null,
   );
 
   // A tablet that is gone has no question left.
@@ -176,6 +185,9 @@
           </button>
         {/if}
       </div>
+      {#if addRefusal}
+        <p class="muted small" data-slot="add-unavailable">{t('tablet.known.addUnavailable')} {addRefusal}</p>
+      {/if}
     </div>
   {/if}
 </div>

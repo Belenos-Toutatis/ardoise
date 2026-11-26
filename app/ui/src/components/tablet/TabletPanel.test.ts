@@ -519,6 +519,28 @@ describe('tablet panel: no tablet registered', () => {
     expect(action('test')).not.toBeNull();
   });
 
+  it('offers no addition while Bluetooth is off, and says why under the buttons', async () => {
+    const { q, action, target } = await render({ forget: true });
+    expect(q('[data-slot="add-unavailable"]')).toBeNull();
+    // The service would refuse with the error its status holds already, and say nothing more.
+    mockTabletPatch({ connection: 'unavailable', error: { code: 'bluetoothOff', message: '' } });
+    await settle();
+    expect(action('register')!.disabled).toBe(true);
+    expect(action('add-blackboard')!.disabled).toBe(true);
+    expect(q('[data-slot="add-unavailable"]')!.textContent).toBe(
+      "Impossible d'ajouter une tablette pour le moment. Le Bluetooth est désactivé : activez-le dans les paramètres de Windows.",
+    );
+    // The « Tablets » tab says so too.
+    const known = target.querySelector('[data-tab-panel="tablets"]')!;
+    expect(known.querySelector<HTMLButtonElement>('[data-action="register"]')!.disabled).toBe(true);
+    expect(known.querySelector('[data-slot="add-unavailable"]')).not.toBeNull();
+    // Bluetooth back: both again.
+    mockTabletPatch({ connection: 'notRegistered', error: null });
+    await settle();
+    expect(action('register')!.disabled).toBe(false);
+    expect(q('[data-slot="add-unavailable"]')).toBeNull();
+  });
+
   it('opens the wizard on its warning', async () => {
     const { q, action, click } = await render({ forget: true });
     expect(q('.register-wizard')).toBeNull();

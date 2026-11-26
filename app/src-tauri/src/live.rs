@@ -220,14 +220,15 @@ pub fn session_ending(app: &AppHandle) {
 /// The ink first, which takes least and loses most: it ends up on disk within moments. Then the
 /// recording under way: a plain copy of its sound, then its pages, which encoding can make far
 /// longer than Windows waits ([`narration::finish_live_ending`]). The copy goes once the pages
-/// holding the sound are written. `remember` tells the assistant's bridge, after each step.
+/// holding the sound are written to the library; a page backed up before the sound joined it
+/// keeps only its last copy. `remember` tells the assistant's bridge, after each step.
 pub(crate) fn close_at_session_end(
     hub: &LiveHub,
     narration: Option<&NarrationRuntime>,
     backup: &Path,
     remember: impl Fn(),
 ) {
-    close_session(hub, backup);
+    let first = close_session(hub, backup);
     remember();
     let Some(ended) = narration.and_then(|narration| narration::finish_live_ending(narration, hub))
     else {
@@ -242,10 +243,30 @@ pub(crate) fn close_at_session_end(
     if let Err(error) = &ended.saved {
         log_narration_failure(error, backup);
     }
-    let failed = close_session(hub, backup);
+    let left = close_session(hub, backup);
     remember();
+    // A page copied before the sound joined it, and written again since (to the library, or to a
+    // copy of its own with the sound): its first copy is one too many.
+    for (index, copy) in &first {
+        let again = left.iter().find(|(page, _)| page == index);
+        if let Ok(path) = copy
+            && again.is_none_or(|(_, copy)| copy.is_ok())
+            && std::fs::remove_file(path).is_ok()
+        {
+            log_backup(
+                backup,
+                &format!(
+                    "page {}: backup copy {} removed, the page was written again since",
+                    index + 1,
+                    path.display()
+                ),
+            );
+        }
+    }
+    // The sound's copy goes only once every page is in the library: a page left out, even one
+    // whose own copy could not be written either, may leave it the only one.
     if ended.saved.is_ok()
-        && failed.is_empty()
+        && left.is_empty()
         && let Some(copy) = &ended.copy
     {
         let _ = std::fs::remove_file(copy);
@@ -265,15 +286,16 @@ pub fn backup_dir() -> PathBuf {
 
 /// Stops the session and writes its pages to the library; every page that cannot be written
 /// there gets a complete copy in `backup`, whose path is logged (standard error, and
-/// `live-backup.log` next to the copies, since a windowed app has no console). Returns the
-/// copies.
-fn close_session(hub: &LiveHub, backup: &Path) -> Vec<PathBuf> {
+/// `live-backup.log` next to the copies, since a windowed app has no console). Returns each page
+/// left out of the library (0-based) with its copy, or why it has none: empty when every page is
+/// in the library.
+fn close_session(hub: &LiveHub, backup: &Path) -> Vec<(usize, std::io::Result<PathBuf>)> {
     if let Err(error) = hub.stop() {
         eprintln!("live mode: cannot write the pages to the library when closing: {error}");
     }
-    let mut copies = Vec::new();
-    for (index, copy) in hub.back_up_unsaved(backup) {
-        let line = match &copy {
+    let unsaved = hub.back_up_unsaved(backup);
+    for (index, copy) in &unsaved {
+        let line = match copy {
             Ok(path) => format!(
                 "page {} could not be written to the library; backup copy: {}",
                 index + 1,
@@ -286,11 +308,8 @@ fn close_session(hub: &LiveHub, backup: &Path) -> Vec<PathBuf> {
         };
         eprintln!("live mode: {line}");
         log_backup(backup, &line);
-        if let Ok(path) = copy {
-            copies.push(path);
-        }
     }
-    copies
+    unsaved
 }
 
 /// Appends `line` (with the time) to `live-backup.log` in `dir`. Best effort.

@@ -69,6 +69,8 @@ describe('registration wizard', () => {
     const register = vi.spyOn(api, 'tabletRegister');
     const { target, q, step } = await render();
     expect(step()).toBe('warning');
+    // Not the class of the diagnostic's steps, whose global rule lays their parts out side by side.
+    expect(q('.register-wizard .step')).toBeNull();
     expect(target.textContent).toContain("ne fonctionnera plus avec l'application Wacom du téléphone ni avec Inkspace");
     expect(target.textContent).toContain('Coupez le Bluetooth de votre téléphone');
     expect(q('[data-action="continue"]')).not.toBeNull();
@@ -185,6 +187,29 @@ describe('registration wizard', () => {
 
     // And closing from an error needs no cancel.
     expect(onclose).not.toHaveBeenCalled();
+  });
+
+  it('takes the error the status holds for the answer when the service says nothing more (Bluetooth still off)', async () => {
+    const { q, step, click } = await render();
+    // Bluetooth goes off while the warning shows. The service refuses then with the error its status holds already, and
+    // publishes nothing: it publishes a status only when it changes.
+    mockTabletPatch({ connection: 'unavailable', error: { code: 'bluetoothOff', message: '' } });
+    await settle();
+    const register = vi.spyOn(api, 'tabletRegister').mockResolvedValue(undefined);
+    await click('[data-action="continue"]');
+    expect(register).toHaveBeenCalledOnce();
+    await beat(2);
+    expect(step()).toBe('error');
+    expect(q('[data-step="error"]')!.textContent).toContain('Le Bluetooth est désactivé');
+    // Tried again, Bluetooth still off: the same answer.
+    await click('[data-action="retry"]');
+    expect(register).toHaveBeenCalledTimes(2);
+    await beat(2);
+    expect(step()).toBe('error');
+    // The registration began after all (Bluetooth back, the request taken late): it is followed.
+    mockTabletPatch({ connection: 'registering', registerStep: 'searching', error: null });
+    await settle();
+    expect(step()).toBe('searching');
   });
 
   it('shows the error of a refused request', async () => {

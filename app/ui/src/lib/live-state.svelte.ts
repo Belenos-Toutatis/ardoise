@@ -218,6 +218,8 @@ export class LiveState {
   private lastSent: LiveViewState | null = null;
   private sendTimer: ReturnType<typeof setTimeout> | undefined;
   private sendQueued = false;
+  /** The last style Rust sent, and the local styles on their way to it (oldest first). */
+  private confirmedStyle: LiveStyle = DEFAULT_STYLE;
   private styleInFlight: LiveStyle[] = [];
   /** The forks told so far (`original|path`), dismissed or not: each is shown once. */
   private forksTold = new Set<string>();
@@ -520,7 +522,11 @@ export class LiveState {
   // --- Changes made in this window ------------------------------------------------------------
   //
   // They show at once; Rust broadcasts them back to every window. An echo of an older local
-  // change (the user is still dragging, or clicked twice) must not undo a newer one.
+  // change (the user is still dragging, or clicked twice) must not undo a newer one. Rust broadcasts
+  // only what changes its view or style (`LiveSession::set_view`, `set_style`), and keeps only the
+  // last of the views queued for a window: a change equal to what Rust is expected to hold (the last
+  // one on its way, else the last one Rust sent) is sent all the same (this window may not have heard
+  // of a newer one yet) but not waited for, or the window would ignore every other one from then on.
 
   /**
    * Shows `view` now and sends it with `send` (at most one per `VIEW_SEND_MS`; the last one is
@@ -540,8 +546,10 @@ export class LiveState {
   private sendView(send: (view: LiveViewState) => Promise<unknown>): void {
     const view = this.view;
     this.lastSent = view;
-    this.inFlight.push(view);
-    if (this.inFlight.length > MAX_IN_FLIGHT) this.inFlight.shift();
+    if (!sameView(view, this.inFlight.at(-1) ?? this.confirmedView)) {
+      this.inFlight.push(view);
+      if (this.inFlight.length > MAX_IN_FLIGHT) this.inFlight.shift();
+    }
     send(view).catch(() => this.viewFailed(view));
     this.sendTimer = setTimeout(() => {
       this.sendTimer = undefined;
@@ -567,9 +575,9 @@ export class LiveState {
     this.confirmedView = view;
     const i = this.inFlight.findIndex((v) => sameView(v, view));
     if (i >= 0) this.inFlight.splice(0, i + 1);
-    // A newer local view is on its way (sent, or waiting to be sent): keep showing it.
-    const localAhead = this.lastSent !== null && !sameView(this.view, this.lastSent);
-    if (this.inFlight.length > 0 || localAhead) return;
+    // A newer local view is on its way (sent, or waiting to be sent): keep showing it. Not the view
+    // last adopted from another window, which differs from `lastSent` too.
+    if (this.inFlight.length > 0 || this.sendQueued) return;
     if (!sameView(this.view, view)) this.view = view;
   }
 
@@ -578,8 +586,10 @@ export class LiveState {
     if (this.closed) return Promise.resolve();
     const previous = this.style;
     this.style = style;
-    this.styleInFlight.push(style);
-    if (this.styleInFlight.length > MAX_IN_FLIGHT) this.styleInFlight.shift();
+    if (!sameStyle(style, this.styleInFlight.at(-1) ?? this.confirmedStyle)) {
+      this.styleInFlight.push(style);
+      if (this.styleInFlight.length > MAX_IN_FLIGHT) this.styleInFlight.shift();
+    }
     return send(style).then(
       () => undefined,
       (error: unknown) => {
@@ -597,6 +607,7 @@ export class LiveState {
   }
 
   private incomingStyle(style: LiveStyle): void {
+    this.confirmedStyle = style;
     const i = this.styleInFlight.findIndex((s) => sameStyle(s, style));
     if (i >= 0) this.styleInFlight.splice(0, i + 1);
     if (this.styleInFlight.length > 0) return;

@@ -798,15 +798,18 @@ fn a_page_that_cannot_be_written_is_shown_and_backed_up_when_the_app_closes() {
 
     // The app closes: the page goes to the backup folder, complete, and the path is logged.
     let backup = dir.path().join("live-backup");
-    let copies = super::close_session(&hub, &backup);
-    assert_eq!(copies.len(), 1);
-    assert_eq!(copies[0].parent(), Some(backup.as_path()));
-    let copy = ardoise_core::format::read_note(&copies[0]).unwrap().note;
+    let unsaved = super::close_session(&hub, &backup);
+    assert_eq!(unsaved.len(), 1);
+    let (page, copy) = &unsaved[0];
+    let path = copy.as_ref().unwrap();
+    assert_eq!(*page, 0);
+    assert_eq!(path.parent(), Some(backup.as_path()));
+    let copy = ardoise_core::format::read_note(path).unwrap().note;
     assert_eq!(copy.strokes.len(), 2);
     assert_eq!(copy.origin, Origin::Live);
     assert_ne!(copy.id, hub.snapshot().page.id, "a copy, with its own id");
     let log = std::fs::read_to_string(backup.join("live-backup.log")).unwrap();
-    assert!(log.contains(&copies[0].display().to_string()), "{log}");
+    assert!(log.contains(&path.display().to_string()), "{log}");
     assert_eq!(
         std::fs::read_dir(&backup).unwrap().count(),
         2,
@@ -1917,6 +1920,45 @@ fn live_narration_goes_to_its_pages_through_the_hub() {
     assert_eq!(audio_of(&library, Path::new(&saved[1])), Some(damaged));
 }
 
+/// A stroke begun on a new page, then dropped (Esc), gives the page its time origin: a narration has
+/// a part for it (`split_live_recording`), which the hub takes. The page is then written for its
+/// sound, a note without ink, rather than the sound lost without a word.
+#[test]
+fn a_narration_given_to_a_page_without_ink_is_written_with_it() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(config());
+    let _sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    let session = hub.page_position().unwrap().session;
+    let begin = ComputerPenInput::Begin {
+        stroke: 1,
+        page_index: 0,
+        style: LiveStyle::default(),
+        samples: vec![computer_sample(100.0), computer_sample(200.0)],
+        now: 0.0,
+    };
+    assert!(hub.computer_pen(begin).unwrap());
+    assert!(
+        hub.computer_pen(ComputerPenInput::Cancel { stroke: 1 })
+            .unwrap()
+    );
+    let origin = hub.page_origins(session).unwrap()[0];
+    assert!(origin.is_some(), "a stroke was begun on the page");
+    let pieces = crate::narration::split_live_recording(
+        simulated_narration(Duration::from_secs(1), 1),
+        &[change(Duration::ZERO, 0)],
+        origin.unwrap() as f64,
+        &[origin],
+    );
+    assert_eq!(pieces.len(), 1, "the page has its part of the recording");
+    let (page, narration) = pieces.into_iter().next().unwrap();
+    assert!(hub.attach_narration(session, page, narration).unwrap());
+    let saved = hub.stop().unwrap();
+    assert_eq!(saved.len(), 1, "the sound is not lost");
+    let written = library.read(Path::new(&saved[0])).unwrap().file;
+    assert!(written.note.strokes.is_empty());
+    assert!(written.audio.is_some());
+}
+
 // --- What is said when live mode stops, and the end of the Windows session -----------------------
 
 /// A hub that writes a page at its first stroke, then not again until it is told to.
@@ -2129,6 +2171,59 @@ fn at_the_end_of_the_session_a_recording_that_did_not_reach_its_page_stays_as_a_
     let log = std::fs::read_to_string(backup.join("live-backup.log")).unwrap();
     assert!(log.contains(&copy.display().to_string()), "{log}");
     assert!(log.contains("narrationUnreadable"), "{log}");
+}
+
+/// The files of `dir` with the extension `extension`.
+fn files_in(dir: &Path, extension: &str) -> Vec<PathBuf> {
+    std::fs::read_dir(dir).map_or(Vec::new(), |entries| {
+        entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|x| x == extension))
+            .collect()
+    })
+}
+
+#[test]
+fn at_the_end_of_the_session_a_page_the_library_refuses_keeps_its_sound_in_one_place_at_least() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("Notes");
+    std::fs::create_dir(&root).unwrap();
+    ardoise_core::library::init(&root).unwrap();
+    let library = Library::open(&root).unwrap();
+
+    // The library refuses the page: one backup copy of it, the one written once the sound joined it
+    // (the copy made before, with the ink alone, goes). The sound's own copy stays too.
+    let hub = patient_hub();
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    stroke(&mut sink, 3000, 5);
+    break_folder(&hub, &root, true);
+    let (backup, copies) = (dir.path().join("backup"), dir.path().join("copies"));
+    let runtime = recording(&hub, 1, &copies);
+    super::close_at_session_end(&hub, Some(&runtime), &backup, || {});
+    let kept = files_in(&backup, "ardoise");
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert!(
+        ardoise_core::format::read_note(&kept[0])
+            .unwrap()
+            .audio
+            .is_some()
+    );
+    assert_eq!(files_in(&copies, "wav").len(), 1);
+    break_folder(&hub, &root, false);
+
+    // Neither the library nor the backup folder takes it: the sound's copy is the only one left.
+    let hub = patient_hub();
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    stroke(&mut sink, 3000, 5);
+    break_folder(&hub, &root, true);
+    let blocked = dir.path().join("blocked");
+    std::fs::write(&blocked, b"not a folder").unwrap();
+    let copies = dir.path().join("copies-2");
+    let runtime = recording(&hub, 1, &copies);
+    super::close_at_session_end(&hub, Some(&runtime), &blocked, || {});
+    assert_eq!(files_in(&copies, "wav").len(), 1, "the sound is kept");
+    break_folder(&hub, &root, false);
 }
 
 // --- How often a page is written -----------------------------------------------------------------
