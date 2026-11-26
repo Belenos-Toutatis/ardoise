@@ -1242,6 +1242,58 @@ fn cancel_stops_the_sync_between_pages() {
 }
 
 #[test]
+fn stopping_live_mode_that_waits_for_a_sync_leaves_the_sync_shown() {
+    // The automatic sync of the connection runs; live mode asked meanwhile waits for it. Leaving
+    // live mode then must not show the tablet as idle: the progress and « Annuler » stay.
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    with_pages(&tablet, 3);
+    registered_beforehand(&tablet, library.path());
+    // Each page waits for the test before it is stored.
+    let (reached, page_reached) = mpsc::channel();
+    let (go, wait_go) = mpsc::channel::<()>();
+    let wait_go = Mutex::new(wait_go);
+    let reached = Mutex::new(reached);
+    let before = move |n: u16| {
+        reached.lock().unwrap().send(n).unwrap();
+        wait_go.lock().unwrap().recv_timeout(WAIT).unwrap();
+    };
+    let mut run = Running::virtual_time(
+        &tablet,
+        library.path(),
+        TabletOptions::default(),
+        library_store(None, Some(Box::new(before))),
+    );
+    assert_eq!(page_reached.recv_timeout(WAIT).unwrap(), 1);
+    let (sender, inputs) = mpsc::channel();
+    run.service.start_live(Box::new(ChannelSink(sender)));
+    go.send(()).unwrap();
+    // Taken between pages 1 and 2: live mode waits for the sync.
+    assert_eq!(page_reached.recv_timeout(WAIT).unwrap(), 2);
+    assert_eq!(
+        inputs.recv_timeout(WAIT).unwrap(),
+        LiveInput::State(LiveState::Waiting)
+    );
+    run.service.stop_live();
+    go.send(()).unwrap();
+    // Taken between pages 2 and 3: live mode is left while the sync goes on.
+    assert_eq!(page_reached.recv_timeout(WAIT).unwrap(), 3);
+    assert_eq!(
+        inputs.recv_timeout(WAIT).unwrap(),
+        LiveInput::State(LiveState::Stopped)
+    );
+    let status = run.service.status();
+    assert_eq!(status.connection, Connection::Syncing, "{status:#?}");
+    assert!(status.sync.is_some());
+    assert_eq!(status.pending, None);
+    go.send(()).unwrap();
+    let status = run.wait(|s| s.last_sync.is_some());
+    assert_eq!(status.last_sync.unwrap().saved.len(), 3);
+    assert_eq!(status.connection, Connection::Connected);
+    run.service.shutdown();
+}
+
+#[test]
 fn a_sync_asked_while_away_runs_when_the_tablet_comes() {
     let library = new_library();
     let tablet = SimTablet::slate_large();

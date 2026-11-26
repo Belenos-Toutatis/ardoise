@@ -525,12 +525,14 @@ impl Session {
             }) {
                 Ok(Reply::DownloadEnd { crc }) => break crc,
                 Ok(other) => return Err(unexpected(&other)),
-                Err(DeviceError::Timeout(what)) => {
+                // A wait that saw only frames it could not decode ends `Unexpected`: as after a
+                // silent one, the page goes on while its bytes flow.
+                Err(error @ (DeviceError::Timeout(_) | DeviceError::Unexpected(_))) => {
                     let flowing = self.last_page_data.is_some_and(|last| {
                         self.clock.monotonic().saturating_sub(last) < DATA_IDLE_TIMEOUT
                     });
                     if !flowing {
-                        return Err(DeviceError::Timeout(what));
+                        return Err(error);
                     }
                 }
                 Err(error) => return Err(error),

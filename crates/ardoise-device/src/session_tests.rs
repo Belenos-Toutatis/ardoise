@@ -492,6 +492,89 @@ fn a_transfer_corrupted_once_succeeds_on_the_retry() {
     assert_eq!(saved, vec![bytes]);
 }
 
+/// A scripted tablet whose notifications come `pace` apart, the clock moving in between: a long
+/// transfer outlasts a wait for its end marker.
+struct Paced {
+    script: Box<dyn Transport>,
+    clock: Arc<TestClock>,
+    pace: Duration,
+    /// The next notification of the script and when it arrives.
+    next: Option<(TransportEvent, Duration)>,
+}
+
+impl Paced {
+    fn set_clock(&self, at: Duration) {
+        let ms = u64::try_from(at.as_millis()).unwrap();
+        self.clock.0.store(ms, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl Transport for Paced {
+    fn peer(&self) -> &Advertisement {
+        self.script.peer()
+    }
+    fn write(&mut self, frame: &[u8]) -> Result<(), TransportError> {
+        self.script.write(frame)
+    }
+    fn recv(&mut self, timeout: Duration) -> Result<Option<TransportEvent>, TransportError> {
+        let now = self.clock.monotonic();
+        if self.next.is_none() {
+            // What the script holds ready (a wait of zero moves no clock).
+            self.next = self
+                .script
+                .recv(Duration::ZERO)?
+                .map(|e| (e, now + self.pace));
+        }
+        match self.next.take() {
+            Some((event, due)) if due <= now + timeout => {
+                self.set_clock(due.max(now));
+                Ok(Some(event))
+            }
+            later => {
+                self.next = later;
+                self.set_clock(now + timeout);
+                Ok(None)
+            }
+        }
+    }
+    fn disconnect(&mut self) -> Result<(), TransportError> {
+        self.script.disconnect()
+    }
+}
+
+/// A frame the decoder refuses, met during a long download, is no reason to give up while the
+/// page's bytes still flow: the download waits on as after a wait with nothing at all.
+#[test]
+fn a_frame_that_does_not_decode_does_not_stop_a_download_whose_bytes_flow() {
+    // 60 chunks of 20 bytes, 200 ms apart: 12 s, more than two waits for the end marker.
+    let bytes: Vec<u8> = (0..1200u32).map(|i| (i * 7 % 251) as u8).collect();
+    let mut download = vec![cmd("c8 01 be")];
+    let mut chunks = page(&bytes);
+    let later = chunks.split_off(10);
+    download.extend(chunks);
+    // Declares two bytes, holds one.
+    download.push(cmd("b3 02 00"));
+    download.extend(later);
+    download.push(end_marker(&bytes));
+    let (script, harness) = script(vec![
+        ("e6 06 89 ea 78 88 ff cb", vec![cmd("b3 01 00")]),
+        ("cc 01 00", vec![page_info(bytes.len())]),
+        ("c3 01 00", download),
+    ]);
+    let paced = Paced {
+        script,
+        clock: harness.clock.clone(),
+        pace: Duration::from_millis(200),
+        next: None,
+    };
+    let clock: Arc<dyn Clock> = harness.clock.clone();
+    let mut session = Session::connect(Box::new(paced), clock, ID).unwrap();
+    let page = session.download_oldest().unwrap();
+    assert_eq!(page.bytes, bytes);
+    let took = harness.clock.monotonic();
+    assert!(took > DATA_IDLE_TIMEOUT * 2, "{took:?}");
+}
+
 #[test]
 fn without_deletion_only_the_oldest_page_is_read() {
     let bytes = vec![9u8; 5];

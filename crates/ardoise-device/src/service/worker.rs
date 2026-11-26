@@ -1497,7 +1497,12 @@ impl Worker {
             self.link_lost();
         } else if self.session.is_some() || self.board.is_some() {
             self.counted_at = self.session_time();
-            self.publish(Connection::Connected);
+            // A sync that live mode waited for goes on: its steps publish only their progress.
+            self.publish(if self.sync.is_some() {
+                Connection::Syncing
+            } else {
+                Connection::Connected
+            });
         } else {
             let pending = self.pending();
             self.publisher.update(|status| status.pending = pending);
