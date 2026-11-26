@@ -2,6 +2,58 @@
 
 ## Non publié
 
+### Corrigé et modifié (audit complet du 2026-11-26, demandé par l'utilisateur ; `docs/questions.md` Q28)
+
+Une relecture de tout le code, partie par partie, et de l'affichage, écran par écran, a relevé une soixantaine de défauts. Chacun est corrigé avec un test quand il se laisse tester. Aucune de ces corrections n'a été essayée à la main ni avec les vraies tablettes.
+
+Quatre décisions de l'utilisateur :
+
+- **Partage derrière le filtre web d'un établissement** : quand tous les navigateurs passent par le même proxy, les limites du partage valaient pour toute l'école (cinq codes faux d'un élève faisaient attendre tous les écrans, le projecteur compris ; un neuvième écran déconnectait le premier). Quand le proxy dit pour quel poste il transmet (dernière entrée de `X-Forwarded-For`, sinon `Forwarded`), les codes faux et les jetons se comptent par poste. Un navigateur peut falsifier cette entrée, risque accepté par l'utilisateur ; chaque adresse de connexion garde donc une limite plus large (40 codes faux en 5 minutes, 128 jetons). Le journal du partage nomme le poste. Les limites de quatre écrans et de huit connexions restent comptées par adresse de connexion.
+- **« Synchroniser » demandé sans tablette connectée**, avec les deux tablettes connues : la demande était abandonnée sans rien dire quand la Xiaomi se connectait la première. Elle attend maintenant la Bamboo Slate et s'exécute à sa connexion ; le panneau le dit. Elle n'importe toujours pas les pages de la Xiaomi (Q15).
+- **Encodeur vidéo de Windows en panne pendant un export MP4** : le message parlait de l'emplacement du fichier. Il dit maintenant que l'encodeur a échoué et propose OpenH264 ou le WebM (code `videoEncoderFailed`). Après une telle panne, les exports MP4 suivants de la même session passent par OpenH264 s'il est installé ; rien n'est relancé tout seul.
+- **Échec de l'export automatique après une synchronisation** : il n'était écrit nulle part. Il est écrit dans `_ardoise\diagnostics\autoexport.log` et affiché à la fin de la synchronisation dans le panneau de la tablette, comme un avertissement (nombre de notes, fichier, raison donnée par Windows).
+
+Bibliothèque :
+
+- **`Ctrl + Z` pendant le mode direct, ou sous une fenêtre de dialogue, annulait une action de la bibliothèque cachée derrière** (des notes retournaient dans leur ancien classeur) et empêchait le direct d'annuler la sienne. `Ctrl + N` et `Ctrl + F` agissaient aussi sous la plupart des dialogues.
+- Deux écritures rapprochées sur les mêmes notes (deux étiquettes, un double clic sur l'étoile) donnaient une fausse erreur « modifiée entre-temps » ; un second **Nouvelle note** créait une seconde note vide ; la bibliothèque pouvait être changée pendant un travail par lot, qui continuait dans la nouvelle (c'est refusé).
+- Une note dont le chemin dépasse 260 caractères restait cachée dans l'Explorateur après chaque enregistrement. Retitrer une note « (2) » en ne changeant que la casse renommait son fichier en « (3) ». Un titre finissant par un groupe comme « (conflit … 2026-11-03) » donnait un nom de fichier pris pour une copie en conflit : le groupe passe entre crochets. Un `tags.json` ou un `_ardoise-order.json` d'une version plus récente n'est plus pris pour un fichier abîmé ni remplacé.
+- Une bibliothèque dont le dossier manquait au lancement n'était plus surveillée de toute la session ; elle l'est dès qu'il revient. Une recherche ne rend plus l'ancien chemin d'une note renommée pendant que la lecture de l'écriture est arrêtée.
+- Un menu du clic droit plus haut que la fenêtre se fermait à la molette ; des messages **Annuler** pouvaient ne plus partir seuls ; un thème ou une langue refusés restaient cochés ; un filtre d'étiquettes sans résultat affichait le texte d'une bibliothèque vide.
+- **Affichage** : un dialogue haut (export, vidéo) s'ouvrait défilé jusqu'à son bouton, titre caché ; sous 1 100 px environ, l'en-tête écrasait le champ de recherche et repliait ses boutons ; le menu de tri coupait son libellé le plus long ; les messages **Annuler** couvraient le bas des panneaux de côté ; la licence d'OpenH264 est au-dessus de sa phrase ; l'infobulle d'export nomme le WebP.
+
+Éditeur :
+
+- Gommer avec le dos du stylet pendant la frappe d'un cadre de texte perdait le gommage. Les touches de l'éditeur agissaient derrière la question de récupération d'un brouillon. `Ctrl + S` dans le champ du titre ne renommait rien quand seul le titre avait changé.
+- **Le surligneur disparaissait sur un papier sombre** ; il s'y dessine comme dans les exports et le direct. Le feutre et la craie prennent l'opacité des exports.
+- **Le quadrillage était décalé d'un demi-carreau (2,5 mm)** à l'écran, en PNG, en vidéo et sur les miniatures, par rapport au SVG, au PDF et à l'aimantation.
+- Une découpe par instant avec un signet placé entre la coupe et le premier contenu déplacé donnait une heure aberrante (arrêt brutal en version de développement).
+- Affichage : un vide au-dessus de la ligne du calque choisi ; les erreurs du panneau Équation ne revenaient pas à la ligne ; le menu **Format** de l'onglet Page coupait son libellé ; le texte d'attente de l'aperçu d'une équation est lisible sur un papier ardoise. L'épaisseur du trait et la taille de la gomme suivent la langue (« 0,60 mm » en français).
+
+Mode direct et tablettes :
+
+- **Le vidéoprojecteur pouvait cesser de suivre le zoom et le laser** : une fenêtre qui envoyait une vue ou un style sans rien changer attendait un écho qui ne vient jamais, puis ignorait tout ce qui venait des autres fenêtres ; la barre d'outils pouvait renvoyer un ancien style.
+- Retirer l'image de fond pendant un trait tournait la page sous lui. À la fermeture de session de Windows, la copie de la narration était effacée même quand aucune page n'avait pu être écrite. Une narration donnée à une page sans encre n'était jamais écrite : cette page devient une note.
+- Après un choix à la souris, le menu des outils et le curseur d'épaisseur gardaient le focus, et les touches du direct changeaient alors l'outil de la tablette.
+- Les assistants d'ajout d'une tablette restaient à leur première étape quand le Bluetooth était coupé : les boutons sont inactifs et disent pourquoi. Avec la seule Xiaomi connue et non connectée, la barre d'outils montrait les positions de la Slate.
+- Arrêter un direct qui attendait la fin d'une synchronisation faisait disparaître l'avancement et le bouton d'annulation alors qu'elle continuait. Pendant le téléchargement d'une longue page, une trame illisible terminait le transfert alors que ses octets arrivaient encore.
+
+Narration, vidéo et partage :
+
+- **Un enregistrement sonore s'arrête de lui-même juste avant 4 heures**, la durée que la lecture accepte, et le dit. Un son plus long était écrit dans la note, puis refusé à la lecture, et le suivant le remplaçait sans question.
+- L'estimation d'un export vidéo décodait toute la narration à chaque changement de réglage (345 Mo par heure de son). Le niveau du micro restait figé après une panne, et un micro qui cessait d'envoyer du son ne disait rien.
+- Sur un Wi-Fi lent, la page de l'autre écran montrait le papier sans aucun trait jusqu'à son rechargement (le module de dessin n'avait que cinq secondes pour arriver) : chaque morceau a maintenant son propre délai et la page réessaie.
+
+Exports, impression et assistant :
+
+- **Un export, une impression ou un glisser de nombreuses notes à fond d'image décodait toutes les images avant de dessiner** (2,9 Go pour les 80 notes d'un PDF de 80 pages, de quoi arrêter Ardoise sur un petit PC) : une seule à la fois, et les fichiers écrits sont identiques à l'octet près. Le PDF lui-même reste construit en mémoire avant d'être écrit.
+- Les dessins d'un export Markdown ou Word échouaient pour une page de plus de 2,08 m (`imageTooLarge`) : la résolution baisse jusqu'à ce que la page tienne. `Thumbs.db` ou `desktop.ini` dans le dossier d'images d'un export précédent faisaient créer un dossier de plus à chaque export.
+- Fermer la fenêtre de fichier de « Microsoft Print to PDF » est une impression annulée, plus une erreur.
+- Assistant (MCP) : `get_note_text` rend la transcription corrigée même sans module d'écriture sur le PC (`structure.source` vaut `"none"` quand la page n'a ni texte tapé ni reconnaissance).
+- `ardoise.exe --self-test` ne démarre plus le service de la tablette, la lecture de l'écriture ni l'entretien de la bibliothèque.
+
+Restes connus, non corrigés : le glisser-déposer d'une page de plus de 5,7 m échoue ; l'opacité du crayon (pression, grain) n'est pas rendue dans l'éditeur comme dans les exports ; les compteurs n'ont pas de séparateur de milliers.
+
 ### Corrigé (décision de l'utilisateur du 2026-11-25 : une page illisible ne bloque plus la tablette)
 
 - **Une page de la Bamboo Slate qu'Ardoise ne sait pas lire jusqu'au bout ne bloque plus les suivantes.** La tablette ne donne que sa page la plus ancienne : une page refusée y restait et cachait pour toujours celles d'après, avec un message faux (« la bibliothèque ne peut pas être lue ou modifiée »). Elle devient maintenant une note avec les traits lus avant le problème (vide si rien n'est lisible) et toutes les données de la tablette, octet pour octet ; elle n'est effacée de la tablette qu'après la vérification habituelle du fichier, et seulement si **Effacer de la tablette après import** est coché : les pages suivantes arrivent alors à leur tour. À la fin, le panneau dit quelle note vérifier, et le journal de la connexion est gardé dans `_ardoise\diagnostics`.
