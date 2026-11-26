@@ -36,7 +36,7 @@ use ardoise_core::fsutil;
 use ardoise_core::note::{Note, PageSize};
 use ardoise_render::{Backdrop, NoteView};
 
-use crate::narration::Narration;
+use crate::narration::{Narration, NarrationHeader};
 use crate::opus::samples_to_duration;
 use crate::replay::{FrameRenderer, FrameSettings, ReplayOptions, Timeline, frame_time};
 use crate::{
@@ -153,6 +153,44 @@ pub fn plan_export(
     export: &AnimationExport,
     narration: Option<&Narration>,
 ) -> Result<ExportPlan, MediaError> {
+    let timing = narration.map(|n| NarrationTiming {
+        options: n.options,
+        start_ms: n.start_ms,
+        length: clip_duration(&n.clip),
+    });
+    plan(note, export, timing, narration.map(|n| &n.clip))
+}
+
+/// [`plan_export`] from what [`narration_header`](crate::narration_header) reads of the narration
+/// (its time base and length), without its sound: the estimate before an export.
+pub fn plan_export_from_header(
+    note: &Note,
+    export: &AnimationExport,
+    narration: Option<&NarrationHeader>,
+) -> Result<ExportPlan, MediaError> {
+    let timing = narration.map(|n| NarrationTiming {
+        options: n.options,
+        start_ms: n.start_ms,
+        length: n.duration,
+    });
+    plan(note, export, timing, None)
+}
+
+/// What a plan needs of a narration.
+#[derive(Debug, Clone, Copy)]
+struct NarrationTiming {
+    options: ReplayOptions,
+    start_ms: i64,
+    length: Duration,
+}
+
+/// [`plan_export`]; `clip`, when given, is checked for the formats with sound.
+fn plan(
+    note: &Note,
+    export: &AnimationExport,
+    narration: Option<NarrationTiming>,
+    clip: Option<&AudioClip>,
+) -> Result<ExportPlan, MediaError> {
     let format = export.format.format();
     validate(export, format)?;
     let replay = narration.map_or(export.replay, |n| n.options);
@@ -161,11 +199,13 @@ pub fn plan_export(
     // Where the narration lies in video time: (start, length).
     let span = match narration {
         Some(narration) => {
-            if format.has_sound() {
-                validate_clip(&narration.clip)?;
+            if let Some(clip) = clip
+                && format.has_sound()
+            {
+                validate_clip(clip)?;
             }
             let start = Duration::from_millis(u64::try_from(narration.start_ms).unwrap_or(0));
-            Some((start, clip_duration(&narration.clip)))
+            Some((start, narration.length))
         }
         None => None,
     };

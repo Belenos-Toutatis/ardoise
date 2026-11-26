@@ -9,7 +9,13 @@ use cpal::{FromSample, Sample};
 use super::level::{Level, LevelMeter};
 use super::resample::NarrationResampler;
 use super::silence::SilenceDetector;
-use crate::{AudioClip, MediaError};
+use crate::{AudioClip, MAX_NARRATION_FRAMES, MediaError, NARRATION_SAMPLE_RATE};
+
+/// Longest recording, in samples at 48 kHz: the longest narration read back
+/// ([`MAX_NARRATION_FRAMES`], 4 hours) less a minute of margin. The capture stops there by itself
+/// ([`CaptureStatus::Full`](super::CaptureStatus::Full)) and keeps what it recorded.
+pub const MAX_RECORDING_FRAMES: u64 = MAX_NARRATION_FRAMES - 60 * NARRATION_SAMPLE_RATE as u64;
+const _: () = assert!(MAX_RECORDING_FRAMES > 0 && MAX_RECORDING_FRAMES < MAX_NARRATION_FRAMES);
 
 /// Highest device sample rate accepted (a sanity bound; real devices stop at 192 kHz).
 const MAX_SAMPLE_RATE: u32 = 768_000;
@@ -37,6 +43,10 @@ pub(crate) struct Pipeline {
     record: bool,
     level: Level,
     frames_in: u64,
+    /// Input frames a recording takes at most: its 48 kHz limit at the device's rate.
+    max_frames_in: u64,
+    /// A recording reached its limit: whatever comes next is dropped.
+    full: bool,
     mono: Vec<f32>,
     converted: Vec<f32>,
     samples: Vec<i16>,
@@ -44,6 +54,17 @@ pub(crate) struct Pipeline {
 
 impl Pipeline {
     pub fn new(sample_rate: u32, channels: u16, record: bool) -> Result<Self, MediaError> {
+        Self::with_limit(sample_rate, channels, record, MAX_RECORDING_FRAMES)
+    }
+
+    /// A pipeline whose recording keeps at most `max_frames` samples at 48 kHz (a monitor keeps
+    /// nothing and has no limit).
+    pub fn with_limit(
+        sample_rate: u32,
+        channels: u16,
+        record: bool,
+        max_frames: u64,
+    ) -> Result<Self, MediaError> {
         if sample_rate == 0
             || sample_rate > MAX_SAMPLE_RATE
             || channels == 0
@@ -54,6 +75,12 @@ impl Pipeline {
             )));
         }
         let channels = usize::from(channels);
+        // Rounded down: the resampler then hands out `round(frames_in × 48000 / rate)` frames,
+        // never more than `max_frames`.
+        let max_frames_in = u64::try_from(
+            u128::from(max_frames) * u128::from(sample_rate) / u128::from(NARRATION_SAMPLE_RATE),
+        )
+        .unwrap_or(u64::MAX);
         Ok(Self {
             channels,
             sample_rate,
@@ -63,6 +90,8 @@ impl Pipeline {
             record,
             level: Level::default(),
             frames_in: 0,
+            max_frames_in,
+            full: false,
             mono: Vec::new(),
             converted: Vec::new(),
             samples: Vec::new(),
@@ -70,9 +99,17 @@ impl Pipeline {
     }
 
     /// Adds interleaved samples as the device delivered them. A trailing partial frame is
-    /// dropped.
+    /// dropped, and so is what a recording receives past its limit ([`Pipeline::is_full`]).
     pub fn push(&mut self, interleaved: &[f32]) -> Result<(), MediaError> {
-        let whole = interleaved.len() - interleaved.len() % self.channels;
+        let mut whole = interleaved.len() - interleaved.len() % self.channels;
+        if self.record {
+            let room = self.max_frames_in.saturating_sub(self.frames_in);
+            let room = usize::try_from(room).unwrap_or(usize::MAX);
+            if whole / self.channels >= room {
+                whole = room * self.channels;
+                self.full = true;
+            }
+        }
         let interleaved = &interleaved[..whole];
         if interleaved.is_empty() {
             return Ok(());
@@ -117,6 +154,11 @@ impl Pipeline {
 
     pub fn frames_received(&self) -> u64 {
         self.frames_in
+    }
+
+    /// A recording reached its limit: it keeps nothing more.
+    pub fn is_full(&self) -> bool {
+        self.full
     }
 
     /// The last second or more was exactly zero.
@@ -320,6 +362,26 @@ mod tests {
         assert!((level.peak_dbfs() + 12.04).abs() < 0.2, "{level:?}");
         p.push(&vec![0.0; 2 * 4410]).expect("push");
         assert_eq!(p.level().peak, 0.0);
+    }
+
+    #[test]
+    fn a_recording_keeps_no_more_than_its_limit() {
+        for rate in [48_000u32, 44_100, 16_000] {
+            // 0.2 s at 48 kHz; a second is pushed, in chunks that do not fall on the limit.
+            let mut p = Pipeline::with_limit(rate, 2, true, 9_600).expect("pipeline");
+            let data = tone(440.0, 0.5, rate, 2, rate as usize);
+            for chunk in data.chunks(2 * 441) {
+                p.push(chunk).expect("push");
+            }
+            assert!(p.is_full(), "{rate} Hz");
+            assert_eq!(p.frames_received(), u64::from(rate) / 5, "{rate} Hz");
+            let clip = p.finish().expect("finish");
+            assert_eq!(clip.samples.len(), 9_600, "{rate} Hz");
+        }
+        // Below its limit a recording is not full.
+        let mut p = Pipeline::with_limit(48_000, 1, true, 9_600).expect("pipeline");
+        p.push(&tone(440.0, 0.5, 48_000, 1, 9_599)).expect("push");
+        assert!(!p.is_full());
     }
 
     #[test]

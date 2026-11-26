@@ -141,6 +141,9 @@ pub enum CaptureState {
     Receiving,
     Silent,
     Failed,
+    /// The recording reached the longest narration a note reads back: it stopped by itself, and
+    /// what it recorded is saved by the stop.
+    Full,
 }
 
 /// Peak and RMS of the last 50 ms, linear 0..=1.
@@ -276,6 +279,7 @@ pub fn capture_state(status: &CaptureStatus) -> (CaptureState, Option<String>) {
         CaptureStatus::Receiving => (CaptureState::Receiving, None),
         CaptureStatus::Silent => (CaptureState::Silent, None),
         CaptureStatus::Failed(message) => (CaptureState::Failed, Some(message.clone())),
+        CaptureStatus::Full => (CaptureState::Full, None),
     }
 }
 
@@ -1651,10 +1655,10 @@ pub fn discard_in(runtime: &NarrationRuntime) {
 
 /// The microphones the runtime can open (with `--simulated-microphone`, only the simulated one).
 #[tauri::command]
-pub async fn list_microphones(
-    runtime: State<'_, NarrationRuntime>,
-) -> CommandResult<Vec<Microphone>> {
-    runtime.microphones()
+pub async fn list_microphones(app: AppHandle) -> CommandResult<Vec<Microphone>> {
+    // Listing asks the audio system: off the async runtime's threads, as every command here that
+    // opens a device, waits for the capture or reads a note.
+    crate::notes::blocking(move || app.state::<NarrationRuntime>().microphones()).await
 }
 
 /// Remembers the microphone on this PC (`None`: the system's default).
@@ -1674,51 +1678,54 @@ pub fn set_microphone(
     set_microphone_in(&context, device)
 }
 
+/// Opening the device waits for it, with the capture's lock held: off the async runtime's threads.
 #[tauri::command]
-pub async fn microphone_monitor(
-    runtime: State<'_, NarrationRuntime>,
-    device: Option<String>,
-) -> CommandResult<()> {
-    monitor_in(&runtime, device.as_deref())
+pub async fn microphone_monitor(app: AppHandle, device: Option<String>) -> CommandResult<()> {
+    crate::notes::blocking(move || monitor_in(&app.state::<NarrationRuntime>(), device.as_deref()))
+        .await
 }
 
-/// Stops the level meter, never a recording.
+/// Stops the level meter, never a recording (waiting for its capture thread to end).
 #[tauri::command]
-pub async fn microphone_monitor_stop(runtime: State<'_, NarrationRuntime>) -> CommandResult<()> {
-    monitor_stop_in(&runtime);
-    Ok(())
+pub async fn microphone_monitor_stop(app: AppHandle) -> CommandResult<()> {
+    crate::notes::blocking(move || {
+        monitor_stop_in(&app.state::<NarrationRuntime>());
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn narration_start(
     app: AppHandle,
-    context: State<'_, AppContext>,
-    runtime: State<'_, NarrationRuntime>,
-    live: State<'_, LiveRuntime>,
     device: Option<String>,
     target: NarrationTarget,
 ) -> CommandResult<()> {
-    let watched = app.clone();
-    let position = Arc::new(move || {
-        watched
-            .try_state::<LiveRuntime>()
-            .and_then(|live| live.hub().page_position())
-    });
-    start_in(
-        &runtime,
-        device.as_deref(),
-        target,
-        || library_of(&context),
-        live.hub(),
-        position,
-    )
+    crate::notes::blocking(move || {
+        let watched = app.clone();
+        let position = Arc::new(move || {
+            watched
+                .try_state::<LiveRuntime>()
+                .and_then(|live| live.hub().page_position())
+        });
+        let context = app.state::<AppContext>();
+        let live = app.state::<LiveRuntime>();
+        start_in(
+            &app.state::<NarrationRuntime>(),
+            device.as_deref(),
+            target,
+            || library_of(&context),
+            live.hub(),
+            position,
+        )
+    })
+    .await
 }
 
+/// Waits for the capture's lock, which a start holds while the device opens.
 #[tauri::command]
-pub async fn narration_status(
-    runtime: State<'_, NarrationRuntime>,
-) -> CommandResult<NarrationStatus> {
-    Ok(runtime.status())
+pub async fn narration_status(app: AppHandle) -> CommandResult<NarrationStatus> {
+    crate::notes::blocking(move || Ok(app.state::<NarrationRuntime>().status())).await
 }
 
 #[tauri::command]
@@ -1748,13 +1755,21 @@ pub async fn narration_stop(
 /// Saves the replay narration that could not be saved at stop into the note at `path`.
 #[tauri::command]
 pub async fn narration_retry(
+    app: AppHandle,
     context: State<'_, AppContext>,
-    runtime: State<'_, NarrationRuntime>,
     path: String,
     stamp: Option<FileStamp>,
 ) -> CommandResult<NarrationSaved> {
     let library = library_of(&context)?;
-    retry_in(&runtime, &library, &path, stamp.as_ref())
+    crate::notes::blocking(move || {
+        retry_in(
+            &app.state::<NarrationRuntime>(),
+            &library,
+            &path,
+            stamp.as_ref(),
+        )
+    })
+    .await
 }
 
 /// Forgets the replay narration that could not be saved (its backup copy stays).
@@ -1769,7 +1784,8 @@ pub async fn narration_info(
     context: State<'_, AppContext>,
     path: String,
 ) -> CommandResult<Option<NarrationInfo>> {
-    narration_info_in(&library_of(&context)?, Path::new(&path))
+    let library = library_of(&context)?;
+    crate::notes::blocking(move || narration_info_in(&library, Path::new(&path))).await
 }
 
 /// The narration of a note as stored, an Ogg Opus stream (raw bytes: an `ArrayBuffer` in the

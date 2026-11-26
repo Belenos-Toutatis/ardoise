@@ -28,6 +28,7 @@ mod silence;
 mod simulated;
 
 pub use level::Level;
+pub use pipeline::MAX_RECORDING_FRAMES;
 pub use recorder::{CaptureStatus, Recorder};
 pub use simulated::simulated_narration;
 

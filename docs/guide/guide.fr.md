@@ -1938,6 +1938,10 @@ de coupure du micro, sur certains PC, donne le même résultat).
 
 En mode direct, **Enregistrer la narration** enregistre le son pendant la séance, découpé page par page.
 
+Un enregistrement dure au plus 4 heures (s'il est resté lancé à la fin d'un cours, par exemple) : il s'arrête alors de
+lui-même et est enregistré comme avec **Arrêter et enregistrer**, et Ardoise le dit (« L'enregistrement s'est arrêté de
+lui-même : il a atteint sa durée maximale (4 heures). »).
+
 ### Exporter en vidéo
 
 Le bouton **Vidéo** ouvre **Exporter en vidéo**. Quatre formats :

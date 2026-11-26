@@ -1812,6 +1812,10 @@ same result).
 
 In live mode, **Record the narration** records the sound during the session, cut page by page.
 
+A recording lasts 4 hours at most (a recording left running at the end of a lesson, for instance): it then stops by
+itself and is saved as with **Stop and save**, and Ardoise says so ("The recording stopped by itself: it reached its
+longest length (4 hours).").
+
 ### Exporting as video
 
 The **Video** button opens **Export as video**. Four formats:

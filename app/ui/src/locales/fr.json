@@ -1737,7 +1737,8 @@
       "noData": "Le micro ne transmet rien. Vérifiez qu'il est bien branché ou choisissez-en un autre.",
       "failed": "Le micro a échoué : {detail}",
       "failedUnknown": "Le micro ne fonctionne pas.",
-      "silent": "Windows bloque peut-être l'accès au micro : ouvrez Paramètres > Confidentialité et sécurité > Microphone et activez « Autoriser les applications de bureau à accéder à votre microphone ». Un interrupteur de coupure du micro donne le même résultat."
+      "silent": "Windows bloque peut-être l'accès au micro : ouvrez Paramètres > Confidentialité et sécurité > Microphone et activez « Autoriser les applications de bureau à accéder à votre microphone ». Un interrupteur de coupure du micro donne le même résultat.",
+      "full": "Durée maximale atteinte (4 heures) : l'enregistrement s'arrête."
     },
     "record": {
       "open": "Enregistrer une narration",
@@ -1759,7 +1760,8 @@
       "unsavedWarning": "Cette note a des modifications non enregistrées. Enregistrez-la d'abord (Ctrl+S), sinon elles ne seront pas conservées avec la narration.",
       "replaceQuestion": "Cette note a déjà une narration ({duration}). La remplacer par ce nouvel enregistrement ?",
       "replaceYes": "Remplacer",
-      "replaceNo": "Garder l'ancienne"
+      "replaceNo": "Garder l'ancienne",
+      "limitReached": "L'enregistrement s'est arrêté de lui-même : il a atteint sa durée maximale (4 heures)."
     },
     "pending": {
       "title": "Enregistrement en attente",

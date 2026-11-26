@@ -337,12 +337,17 @@ fn capture_statuses_and_levels_map_to_the_interface() {
         capture_state(&CaptureStatus::Failed("unplugged".into())),
         (CaptureState::Failed, Some("unplugged".into()))
     );
+    assert_eq!(
+        capture_state(&CaptureStatus::Full),
+        (CaptureState::Full, None)
+    );
     for (state, text) in [
         (CaptureState::Waiting, "waiting"),
         (CaptureState::NoData, "noData"),
         (CaptureState::Receiving, "receiving"),
         (CaptureState::Silent, "silent"),
         (CaptureState::Failed, "failed"),
+        (CaptureState::Full, "full"),
     ] {
         assert_eq!(serde_json::to_value(state).unwrap(), text);
     }

@@ -9,8 +9,11 @@
    *
    * M17 (O11): with `replaces`, « Démarrer » first asks whether the narration the note has (`replacedMs` long) is to be
    * replaced; only « Remplacer » starts. The live view passes no `replaces`.
+   *
+   * A recording that reaches the longest narration a note reads back (4 hours: its capture says `full`) stopped by
+   * itself: the panel stops it with `onstop`, as « Arrêter et enregistrer » does, and says why until the next start.
    */
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import { t } from '../../lib/i18n.svelte';
   import { clock } from './format';
   import MicrophonePicker from './MicrophonePicker.svelte';
@@ -79,6 +82,16 @@
   // The question goes with what it was about: the panel folded, a recording started elsewhere, no narration to replace.
   $effect(() => {
     if (!open || !idle || !replaces) askingReplace = false;
+  });
+
+  /** `onstop` was called for the recording that reached its limit (once per recording). */
+  let stoppedAtLimit = false;
+  $effect(() => {
+    const full = recorder.phase === 'recording' && recorder.status?.capture === 'full';
+    if (recorder.phase === 'idle') stoppedAtLimit = false;
+    if (!full || stoppedAtLimit) return;
+    stoppedAtLimit = true;
+    untrack(() => onstop());
   });
 
   async function discard() {
@@ -237,6 +250,9 @@
         </button>
       </div>
     {/if}
+  {/if}
+  {#if idle && recorder.reachedLimit}
+    <p class="small warning" role="status" data-slot="record-limit">{t('narration.record.limitReached')}</p>
   {/if}
   {#if recorder.error}
     <p class="small error" role="alert" data-slot="record-error">{t('narration.record.failed', { message: recorder.error })}</p>

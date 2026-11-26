@@ -22,7 +22,8 @@ use ardoise_media::replay::{MAX_SPEED, MIN_SPEED, ReplayOptions};
 use ardoise_media::{
     AnimationExport, AnimationFormat, ExportProgress, FormatOptions, GifOptions, MediaError,
     Mp4Options, Narration, OpenH264Codec, WebmOptions, WebpOptions, decode_narration,
-    estimate_export_time, export_animation, page_frame_size, plan_export,
+    estimate_export_time, export_animation, narration_header, page_frame_size,
+    plan_export_from_header,
 };
 use ardoise_render::{Backdrop, NoteView, Picture};
 use serde::{Deserialize, Serialize};
@@ -332,6 +333,39 @@ pub fn load_video_source(
     source: ExportSource,
     narration: bool,
 ) -> CommandResult<VideoSource> {
+    let files = load_source_files(library, source, narration)?;
+    let narration = files
+        .audio
+        .map(|bytes| decode_narration(&bytes).map_err(unreadable_narration))
+        .transpose()?;
+    Ok(VideoSource {
+        note: files.note,
+        picture: files.picture,
+        narration,
+    })
+}
+
+/// What [`load_source_files`] reads: the narration as stored (its `audio.opus`, when wanted).
+struct SourceFiles {
+    note: Note,
+    picture: Option<Arc<Picture>>,
+    audio: Option<Vec<u8>>,
+}
+
+/// `videoExportFailed` for a stored narration that cannot be read.
+fn unreadable_narration(error: MediaError) -> CommandError {
+    CommandError::new(
+        VIDEO_EXPORT_FAILED,
+        format!("the narration stored in the note cannot be read: {error}"),
+    )
+}
+
+/// What [`load_video_source`] reads, before the narration is decoded.
+fn load_source_files(
+    library: Option<&Library>,
+    source: ExportSource,
+    narration: bool,
+) -> CommandResult<SourceFiles> {
     let path = Path::new(&source.path);
     let wants_file =
         source.note.is_none() || (narration && !source.path.is_empty()) || image_from_file(&source);
@@ -355,23 +389,15 @@ pub fn load_video_source(
         }
     };
     let picture = background::source_picture(&note, key.as_deref(), member.as_ref())?;
-    let narration = match audio {
-        Some(bytes) if narration => Some(decode_narration(&bytes).map_err(|error| {
-            CommandError::new(
-                VIDEO_EXPORT_FAILED,
-                format!("the narration stored in the note cannot be read: {error}"),
-            )
-        })?),
-        _ => None,
-    };
-    Ok(VideoSource {
+    Ok(SourceFiles {
         note,
         picture,
-        narration,
+        audio: audio.filter(|_| narration),
     })
 }
 
-/// What the export of `source` with `options` would be (nothing is written).
+/// What the export of `source` with `options` would be (nothing is written). The narration is
+/// read from its headers, not decoded: the dialog asks again after each change of its settings.
 pub fn estimate_in(
     library: Option<&Library>,
     source: ExportSource,
@@ -379,14 +405,18 @@ pub fn estimate_in(
 ) -> CommandResult<VideoEstimate> {
     check_options(options)?;
     let format = options.format.animation();
-    let source = load_video_source(library, source, wants_narration(options))?;
-    let export = animation_export(&source.note, options)?;
-    let plan = plan_export(&source.note, &export, source.narration.as_ref())
+    let SourceFiles { note, audio, .. } =
+        load_source_files(library, source, wants_narration(options))?;
+    let narration = audio
+        .map(|bytes| narration_header(&bytes).map_err(unreadable_narration))
+        .transpose()?;
+    let export = animation_export(&note, options)?;
+    let plan = plan_export_from_header(&note, &export, narration.as_ref())
         .map_err(|error| video_error(error, format))?;
     let narration_ms = plan
         .audio_start
-        .and(source.narration.as_ref())
-        .map(|narration| duration_ms(narration.duration()));
+        .and(narration)
+        .map(|narration| duration_ms(narration.duration));
     Ok(VideoEstimate {
         width: export.width,
         height: export.height,
@@ -1145,5 +1175,98 @@ mod tests {
         .unwrap();
         assert_eq!(gif.narration_ms, None);
         assert_eq!(gif.speed, 1.0);
+    }
+
+    /// The Ogg CRC (RFC 3533: polynomial 0x04c11db7, not reflected, initial value 0).
+    fn ogg_crc(bytes: &[u8]) -> u32 {
+        let mut crc = 0u32;
+        for &byte in bytes {
+            crc ^= u32::from(byte) << 24;
+            for _ in 0..8 {
+                crc = if crc & 0x8000_0000 != 0 {
+                    (crc << 1) ^ 0x04c1_1db7
+                } else {
+                    crc << 1
+                };
+            }
+        }
+        crc
+    }
+
+    /// `audio`, an Ogg stream, with the granule position of its last page moved by `delta`: its
+    /// headers then give another length, while its packets decode to the same sound.
+    fn with_last_granule_moved(mut audio: Vec<u8>, delta: i64) -> Vec<u8> {
+        let mut start = 0;
+        let last = loop {
+            let segments = usize::from(audio[start + 26]);
+            let body: usize = audio[start + 27..start + 27 + segments]
+                .iter()
+                .map(|&lacing| usize::from(lacing))
+                .sum();
+            let end = start + 27 + segments + body;
+            if end == audio.len() {
+                break start..end;
+            }
+            start = end;
+        };
+        let at = last.start + 6..last.start + 14;
+        let granule = u64::from_le_bytes(audio[at.clone()].try_into().unwrap());
+        let moved = granule.checked_add_signed(delta).unwrap();
+        audio[at].copy_from_slice(&moved.to_le_bytes());
+        audio[last.start + 22..last.start + 26].fill(0);
+        let crc = ogg_crc(&audio[last.clone()]);
+        audio[last.start + 22..last.start + 26].copy_from_slice(&crc.to_le_bytes());
+        audio
+    }
+
+    #[test]
+    fn the_estimate_reads_the_narration_without_decoding_it() {
+        // A narration whose headers give 20 ms while its packets hold 3 s: decoding it refuses it
+        // ("more sound than the file can hold"), its headers alone are read as `narration_info`
+        // reads them.
+        let (_dir, library) = library();
+        let saved = write_sample(&library, "", "Essai");
+        let narration = Narration {
+            clip: simulated_narration(Duration::from_secs(3), 1),
+            base: NarrationBase::Replay,
+            options: ReplayOptions {
+                speed: 2.0,
+                max_pause: None,
+            },
+            start_ms: 0,
+        };
+        let frames = i64::try_from(narration.clip.samples.len()).unwrap();
+        let audio = with_last_granule_moved(encode_narration(&narration).unwrap(), 960 - frames);
+        assert_eq!(
+            narration_header(&audio).unwrap().duration,
+            Duration::from_millis(20)
+        );
+        assert!(decode_narration(&audio).is_err());
+        let mut file = library.read(&saved.path).unwrap().file;
+        file.audio = Some(audio);
+        library.save(&saved.path, &file, &saved.stamp).unwrap();
+
+        let webm = estimate_in(
+            Some(&library),
+            from_library(&saved.path),
+            &options(VideoFormat::Webm),
+        )
+        .unwrap();
+        assert_eq!(webm.speed, 2.0);
+        assert_eq!(webm.narration_ms, Some(20));
+        // The export decodes the sound, and refuses it.
+        let out = tempfile::tempdir().unwrap();
+        let error = export_video_in(
+            Some(&library),
+            from_library(&saved.path),
+            &options(VideoFormat::Webm),
+            &out.path().join("essai.webm"),
+            None,
+            &mut |_| {},
+            &NOT_CANCELLED,
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), VIDEO_EXPORT_FAILED);
+        assert_eq!(fs::read_dir(out.path()).unwrap().count(), 0);
     }
 }

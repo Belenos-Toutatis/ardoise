@@ -1737,7 +1737,8 @@
       "noData": "The microphone sends nothing. Check that it is plugged in properly, or choose another one.",
       "failed": "The microphone failed: {detail}",
       "failedUnknown": "The microphone is not working.",
-      "silent": "Windows may be blocking access to the microphone: open Settings > Privacy & security > Microphone and turn on \"Let desktop apps access your microphone\". A microphone mute switch gives the same result."
+      "silent": "Windows may be blocking access to the microphone: open Settings > Privacy & security > Microphone and turn on \"Let desktop apps access your microphone\". A microphone mute switch gives the same result.",
+      "full": "Longest length reached (4 hours): the recording stops."
     },
     "record": {
       "open": "Record a narration",
@@ -1759,7 +1760,8 @@
       "unsavedWarning": "This note has unsaved changes. Save it first (Ctrl+S), otherwise they will not be kept with the narration.",
       "replaceQuestion": "This note already has a narration ({duration}). Replace it with this new recording?",
       "replaceYes": "Replace",
-      "replaceNo": "Keep the old one"
+      "replaceNo": "Keep the old one",
+      "limitReached": "The recording stopped by itself: it reached its longest length (4 hours)."
     },
     "pending": {
       "title": "Recording on hold",
