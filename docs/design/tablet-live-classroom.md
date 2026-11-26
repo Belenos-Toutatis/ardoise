@@ -347,7 +347,14 @@ Interface (packages C and D):
 - One `tabletSubscribe` for the whole app (`lib/tablet-state.svelte.ts`); options apply at once and roll back if the
   service refuses. The panel has a `sim-press` button with the simulated tablet only.
 - `lib/live-state.svelte.ts` keeps batches received before the subscription's snapshot; view and style changes show
-  at once (an older echo from Rust does not undo them), views are sent at most every 32 ms.
+  at once (an older echo from Rust does not undo them), views are sent at most every 32 ms. Rust broadcasts only a view
+  or a style that changes its own (`LiveSession::set_view`, `set_style`), and a hub keeps only the last view queued for
+  a window: a window therefore never waits for the echo of a change equal to what Rust is expected to hold (the last
+  one on its way, else the last one Rust sent), or it would ignore every view and style from the other windows from
+  then on (audit of 2026-11-26: the projector no longer followed the control window). `lib/mock-live.ts` echoes
+  nothing for such a change either.
+- A page of the session is written for its strokes, its objects, its image, or its narration alone: a stroke begun then
+  dropped leaves no ink, and the sound given to the page would otherwise be lost (`Page::needs_write`).
 - `window.__ardoiseLatency = { samples, median, p95, uiSamples, uiMedian }`; `median()` is `null` without samples.
 - The e2e journey checks that the tablet is empty from the sync result ("3 pages deleted"), and clicks "Sync" if
   the automatic sync did not bring 10 notes within 20 s.
