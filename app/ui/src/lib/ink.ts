@@ -240,10 +240,21 @@ export async function instantiateInk(bytes: BufferSource): Promise<Ink> {
 
 let loading: Promise<Ink> | null = null;
 
-/** The module, fetched once. */
+/**
+ * The module, fetched once. A failed fetch (an HTTP error, a download cut short: the viewer page
+ * loads it over the network) is not kept: the next call fetches it again.
+ */
 export function loadInk(): Promise<Ink> {
-  loading ??= fetch(wasmUrl)
-    .then((response) => response.arrayBuffer())
+  if (loading) return loading;
+  const attempt = fetch(wasmUrl)
+    .then((response) => {
+      if (!response.ok) throw new Error(`ardoise_ink.wasm: HTTP ${response.status}`);
+      return response.arrayBuffer();
+    })
     .then((bytes) => instantiateInk(bytes));
-  return loading;
+  loading = attempt;
+  attempt.catch(() => {
+    if (loading === attempt) loading = null;
+  });
+  return attempt;
 }

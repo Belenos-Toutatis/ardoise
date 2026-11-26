@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use ardoise_share::{Limits, LiveFeed, Share, ShareConfig, ShareError};
+use ardoise_share::{Asset, Limits, LiveFeed, Share, ShareConfig, ShareError};
 use common::*;
 
 const CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -62,6 +62,68 @@ fn serves_the_page_and_its_assets() {
     let old = exchange(h.port(), b"GET / HTTP/1.0\r\n\r\n").unwrap();
     assert_eq!(old.status, 200);
     assert_eq!(old.body, PAGE.as_bytes());
+}
+
+/// More than the buffers of a socket on loopback can hold (Windows grows them to megabytes).
+const LARGER_THAN_BUFFERS: usize = 64 * 1024 * 1024;
+
+/// A share whose WebAssembly module weighs `len` bytes.
+fn with_large_module(limits: Limits, len: usize) -> Share {
+    let mut files = assets();
+    files.insert(
+        WASM_PATH.into(),
+        Asset {
+            content_type: "application/wasm".into(),
+            bytes: Arc::from(vec![7u8; len]),
+        },
+    );
+    let feed = Arc::new(FakeFeed::default()) as Arc<dyn LiveFeed>;
+    Share::start_with_limits(test_config(), limits, files, feed, Box::new(|_| {})).unwrap()
+}
+
+/// A request for `target`, its answer not read yet.
+fn ask(port: u16, target: &str) -> TcpStream {
+    let mut stream = connect(port);
+    let request = format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+    stream.write_all(request.as_bytes()).unwrap();
+    stream
+}
+
+/// A file of the page goes at the pace the client reads (`server.rs`: `write_answer`), within the
+/// time allowed for a whole answer: a client that reads a trickle for ever gives its slot back.
+#[test]
+fn a_file_has_a_time_limit_however_it_reads() {
+    let limits = Limits {
+        paper_answer: Duration::from_millis(500),
+        ..Limits::default()
+    };
+    let share = with_large_module(limits, LARGER_THAN_BUFFERS);
+    let mut stream = ask(share.port(), WASM_PATH);
+    stream
+        .set_read_timeout(Some(Duration::from_millis(100)))
+        .unwrap();
+    let started = Instant::now();
+    // A client that keeps reading a little, for ever: the slot still comes back.
+    let mut chunk = [0u8; 1024];
+    let mut closed = false;
+    let mut total = 0;
+    while started.elapsed() < Duration::from_secs(30) {
+        match stream.read(&mut chunk) {
+            Ok(0) => {
+                closed = true;
+                break;
+            }
+            Ok(n) => total += n,
+            Err(error) if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
+            Err(_) => {
+                closed = true;
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(closed, "still open after {:?}", started.elapsed());
+    assert!(total < LARGER_THAN_BUFFERS, "{total}");
 }
 
 #[test]

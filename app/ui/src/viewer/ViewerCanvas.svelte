@@ -165,9 +165,11 @@
     const measure = () => {
       const width = el.clientWidth;
       const height = el.clientHeight;
-      if (width > 0 && height > 0 && (width !== size.width || height !== size.height)) {
-        size = { width, height };
-        view.setSize(size);
+      if (width > 0 && height > 0) {
+        if (width !== size.width || height !== size.height) size = { width, height };
+        // The view outlives this canvas (the sheet went away and came back): it may hold an older size, even when this
+        // one is still the nominal size it starts from. It ignores a size it already has.
+        view.setSize({ width, height });
       }
       const ratio = currentPixelRatio();
       if (ratio !== pixelRatio) pixelRatio = ratio;

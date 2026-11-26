@@ -262,10 +262,11 @@ pub struct Limits {
     pub request: Duration,
     /// Time between two comments on an idle event stream.
     pub ping: Duration,
-    /// Time for 64 KiB of an event stream or of a picture to go, whatever the whole weighs: a client
+    /// Time for 64 KiB of an event stream or of an answer to go, whatever the whole weighs: a client
     /// that still reads goes on, one that stopped reading is gone after this long.
     pub stall: Duration,
-    /// Time for a whole picture to go (`GET /paper/<key>`): how long a slow client may hold its
+    /// Time for a whole answer to go: the picture of the paper (`GET /paper/<key>`) or a file of
+    /// the page (the WebAssembly module weighs about 3 MB): how long a slow client may hold its
     /// connection slot. Enough for 10 MB at 35 KB/s.
     pub paper_answer: Duration,
 }

@@ -126,8 +126,10 @@ OR Apache-2.0, already in the tree through tokio) for clients bound to other loo
     twice and gave up (`ERR_TOO_MANY_RETRIES`, 2026-11-03). A waiting connection takes no room from others: it is
     the first closed to make room. A first byte that is not a letter is no HTTP request — above all a browser
     trying `https://` (a TLS handshake starts with 0x16) — and is closed at once, so that the browser falls back
-    to `http://` without waiting; **an answer written within 5 s** (the largest, a script of about 200 KB, takes milliseconds on a LAN;
-    the picture of a live page's paper has its own limits, see "The paper of a live page"),
+    to `http://` without waiting; **an answer written as the client reads it**, each 64 KiB within 15 s and the whole
+    within 5 minutes (`Limits::stall`, `Limits::paper_answer`, as the picture of a live page's paper, see "The paper of a
+    live page"): the largest file, the WebAssembly module of about 2.7 MB, needed more than 4 Mbit/s to go within the 5 s
+    allowed before (2026-11 audit), and a viewer on a slow Wi-Fi was left without any stroke,
     then the browser closes first (the server waits up to 2 s, see "Through a school's filtering proxy"). A head is parsed again only when a blank line may have arrived.
     `TCP_NODELAY` on every socket (no Nagle delay on the stream).
 
@@ -382,8 +384,9 @@ page still costs nothing.
 - **Limits.** Same slots, same per-address limits, same deadlines for the request as any other request; it is a
   `Phase::Request`, so a slow download makes room by fair share and can keep nobody out. Writing: each 64 KiB within 15 s
   (`Limits::stall`: a client that stopped reading is gone), and the whole within 5 minutes (`Limits::paper_answer`: 10 MB at
-  35 KB/s, and a slot never held for ever by a client that reads a trickle). `RESPONSE_TIMEOUT` (5 s for a whole answer)
-  is the wrong measure for it: a viewer at 600 KB/s needs 17 s. No rate limit: unlike a stream, a fetch copies nothing.
+  35 KB/s, and a slot never held for ever by a client that reads a trickle). A fixed time for a whole answer (5 s, the
+  `RESPONSE_TIMEOUT` of the first version, since given up for every answer) is the wrong measure for it: a viewer at
+  600 KB/s needs 17 s. No rate limit: unlike a stream, a fetch copies nothing.
 - **`Cache-Control: no-store`**: another picture may come under the same key (below), and a teacher's picture has no reason
   to stay on a pupil's PC or in a proxy. The viewer holds the bytes as long as it needs them.
 - **Through a filtering proxy** it is an ordinary complete answer with a length (not a stream, not a `204`): e2guardian may
