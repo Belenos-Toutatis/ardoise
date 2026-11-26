@@ -755,6 +755,20 @@ pub struct StoredPage {
     /// The note's creation time (Unix ms), for [`ImportedPages::record`].
     pub created: i64,
     pub how: Stored,
+    /// The automatic export of the note (the app's page store makes it once the note is safe)
+    /// could not be written: the page is safe all the same; the sync says it at its end
+    /// (`docs/questions.md` Q28). `None` from [`LibrarySink`], which exports nothing.
+    pub export_failure: Option<ExportFailure>,
+}
+
+/// Why the automatic export (PDF or PNG) of a note just stored could not be written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportFailure {
+    /// The file it was to write, or the folder that cannot hold it (relative to the library
+    /// when it is inside it).
+    pub path: String,
+    /// Why, as the system says it.
+    pub reason: String,
 }
 
 impl StoredPage {
@@ -764,6 +778,7 @@ impl StoredPage {
             path,
             created,
             how: Stored::New,
+            export_failure: None,
         }
     }
 }
@@ -963,6 +978,7 @@ impl<'a> LibrarySink<'a> {
                             path: saved.path,
                             created,
                             how: Stored::Updated { replaced: previous },
+                            export_failure: None,
                         });
                     }
                     Update::Refused(why) => Some(why),
@@ -981,6 +997,7 @@ impl<'a> LibrarySink<'a> {
             path: made.path,
             created: made.created,
             how,
+            export_failure: None,
         })
     }
 

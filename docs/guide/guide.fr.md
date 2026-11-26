@@ -469,7 +469,9 @@ importée de nouveau.
   Slate : synchronisation automatique, sans question.
 - Avec cette option désactivée, Ardoise n'importe les pages de la tablette Xiaomi **qu'à votre demande**. Le panneau dit
   « N pages attendent sur la tablette Xiaomi » ; **Synchroniser** demande d'abord de confirmer que les pages
-  seront effacées de la tablette une fois importées (**Synchroniser et effacer**).
+  seront effacées de la tablette une fois importées (**Synchroniser et effacer**). Un **Synchroniser** cliqué alors
+  qu'elle n'est pas connectée est pour la Bamboo Slate : il attend celle-ci, même si la tablette Xiaomi se connecte
+  la première, et n'importe pas les pages de la Xiaomi.
 - La progression compte les pages une à une, et le nombre de **pages en mémoire** diminue au fur et à mesure.
 - Après un transfert qui ne s'est pas terminé proprement (interrompu ou annulé en cours de page), Ardoise ferme la
   liaison Bluetooth et la rétablit avant de s'en servir de nouveau pour une page ou pour le direct (tout de suite pendant
@@ -524,7 +526,11 @@ page ne la contient pas), une nouvelle note est ajoutée, comme pour n'importe q
 Dans **Réglages**, **Export automatique après synchronisation** : choisissez un **Format** (**Désactivé**, **PDF** ou
 **PNG (image)**) et un **Dossier dans la bibliothèque** (par exemple `Exports`), puis **Enregistrer**. Chaque page
 reçue est alors aussi écrite en PDF ou en PNG dans ce dossier : vous pouvez lire vos notes sur votre téléphone avec
-l'application Nextcloud. Ce dossier n'est pas affiché dans la liste des classeurs.
+l'application Nextcloud. Ce dossier n'est pas affiché dans la liste des classeurs. Si un fichier ne peut pas être
+écrit (dossier en lecture seule, fichier ouvert par Nextcloud ou par un lecteur), la note est quand même importée :
+à la fin de la synchronisation, l'onglet **Utiliser** du panneau **Tablette** le dit, sous le résultat de la
+synchronisation, avec le nombre de notes, le fichier et la raison (le détail est dans
+`_ardoise\diagnostics\autoexport.log`, dans la bibliothèque).
 
 ## 6. Le mode direct et la présentation en classe
 

@@ -26,10 +26,10 @@ use ardoise_proto::sysevent::{self, SysEvent};
 use super::journal::Journal;
 use super::{
     ADAPTER_RECHECK, BLACKBOARD_MODEL_NAME, BUTTON_TIMEOUT, Connection, ConnectorFactory,
-    DeviceDetails, Interrupts, KnownTablet, LastSync, LiveInput, LiveSink, LiveState, PageContext,
-    PageStore, Pending, REGISTER_SEARCH, RETRY_DELAY, RegisterStep, RegisteredTablet, Request,
-    SEARCH_SLICE, Sent, ServiceConfig, ServiceHooks, StatusCallback, StatusError, SyncProgress,
-    TabletOptions, TabletStatus, model_name, sync_error,
+    DeviceDetails, ExportFailed, ExportFailure, Interrupts, KnownTablet, LastSync, LiveInput,
+    LiveSink, LiveState, PageContext, PageStore, Pending, REGISTER_SEARCH, RETRY_DELAY,
+    RegisterStep, RegisteredTablet, Request, SEARCH_SLICE, Sent, ServiceConfig, ServiceHooks,
+    StatusCallback, StatusError, SyncProgress, TabletOptions, TabletStatus, model_name, sync_error,
 };
 use crate::blackboard::{BoardSession, BoardSync};
 use crate::identity::{self, BlackboardRecord, DeviceRecord};
@@ -142,6 +142,19 @@ struct SyncRun {
     /// The pages that could only be read in part (the Slate's): each is a note, the sync goes on.
     /// Said at its end when nothing else is ([`Worker::finish_sync`]).
     partial: Vec<PartialPage>,
+    /// The notes of this sync whose automatic export could not be written (as `saved` names
+    /// them), with why: said at its end, beside what else is ([`LastSync::export_failed`]).
+    export_failures: Vec<(String, ExportFailure)>,
+}
+
+/// What the end of a sync says of the automatic exports it could not write, `None` without any.
+fn export_failed(failures: &[(String, ExportFailure)]) -> Option<ExportFailed> {
+    let (_, first) = failures.first()?;
+    Some(ExportFailed {
+        notes: u16::try_from(failures.len()).unwrap_or(u16::MAX),
+        path: first.path.clone(),
+        reason: first.reason.clone(),
+    })
 }
 
 /// A page that could only be read in part.
@@ -235,6 +248,10 @@ pub(super) struct Worker {
     /// What allows the sync that waits to delete the blackboard's pages; without it, that sync
     /// does nothing for the blackboard.
     board_permission: Option<BoardPermission>,
+    /// A sync that waits for the Slate's next connection: one the blackboard, connected first,
+    /// did not take for want of `board_permission` (Q28). It becomes `want_sync` when the Slate
+    /// connects.
+    slate_sync: bool,
     /// When the worker last looked for the Slate while the blackboard held the link.
     slate_checked_at: Option<Duration>,
     live: Option<LiveRun>,
@@ -294,6 +311,7 @@ impl Worker {
             sync: None,
             want_sync: false,
             board_permission: None,
+            slate_sync: false,
             slate_checked_at: None,
             live: None,
             counted_at: None,
@@ -610,6 +628,10 @@ impl Worker {
         if self.config.options.auto_sync && pages > 0 {
             self.want_sync = true;
         }
+        if std::mem::take(&mut self.slate_sync) {
+            self.note("the sync that waited for the Bamboo Slate runs now");
+            self.want_sync = true;
+        }
         let details = self.details(info, pages);
         let registered = self.record.as_ref().map(registered_tablet);
         let known = self.known_tablets();
@@ -877,6 +899,7 @@ impl Worker {
             board: BoardSync::default(),
             deferred: None,
             partial: Vec::new(),
+            export_failures: Vec::new(),
         };
         if to_read == 0 {
             self.finish_sync(run, None);
@@ -920,6 +943,7 @@ impl Worker {
                         saved: Vec::new(),
                         deleted: 0,
                         error: Some(shown.clone()),
+                        export_failed: None,
                     });
                     status.error = Some(shown);
                 });
@@ -1164,6 +1188,7 @@ impl Worker {
         } else {
             Connection::Searching
         };
+        let export_failed = export_failed(&run.export_failures);
         let pending = self.pending();
         self.publisher.update(|status| {
             status.connection = connection;
@@ -1175,6 +1200,7 @@ impl Worker {
                 saved: run.saved,
                 deleted: run.deleted,
                 error: error.clone(),
+                export_failed,
             });
             if let Some(device) = status.device.as_mut() {
                 device.stored_pages = remaining;
@@ -1184,17 +1210,24 @@ impl Worker {
     }
 
     fn cancel(&mut self) {
+        let mut stopped = false;
         if let Some(run) = self.sync.take() {
             self.note("sync cancelled");
             self.finish_sync(run, None);
+            stopped = true;
         }
         if self.adding.is_some() {
             self.note("search for a blackboard cancelled");
             self.end_search(None);
+            stopped = true;
         }
-        if self.want_sync {
+        // Cancelling the blackboard's sync or the search for a blackboard leaves the sync that
+        // waits for the Slate; with nothing under way, the cancel is for what waits.
+        let slate_sync = self.slate_sync && !stopped;
+        if self.want_sync || slate_sync {
             self.want_sync = false;
             self.board_permission = None;
+            self.slate_sync &= stopped;
             let pending = self.pending();
             self.publisher.update(|status| status.pending = pending);
         }
@@ -1698,7 +1731,12 @@ impl Worker {
                 self.board_permission = self.board_permission.max(Some(BoardPermission::Option));
             }
         }
-        self.publisher.update(|status| status.options = options);
+        // Whether a sync waiting is the Slate's alone follows "delete after import".
+        let pending = self.pending();
+        self.publisher.update(|status| {
+            status.options = options;
+            status.pending = pending;
+        });
     }
 
     fn forget(&mut self) -> Result<(), DeviceError> {
@@ -1720,6 +1758,7 @@ impl Worker {
         }
         identity::forget(&root).map_err(|e| DeviceError::Storage(e.to_string()))?;
         self.record = None;
+        self.slate_sync = false;
         self.partial_untold.clear();
         self.partial_told.clear();
         self.note("registration forgotten");
@@ -1775,6 +1814,7 @@ impl Worker {
         self.journal = None;
         self.want_sync = false;
         self.board_permission = None;
+        self.slate_sync = false;
         self.board_record_unreadable = false;
         self.adding = None;
         self.config.identity_root = root;
@@ -1881,11 +1921,15 @@ impl Worker {
                 }
             }
         }
+        // A Slate forgotten from another computer takes the sync that waited for it along.
+        self.slate_sync &= self.record.is_some();
         let registered = self.record.as_ref().map(registered_tablet);
         let known = self.known_tablets();
+        let pending = self.pending();
         self.publisher.update(|status| {
             status.registered = registered;
             status.known = known;
+            status.pending = pending;
             if error.is_some() {
                 status.error = error;
             }
@@ -2015,14 +2059,32 @@ impl Worker {
             .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
     }
 
-    /// What waits for the tablet.
+    /// What waits for the tablet. A sync that may not take the blackboard's pages, while the Slate
+    /// is not connected and both tablets are known, is the Slate's alone (`SlateSync`).
     fn pending(&self) -> Option<Pending> {
+        let slate_sync = self.slate_sync && self.record.is_some();
         if self.live.as_ref().is_some_and(|run| !run.active) {
             Some(Pending::Live)
-        } else if self.want_sync {
-            Some(Pending::Sync)
+        } else if self.want_sync || slate_sync {
+            let board_part = self.want_sync && self.board_may_sync();
+            let both_known = self.record.is_some() && self.board_record.is_some();
+            if !board_part && both_known && self.session.is_none() {
+                Some(Pending::SlateSync)
+            } else {
+                Some(Pending::Sync)
+            }
         } else {
             None
+        }
+    }
+
+    /// Whether the sync that waits may delete the blackboard's pages (SPEC §4.1): their deletion
+    /// confirmed, or "delete after import" on (as [`Self::board_start_sync`] checks it).
+    fn board_may_sync(&self) -> bool {
+        match self.board_permission {
+            Some(BoardPermission::Confirmed) => true,
+            Some(BoardPermission::Option) => self.config.options.delete_after_import,
+            None => false,
         }
     }
 
@@ -2128,7 +2190,23 @@ fn keep_page_as(
                     cause: cause.clone(),
                 });
             }
-            Ok(match stored.how {
+            let shown = stored.path.display().to_string();
+            let export = stored
+                .export_failure
+                .as_ref()
+                .map_or_else(String::new, |failure| {
+                    format!(
+                        "; its automatic export could not be written ({}: {})",
+                        failure.path, failure.reason
+                    )
+                });
+            // A note stored twice in one sync (a screen stored again) counts once.
+            if let Some(failure) = stored.export_failure
+                && !run.export_failures.iter().any(|(note, _)| *note == shown)
+            {
+                run.export_failures.push((shown, failure));
+            }
+            let kept = match stored.how {
                 Stored::New if recorded.bytes.is_empty() => format!(
                     "{name} holds no byte: an empty note saved as {}",
                     stored.path.display()
@@ -2149,7 +2227,8 @@ fn keep_page_as(
                     ardoise_proto::blackboard::utc(replaced),
                     stored.path.display()
                 ),
-            })
+            };
+            Ok(kept + &export)
         }
     }
 }

@@ -633,6 +633,7 @@
     "hint": {
       "searching": "Press the tablet's button briefly to connect it, and keep it close to the computer.",
       "pendingSync": "Syncing will start as soon as the tablet is connected.",
+      "pendingSyncSlate": "The sync you asked for waits for the Bamboo Slate: it will start as soon as the Slate is connected (press its button briefly). It does not import the Xiaomi tablet's pages.",
       "pendingLive": "Live mode will start as soon as the tablet is connected.",
       "searchingBoard": "Switch on the Xiaomi tablet and keep it close to the computer. Close Mi Home (or turn off the phone's Bluetooth): it talks to one application at a time.",
       "searchingBoth": "Switch on the Xiaomi tablet, or press the Bamboo Slate's button briefly. Close Mi Home (or turn off the phone's Bluetooth): the Xiaomi tablet talks to one application at a time.",
@@ -680,7 +681,11 @@
       "boardConfirmYes": "Sync and delete",
       "boardWaitingOne": "1 page is waiting on the Xiaomi tablet: it is imported only on request, with \"Sync\", and will be deleted from the tablet once its note is written.",
       "boardWaitingMany": "{count} pages are waiting on the Xiaomi tablet: they are imported only on request, with \"Sync\", and will be deleted from the tablet once their notes are written.",
-      "boardOnRequest": "The Xiaomi tablet imports its pages only on request: switch it on, then click \"Sync\" once it is connected."
+      "boardOnRequest": "The Xiaomi tablet imports its pages only on request: switch it on, then click \"Sync\" once it is connected.",
+      "exportFailed": {
+        "one": "A note was imported, but its automatic export could not be written: \"{path}\" ({reason}). Check that this folder is not read-only and that the file is not open in another program (Nextcloud, a PDF or image viewer). The details are in _ardoise\\diagnostics\\autoexport.log, in the library.",
+        "other": "{count} notes were imported, but their automatic export could not be written (the first: \"{path}\", {reason}). Check that this folder is not read-only and that the files are not open in another program (Nextcloud, a PDF or image viewer). The details are in _ardoise\\diagnostics\\autoexport.log, in the library."
+      }
     },
     "live": {
       "open": "Live mode",
@@ -969,6 +974,7 @@
     "videoExportFailed": "the video could not be written ({detail}); choose another location and check that there is enough space left",
     "invalidVideoSettings": "these video settings are not valid ({detail}); check the image size, the duration and the background",
     "codecUnavailable": "Windows cannot write MP4 files on this PC (the H.264 encoder is missing): install the OpenH264 backup in the Settings, or choose WebM",
+    "videoEncoderFailed": "the Windows video encoder failed ({detail}); try again, and check that there is enough space left on the disk. If it happens again, install the OpenH264 backup encoder (Settings, \"Backup video encoder (OpenH264)\"), which Ardoise will use for the next export, or choose the WebM format",
     "microphoneNotFound": "the chosen microphone cannot be found: plug it in, or choose another one in the Settings",
     "microphoneSilent": "Windows may be blocking access to the microphone: Settings > Privacy & security > Microphone > \"Let desktop apps access your microphone\"",
     "microphoneFailed": "the microphone cannot be used ({detail}); check that no other program is using it",

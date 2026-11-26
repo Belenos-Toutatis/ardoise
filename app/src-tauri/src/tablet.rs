@@ -26,9 +26,9 @@ use ardoise_core::settings::{BoardPosition, Language, Orientation, Settings, Set
 use ardoise_device::identity::{self, IdentityError};
 use ardoise_device::pages::LibrarySink;
 use ardoise_device::service::{
-    self, Connection, ConnectorFactory, NoHooks, PageContext, PageStore, ServiceConfig,
-    ServiceHooks, StatusCallback, StatusError, StoredPage, TabletOptions, TabletService,
-    TabletStatus,
+    self, Connection, ConnectorFactory, ExportFailure, NoHooks, PageContext, PageStore,
+    ServiceConfig, ServiceHooks, StatusCallback, StatusError, StoredPage, TabletOptions,
+    TabletService, TabletStatus,
 };
 use ardoise_device::session::{DeviceError, DownloadedPage, valid_name};
 use ardoise_device::transport::{Connector, TransportError};
@@ -280,7 +280,8 @@ fn log_auto_export_failures(
 /// orientation of `context`, a thumbnail, the note read back to check it
 /// (`LibrarySink::store_page`: a new note, or the note of an earlier store of the same screen
 /// of the blackboard updated, docs/design/blackboard.md §9.6). Then the automatic export, with
-/// the settings read now: a failed export is logged and never fails the sync (the note is safe).
+/// the settings read now: a failed export is logged and never fails the sync (the note is safe);
+/// the page returned says it (`export_failure`), and the end of the sync shows it (Q28).
 /// An `Err` keeps the page on the tablet. The one page store of the sync, of the blackboard's
 /// rescue copies and of `--import-blackboard-pages`.
 pub fn store_stored_page_in(
@@ -301,7 +302,7 @@ pub fn store_stored_page_in(
     let library = Library::open(root).map_err(|e| e.to_string())?;
     let layer = first_layer_name(interface_language(&settings, system_locale));
     let mut report = AutoExportReport::default();
-    let saved = {
+    let mut saved = {
         let mut sink = LibrarySink::new(&library, "", context.size, layer, now_ms)
             .with_orientation(context.orientation)
             .with_board_position(context.board_position)
@@ -329,6 +330,18 @@ pub fn store_stored_page_in(
             path.display()
         );
     }
+    // The end of the sync says it in the tablet panel (Q28), the path as the library shows it.
+    saved.export_failure = report
+        .unwritten
+        .first()
+        .map(|(path, reason)| ExportFailure {
+            path: path
+                .strip_prefix(library.root())
+                .unwrap_or(path)
+                .display()
+                .to_string(),
+            reason: reason.clone(),
+        });
     Ok(saved)
 }
 
@@ -1143,6 +1156,79 @@ mod tests {
         assert_eq!(text.lines().count(), AUTO_EXPORT_LOG_LINES);
         assert!(text.lines().next().unwrap().ends_with("failed: error 5"));
         assert!(text.lines().last().unwrap().ends_with("failed: error 204"));
+    }
+
+    /// An automatic export that cannot be written (Q28), through the app's page store and the
+    /// simulated tablet of `--simulated-tablet`: the notes are imported, the sync did not fail,
+    /// and its result says how many notes were not exported, the file and why (the tablet panel
+    /// shows it); the log of the library keeps each failure.
+    #[test]
+    fn an_automatic_export_that_cannot_be_written_is_said_at_the_end_of_the_sync() {
+        let settings = tempfile::tempdir().unwrap();
+        let notes_dir = tempfile::tempdir().unwrap();
+        let throwaway = tempfile::tempdir().unwrap();
+        ardoise_core::library::init(throwaway.path()).unwrap();
+        let context = context(settings.path());
+        crate::commands::choose_library(&context, &notes_dir.path().display().to_string()).unwrap();
+        context
+            .store
+            .as_ref()
+            .unwrap()
+            .update(|s| {
+                s.auto_export = AutoExport {
+                    format: AutoExportFormat::Pdf,
+                    folder: "Exports".into(),
+                    ..AutoExport::default()
+                }
+            })
+            .unwrap();
+        // A file where the export folder should be: no export can be written there.
+        std::fs::write(notes_dir.path().join("Exports"), "not a folder").unwrap();
+        let runtime = TabletRuntime::default();
+        let simulation = Simulation {
+            tablet: Some(app_tablet()),
+            board: None,
+            identity_root: Some(throwaway.path().to_owned()),
+            hook_delay: Duration::from_millis(50),
+        };
+        runtime.start_in(&context, Some(simulation));
+        let (sender, events) = mpsc::channel();
+        let sender = Mutex::new(sender);
+        tablet_subscribe_in(
+            &runtime,
+            "main",
+            Box::new(move |TabletEvent::Status { status }| {
+                lock(&sender).send(status.clone()).is_ok()
+            }),
+        )
+        .unwrap();
+        wait_for(&events, |s| s.connection == Connection::NotRegistered);
+        runtime.with_service(TabletService::register).unwrap();
+        let status = wait_for(&events, |s| s.last_sync.is_some());
+        assert_eq!(status.error, None, "not a failed sync");
+        let last = serde_json::to_value(status.last_sync.as_ref().unwrap()).unwrap();
+        assert_eq!(last["error"], serde_json::Value::Null);
+        assert_eq!(last["saved"].as_array().map(Vec::len), Some(3));
+        let failed = &last["exportFailed"];
+        assert_eq!(failed["notes"], 3, "{last}");
+        let path = failed["path"].as_str().unwrap_or_default();
+        assert!(
+            path.starts_with("Exports") && path.ends_with(".pdf"),
+            "relative to the library: {path}"
+        );
+        assert!(!failed["reason"].as_str().unwrap_or_default().is_empty());
+        assert_eq!(
+            Library::open(notes_dir.path()).unwrap().list().notes.len(),
+            3
+        );
+        let journal = notes_dir
+            .path()
+            .join("_ardoise")
+            .join("diagnostics")
+            .join(AUTO_EXPORT_LOG);
+        let text = std::fs::read_to_string(&journal).unwrap();
+        assert_eq!(text.lines().count(), 3, "{text}");
+        runtime.stop();
     }
 
     /// Waits for a status event accepted by `what`.

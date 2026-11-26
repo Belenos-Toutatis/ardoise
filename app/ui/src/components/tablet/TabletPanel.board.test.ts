@@ -146,6 +146,29 @@ describe('tablet panel: two tablets', () => {
     const { q } = await render({ connect: false });
     expect(q('[data-slot="hint"]')!.textContent).toContain('Allumez la tablette Xiaomi, ou appuyez brièvement sur le bouton de la Bamboo Slate');
   });
+
+  it('says that a sync asked while away waits for the Bamboo Slate, also once the Xiaomi is connected (Q28)', async () => {
+    const { q, action, click } = await render({ options: { deleteAfterImport: false }, connect: false });
+    await click(action('sync'));
+    const waits = 'La synchronisation demandée attend la Bamboo Slate';
+    expect(q('[data-slot="hint"]')!.textContent).toContain(waits);
+    expect(q('[data-slot="hint"]')!.textContent).toContain("Elle n'importe pas les pages de la tablette Xiaomi.");
+    await beat(1.5);
+    // The Xiaomi connected first: nothing of it is imported, and the hint stays true.
+    expect(q('[data-slot="state"]')!.textContent).toContain('Connectée');
+    expect(q('[aria-labelledby="tablet-info"]')!.getAttribute('data-kind')).toBe('blackboard');
+    expect(q('[data-slot="hint"]')!.textContent).toContain(waits);
+    expect(q('[data-slot="hint"]')!.textContent).not.toContain('dès que la tablette sera connectée');
+    expect(q('[data-slot="last-sync"]')!.textContent).toContain('Aucune synchronisation');
+    expect(q('[data-slot="board-waiting"]')!.textContent).toContain('3 pages attendent sur la tablette Xiaomi');
+  });
+
+  it('says it in English too', async () => {
+    const { q, action, click } = await render({ locale: 'en', options: { deleteAfterImport: false }, connect: false });
+    await click(action('sync'));
+    await beat(1.5);
+    expect(q('[data-slot="hint"]')!.textContent).toContain('The sync you asked for waits for the Bamboo Slate');
+  });
 });
 
 describe('tablet panel: the blackboard\'s details', () => {

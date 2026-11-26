@@ -2,7 +2,8 @@
   /**
    * The « Use » tab of the tablet panel (Q17): the connected tablet (its picture, name, state, battery and pages in
    * memory), « Live mode » and « Sync » one under the other, then what needs saying about the state: what is searched
-   * for, what waits, the sync's progress, its last result or failure, the pages that wait on the tablet, and for the
+   * for, what waits, the sync's progress, its last result or failure (then the automatic exports it could not write,
+   * Q28), the pages that wait on the tablet, and for the
    * Xiaomi the confirmation that its pages are deleted. With no tablet known, the invitation to add one. Follows the
    * window's shared status (`tablet-state.svelte.ts`).
    */
@@ -87,17 +88,23 @@
         ? 'tablet.hint.searchingBoard'
         : 'tablet.hint.searching',
   );
+  /** What waits, and for which tablet: a sync waiting for the Slate alone names it, also while the Xiaomi is connected (Q28). */
+  const pendingHints = {
+    sync: 'tablet.hint.pendingSync',
+    slateSync: 'tablet.hint.pendingSyncSlate',
+    live: 'tablet.hint.pendingLive',
+  } as const;
   const hint = $derived(
-    status?.pending === 'sync'
-      ? 'tablet.hint.pendingSync'
-      : status?.pending === 'live'
-        ? 'tablet.hint.pendingLive'
-        : connection === 'searching'
-          ? searchingHint
-          : connection === 'adding'
-            ? 'tablet.hint.adding'
-            : null,
+    status?.pending
+      ? pendingHints[status.pending]
+      : connection === 'searching'
+        ? searchingHint
+        : connection === 'adding'
+          ? 'tablet.hint.adding'
+          : null,
   );
+  /** The automatic export of notes of the last sync that could not be written (Q28): the notes are imported. */
+  const exportFailed = $derived(lastSync?.exportFailed ?? null);
   /**
    * Registering or searching for a blackboard is blocked while the tablet is unavailable (Bluetooth off or missing, no
    * library): the service would refuse it with the error it shows already, and so say nothing at all.
@@ -297,6 +304,12 @@
         {:else}
           {t('tablet.sync.never')}
         {/if}
+      </p>
+    {/if}
+    {#if exportFailed}
+      <!-- After the sync's own result or failure, which comes first: the notes are in the library, only their PDF or PNG is missing. -->
+      <p class="small banner notice" role="status" data-slot="export-failed" data-count={exportFailed.notes}>
+        {tn('tablet.sync.exportFailed', exportFailed.notes, { path: exportFailed.path, reason: exportFailed.reason })}
       </p>
     {/if}
     {#if boardWaiting > 0}

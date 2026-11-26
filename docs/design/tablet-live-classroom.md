@@ -95,8 +95,8 @@ Behaviour:
 | `device` | last information read: `name, firmware, batteryPercent, charging, width, height, storedPages, model, readAt` (unix ms) or null |
 | `registerStep` | `holdButton`, `searching`, `connecting`, `pressButton`, `done`, or null |
 | `sync` | `{ current, total, saved }` while syncing, else null |
-| `lastSync` | `{ at, saved: string[], deleted, error }` (paths of the notes written; `error`: `{ code, message }` when the sync failed, else null) or null |
-| `pending` | `sync`, `live` or null: what waits for the tablet to connect |
+| `lastSync` | `{ at, saved: string[], deleted, error, exportFailed }` (paths of the notes written; `error`: `{ code, message }` when the sync failed, else null; `exportFailed`: `{ notes, path, reason }` when automatic exports could not be written, else null, Q28) or null |
+| `pending` | `sync`, `slateSync` (a sync waiting for the Bamboo Slate alone, both tablets known: docs/design/blackboard.md §2.6), `live` or null: what waits for the tablet to connect |
 | `error` | `{ code, message }` of the last failure (translated by `errorCodes.*`), cleared by the next success |
 | `simulated` | started with `--simulated-tablet` |
 | `options` | the `TabletOptions` in use (`autoSync`, `deleteAfterImport`, `hand`, `button`) |

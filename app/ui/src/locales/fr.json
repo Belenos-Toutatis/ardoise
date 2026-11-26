@@ -633,6 +633,7 @@
     "hint": {
       "searching": "Appuyez brièvement sur le bouton de la tablette pour la connecter, et gardez-la près de l'ordinateur.",
       "pendingSync": "La synchronisation démarrera dès que la tablette sera connectée.",
+      "pendingSyncSlate": "La synchronisation demandée attend la Bamboo Slate : elle démarrera dès que celle-ci sera connectée (appui bref sur son bouton). Elle n'importe pas les pages de la tablette Xiaomi.",
       "pendingLive": "Le mode direct démarrera dès que la tablette sera connectée.",
       "searchingBoard": "Allumez la tablette Xiaomi et gardez-la près de l'ordinateur. Fermez Mi Home (ou coupez le Bluetooth du téléphone) : elle ne parle qu'à une application à la fois.",
       "searchingBoth": "Allumez la tablette Xiaomi, ou appuyez brièvement sur le bouton de la Bamboo Slate. Fermez Mi Home (ou coupez le Bluetooth du téléphone) : la tablette Xiaomi ne parle qu'à une application à la fois.",
@@ -680,7 +681,11 @@
       "boardConfirmYes": "Synchroniser et effacer",
       "boardWaitingOne": "1 page attend sur la tablette Xiaomi : elle n'est importée qu'à votre demande, avec « Synchroniser », et sera effacée de la tablette une fois sa note écrite.",
       "boardWaitingMany": "{count} pages attendent sur la tablette Xiaomi : elles ne sont importées qu'à votre demande, avec « Synchroniser », et seront effacées de la tablette une fois leurs notes écrites.",
-      "boardOnRequest": "La tablette Xiaomi n'importe ses pages qu'à votre demande : allumez-la, puis cliquez sur « Synchroniser » une fois qu'elle est connectée."
+      "boardOnRequest": "La tablette Xiaomi n'importe ses pages qu'à votre demande : allumez-la, puis cliquez sur « Synchroniser » une fois qu'elle est connectée.",
+      "exportFailed": {
+        "one": "Une note a bien été importée, mais son export automatique n'a pas pu être écrit : « {path} » ({reason}). Vérifiez que ce dossier n'est pas en lecture seule et que le fichier n'est pas ouvert dans un autre logiciel (Nextcloud, un lecteur de PDF ou d'images). Le détail est noté dans _ardoise\\diagnostics\\autoexport.log, dans la bibliothèque.",
+        "other": "{count} notes ont bien été importées, mais leur export automatique n'a pas pu être écrit (la première : « {path} », {reason}). Vérifiez que ce dossier n'est pas en lecture seule et que les fichiers ne sont pas ouverts dans un autre logiciel (Nextcloud, un lecteur de PDF ou d'images). Le détail est noté dans _ardoise\\diagnostics\\autoexport.log, dans la bibliothèque."
+      }
     },
     "live": {
       "open": "Mode direct",
@@ -969,6 +974,7 @@
     "videoExportFailed": "la vidéo n'a pas pu être écrite ({detail}) ; choisissez un autre emplacement et vérifiez qu'il reste de la place",
     "invalidVideoSettings": "ces réglages vidéo ne sont pas valides ({detail}) ; vérifiez la taille de l'image, la durée et le fond",
     "codecUnavailable": "Windows ne peut pas écrire de MP4 sur ce PC (l'encodeur H.264 est absent) : installez le secours OpenH264 dans les Réglages, ou choisissez WebM",
+    "videoEncoderFailed": "l'encodeur vidéo de Windows a échoué ({detail}) ; réessayez, et vérifiez qu'il reste de la place sur le disque. Si cela se reproduit, installez l'encodeur de secours OpenH264 (Réglages, « Encodeur vidéo de secours (OpenH264) »), qu'Ardoise utilisera à la prochaine exportation, ou choisissez le format WebM",
     "microphoneNotFound": "le micro choisi est introuvable : branchez-le, ou choisissez-en un autre dans les Réglages",
     "microphoneSilent": "Windows bloque peut-être l'accès au micro : Paramètres > Confidentialité et sécurité > Microphone > « Autoriser les applications de bureau à accéder à votre microphone »",
     "microphoneFailed": "le micro ne peut pas être utilisé ({detail}) ; vérifiez qu'un autre logiciel ne s'en sert pas",

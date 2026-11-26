@@ -21,14 +21,17 @@ use ardoise_core::settings::Orientation;
 use ardoise_device::identity::{self, DEVICE_FORMAT, DeviceRecord, HostId};
 use ardoise_device::pages::{LibrarySink, is_partial_page};
 use ardoise_device::service::{
-    Connection, LiveInput, LiveSink, LiveState, PageContext, PageStore, RegisterStep,
-    ServiceConfig, TabletOptions, TabletService, TabletStatus,
+    Connection, ExportFailed, ExportFailure, LiveInput, LiveSink, LiveState, PageContext,
+    PageStore, Pending, RegisterStep, ServiceConfig, TabletOptions, TabletService, TabletStatus,
 };
 use ardoise_device::session::{DeviceError, DownloadedPage};
 use ardoise_device::transport::TabletKind;
 use ardoise_proto::live::LiveRecord;
 use ardoise_sim::realtime::LIVE_SCRIPT_SECONDS;
-use ardoise_sim::{SimConfig, SimFactory, SimHooks, SimTablet, drawings};
+use ardoise_sim::{
+    SimBoard, SimBoardConfig, SimConfig, SimFactory, SimHooks, SimTablet, drawings,
+    reference_board_pages,
+};
 
 const WAIT: Duration = Duration::from_secs(30);
 const ID: [u8; 6] = [0x89, 0xea, 0x78, 0x88, 0xff, 0xcb];
@@ -1314,6 +1317,372 @@ fn a_sync_asked_while_away_runs_when_the_tablet_comes() {
     let status = run.wait(|s| s.last_sync.is_some());
     assert_eq!(status.last_sync.unwrap().saved.len(), 2);
     assert_eq!(status.pending, None);
+    run.service.shutdown();
+}
+
+/// A Xiaomi blackboard on `tablet`'s clock holding the first `pages` reference pages, added from
+/// this library before, switched off.
+fn board_known(tablet: &SimTablet, root: &Path, pages: usize) -> SimBoard {
+    let board = SimBoard::with_clock(SimBoardConfig::blackboard(), tablet.clock());
+    for page in reference_board_pages().iter().take(pages) {
+        board.draw_page(page);
+    }
+    let record = identity::BlackboardRecord {
+        format: identity::BLACKBOARD_FORMAT,
+        address: board.config().address,
+        name: "Mijia LCD blackboard".into(),
+        protocol: identity::BLACKBOARD_PROTOCOL.into(),
+        model: "jiqid.sxb.v1".into(),
+        added: "2026-11-12T20:00:00+01:00".into(),
+        extra: Default::default(),
+    };
+    identity::save_blackboard(root, &record).unwrap();
+    board.power_off();
+    board
+}
+
+/// The automatic sync and "delete after import" off.
+const BOTH_OFF: TabletOptions = TabletOptions {
+    auto_sync: false,
+    delete_after_import: false,
+    orientation: Orientation::Landscape,
+    board_position: ardoise_core::settings::BoardPosition::ButtonsBottom,
+    button: ardoise_core::settings::LiveButton::NewPage,
+};
+
+/// Both tablets known, both switched off: the Slate holding 3 pages, the blackboard
+/// `board_pages`; the service started with [`BOTH_OFF`] and `store`.
+fn both_away_with(
+    library: &Path,
+    board_pages: usize,
+    store: PageStore,
+) -> (SimTablet, SimBoard, Running) {
+    let tablet = SimTablet::slate_large();
+    with_pages(&tablet, 3);
+    registered_beforehand(&tablet, library);
+    let board = board_known(&tablet, library, board_pages);
+    tablet.power_off();
+    let factory = SimFactory::virtual_time(tablet.clone()).with_board(board.clone());
+    let run = Running::start(&tablet, library, BOTH_OFF, factory, store);
+    (tablet, board, run)
+}
+
+/// [`both_away_with`] the library's store.
+fn both_away(library: &Path, board_pages: usize) -> (SimTablet, SimBoard, Running) {
+    both_away_with(library, board_pages, library_store(None, None))
+}
+
+/// « Sync » clicked with no tablet connected, then the blackboard switched on: connected, the
+/// sync still waiting for the Slate.
+fn asked_then_board_connected(run: &mut Running, board: &SimBoard) -> TabletStatus {
+    run.wait(|s| s.connection == Connection::Searching);
+    run.service.sync_now(false).unwrap();
+    run.wait(|s| s.pending == Some(Pending::SlateSync));
+    board.power_on();
+    let status = run.wait(|s| {
+        s.connection == Connection::Connected && s.active == Some(TabletKind::Blackboard)
+    });
+    assert_eq!(status.pending, Some(Pending::SlateSync), "{status:#?}");
+    status
+}
+
+/// The Slate is switched on while the blackboard holds the link: it gets the link at the
+/// worker's next look for it (every 10 s of the shared clock).
+fn slate_asks(tablet: &SimTablet) {
+    tablet.power_on();
+    tablet.clock().advance(Duration::from_secs(11));
+}
+
+/// Both tablets known, the automatic sync and "delete after import" off (Q28): « Sync » clicked
+/// while no tablet is connected waits for the Bamboo Slate. The blackboard connecting first does
+/// not take it (its pages are imported on a request confirmed while it is connected, Q15), and
+/// does not drop it either: the Slate's page is imported when it connects next.
+#[test]
+fn a_sync_asked_while_no_tablet_is_connected_waits_for_the_slate_past_the_blackboard() {
+    let _report = common::report("two tablets: a sync asked while away waits for the Slate");
+    let library = new_library();
+    let (tablet, board, mut run) = both_away(library.path(), 3);
+    // Said as the Slate's from the start, and still once the blackboard is connected.
+    let status = asked_then_board_connected(&mut run, &board);
+    assert_eq!(status.error, None);
+    assert_eq!(
+        board.stats().downloads,
+        0,
+        "nothing asked of the blackboard"
+    );
+    slate_asks(&tablet);
+    let status = run.wait(|s| s.last_sync.is_some());
+    let last = status.last_sync.unwrap();
+    say!("{last:?}");
+    // The Slate's oldest page (no deletion: the tablet hands over only that one).
+    assert_eq!((last.saved.len(), last.deleted, last.error), (1, 0, None));
+    assert_eq!(status.active, Some(TabletKind::Slate));
+    assert_eq!(status.pending, None);
+    assert_eq!((board.stats().downloads, board.stored_page_count()), (0, 3));
+    assert_eq!(notes(library.path()).len(), 1);
+    run.service.shutdown();
+}
+
+/// The sync that waits for the Slate past the blackboard (Q28), its neighbours: the blackboard
+/// leaving before the Slate comes, and live mode run on the blackboard meanwhile.
+#[test]
+fn the_sync_that_waits_for_the_slate_outlasts_the_blackboard_and_its_live_mode() {
+    let _report = common::report("two tablets: the Slate's sync outlasts the blackboard");
+    // The blackboard switched off again: the request still waits, then runs on the Slate.
+    let library = new_library();
+    let (tablet, board, mut run) = both_away(library.path(), 3);
+    asked_then_board_connected(&mut run, &board);
+    board.power_off();
+    let status = run.wait(|s| s.connection == Connection::Searching);
+    assert_eq!(status.pending, Some(Pending::SlateSync));
+    tablet.power_on();
+    let status = run.wait(|s| s.last_sync.is_some());
+    assert_eq!(status.last_sync.unwrap().saved.len(), 1);
+    assert_eq!(
+        (status.active, status.pending),
+        (Some(TabletKind::Slate), None)
+    );
+    assert_eq!(board.stats().downloads, 0);
+    run.service.shutdown();
+
+    // Live mode on the blackboard meanwhile (it holds no page: it may start): the request waits
+    // through it, and runs once the Slate comes.
+    let library = new_library();
+    let (tablet, board, mut run) = both_away(library.path(), 0);
+    asked_then_board_connected(&mut run, &board);
+    let (sender, inputs) = mpsc::channel();
+    run.service.start_live(Box::new(ChannelSink(sender)));
+    until(&inputs, |i| {
+        matches!(
+            i,
+            LiveInput::Started {
+                kind: TabletKind::Blackboard,
+                ..
+            }
+        )
+    });
+    let status = run.wait(|s| s.connection == Connection::Live);
+    assert_eq!(status.pending, Some(Pending::SlateSync));
+    run.service.stop_live();
+    until(&inputs, |i| *i == LiveInput::State(LiveState::Stopped));
+    let status = run.wait(|s| s.connection == Connection::Connected);
+    assert_eq!(status.pending, Some(Pending::SlateSync));
+    slate_asks(&tablet);
+    let status = run.wait(|s| s.last_sync.is_some());
+    assert_eq!(status.last_sync.unwrap().saved.len(), 1);
+    assert_eq!(
+        (status.active, status.pending),
+        (Some(TabletKind::Slate), None)
+    );
+    run.service.shutdown();
+}
+
+/// The sync that waits for the Slate past the blackboard (Q28) is dropped by the user's cancel,
+/// or with the Slate forgotten; cancelling the blackboard's own sync leaves it.
+#[test]
+fn the_sync_that_waits_for_the_slate_goes_with_a_cancel_or_the_slate_forgotten() {
+    let _report = common::report("two tablets: the Slate's sync cancelled");
+    // Cancelled while the blackboard holds the link: the Slate connects without syncing.
+    let library = new_library();
+    let (tablet, board, mut run) = both_away(library.path(), 3);
+    asked_then_board_connected(&mut run, &board);
+    run.service.cancel();
+    run.wait(|s| s.connection == Connection::Connected && s.pending.is_none());
+    slate_asks(&tablet);
+    run.wait(|s| s.connection == Connection::Connected && s.active == Some(TabletKind::Slate));
+    std::thread::sleep(Duration::from_millis(200));
+    let status = run.service.status();
+    assert_eq!((status.last_sync, status.pending), (None, None));
+    assert_eq!(tablet.stored_page_count(), 3);
+    assert!(notes(library.path()).is_empty());
+    run.service.shutdown();
+
+    // Cancelled before any tablet connected.
+    let library = new_library();
+    let (_tablet, board, mut run) = both_away(library.path(), 3);
+    run.wait(|s| s.connection == Connection::Searching);
+    run.service.sync_now(false).unwrap();
+    run.wait(|s| s.pending == Some(Pending::SlateSync));
+    run.service.cancel();
+    run.wait(|s| s.pending.is_none());
+    board.power_on();
+    let status = run.wait(|s| s.connection == Connection::Connected);
+    assert_eq!(status.pending, None);
+    run.service.shutdown();
+
+    // The Slate forgotten while the blackboard holds the link: nothing waits any more.
+    let library = new_library();
+    let (_tablet, board, mut run) = both_away(library.path(), 3);
+    asked_then_board_connected(&mut run, &board);
+    run.service.forget().unwrap();
+    let status = run.wait(|s| s.known.len() == 1);
+    assert_eq!(status.pending, None);
+    assert_eq!(status.active, Some(TabletKind::Blackboard));
+    run.service.shutdown();
+
+    // The blackboard's own sync (confirmed), cancelled between two of its pages: the Slate's
+    // request still waits, and runs when the Slate comes.
+    let library = new_library();
+    let (reached, page_reached) = mpsc::channel();
+    let (go, wait_go) = mpsc::channel::<()>();
+    let (reached, wait_go) = (Mutex::new(reached), Mutex::new(wait_go));
+    let before = move |n: u16| {
+        if n == 1 {
+            reached.lock().unwrap().send(()).unwrap();
+            wait_go.lock().unwrap().recv_timeout(WAIT).unwrap();
+        }
+    };
+    let store = library_store(None, Some(Box::new(before)));
+    let (tablet, board, mut run) = both_away_with(library.path(), 3, store);
+    asked_then_board_connected(&mut run, &board);
+    run.service.sync_now(true).unwrap();
+    page_reached.recv_timeout(WAIT).unwrap();
+    run.service.cancel();
+    go.send(()).unwrap();
+    let status = run.wait(|s| s.last_sync.is_some());
+    assert_eq!(status.active, Some(TabletKind::Blackboard));
+    assert_eq!(status.pending, Some(Pending::SlateSync), "{status:#?}");
+    assert!(board.stored_page_count() >= 2, "the sync stopped");
+    let before = status.last_sync.unwrap().at;
+    slate_asks(&tablet);
+    let status = run.wait(|s| {
+        s.active == Some(TabletKind::Slate) && s.last_sync.as_ref().is_some_and(|l| l.at > before)
+    });
+    assert_eq!(status.last_sync.unwrap().saved.len(), 1);
+    assert_eq!(status.pending, None);
+    run.service.shutdown();
+}
+
+/// With only the blackboard known, a sync asked while it is away and without "delete after
+/// import" is dropped when it connects, as before Q28: no other tablet to wait for (the panel
+/// does not offer it, `blackboardWaitsForRequest`).
+#[test]
+fn with_only_the_blackboard_known_a_sync_asked_while_away_is_dropped_at_its_connection() {
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    let board = board_known(&tablet, library.path(), 3);
+    let factory = SimFactory::of(vec![ardoise_sim::SimDevice::Board(board.clone())], false);
+    let mut run = Running::start(
+        &tablet,
+        library.path(),
+        BOTH_OFF,
+        factory,
+        library_store(None, None),
+    );
+    run.wait(|s| s.connection == Connection::Searching);
+    run.service.sync_now(false).unwrap();
+    run.wait(|s| s.pending == Some(Pending::Sync));
+    board.power_on();
+    let status = run.wait(|s| s.connection == Connection::Connected);
+    assert_eq!((status.pending, status.error), (None, None));
+    assert_eq!((board.stats().downloads, board.stored_page_count()), (0, 3));
+    run.service.shutdown();
+}
+
+/// Why the automatic export failed, as Windows says it.
+const EXPORT_REASON: &str = "Access is denied. (os error 5)";
+
+/// [`library_store`], the automatic export of every note failing as the app's store says it
+/// (`StoredPage::export_failure`, Q28).
+fn store_export_failing(refuse: Option<u16>) -> PageStore {
+    let mut store = library_store(refuse, None);
+    Box::new(
+        move |root: &Path, page: DownloadedPage, context: &PageContext| {
+            let mut stored = store(root, page, context)?;
+            stored.export_failure = Some(ExportFailure {
+                path: format!("Exports\\{}.pdf", stem(&stored.path)),
+                reason: EXPORT_REASON.into(),
+            });
+            Ok(stored)
+        },
+    )
+}
+
+/// An automatic export that could not be written (Q28), for the Slate and for the blackboard:
+/// every note is imported and its page deleted, the sync did not fail, and its end says how many
+/// notes were not exported, the first file and why. A real failure of the sync stays its error,
+/// and what was not exported is said beside it.
+#[test]
+fn an_automatic_export_that_cannot_be_written_is_said_at_the_end_of_the_sync() {
+    let _report = common::report("service: an automatic export that cannot be written");
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    with_pages(&tablet, 3);
+    registered_beforehand(&tablet, library.path());
+    let mut run = Running::virtual_time(
+        &tablet,
+        library.path(),
+        TabletOptions::default(),
+        store_export_failing(None),
+    );
+    let status = run.wait(|s| s.last_sync.is_some());
+    let last = status.last_sync.unwrap();
+    say!("Slate: {last:?}");
+    assert_eq!((last.saved.len(), last.deleted, last.error), (3, 3, None));
+    assert_eq!(status.error, None);
+    let first = stem(Path::new(&last.saved[0]));
+    assert_eq!(
+        last.export_failed,
+        Some(ExportFailed {
+            notes: 3,
+            path: format!("Exports\\{first}.pdf"),
+            reason: EXPORT_REASON.into(),
+        })
+    );
+    assert_eq!(notes(library.path()).len(), 3);
+    assert_eq!(tablet.stored_page_count(), 0);
+    run.service.shutdown();
+
+    // The second page cannot be stored: the sync failed, and the first page's export too.
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    with_pages(&tablet, 3);
+    registered_beforehand(&tablet, library.path());
+    let mut run = Running::virtual_time(
+        &tablet,
+        library.path(),
+        TabletOptions::default(),
+        store_export_failing(Some(2)),
+    );
+    let status = run.wait(|s| s.last_sync.is_some());
+    let last = status.last_sync.unwrap();
+    say!("Slate, page 2 refused: {last:?}");
+    assert_eq!(last.error.map(|e| e.code).as_deref(), Some("libraryAccess"));
+    assert_eq!(
+        status.error.map(|e| e.code).as_deref(),
+        Some("libraryAccess")
+    );
+    assert_eq!(last.export_failed.map(|f| f.notes), Some(1));
+    assert_eq!((last.saved.len(), tablet.stored_page_count()), (1, 2));
+    run.service.shutdown();
+
+    // The blackboard's pages.
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    let board = board_known(&tablet, library.path(), 3);
+    board.power_on();
+    let factory = SimFactory::of(vec![ardoise_sim::SimDevice::Board(board.clone())], false);
+    let mut run = Running::start(
+        &tablet,
+        library.path(),
+        TabletOptions::default(),
+        factory,
+        store_export_failing(None),
+    );
+    let status = run.wait(|s| s.last_sync.is_some());
+    let last = status.last_sync.unwrap();
+    say!("blackboard: {last:?}");
+    assert_eq!((last.saved.len(), last.deleted, last.error), (3, 3, None));
+    assert_eq!(
+        (status.active, status.error),
+        (Some(TabletKind::Blackboard), None)
+    );
+    assert_eq!(
+        last.export_failed.map(|f| (f.notes, f.reason)),
+        Some((3, EXPORT_REASON.into()))
+    );
+    assert_eq!(notes(library.path()).len(), 3);
+    assert_eq!(board.stored_page_count(), 0);
     run.service.shutdown();
 }
 

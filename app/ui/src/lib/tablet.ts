@@ -125,6 +125,22 @@ export interface LastSync {
    * selects `errorCodes.*`. Stays until the next sync, across reconnections.
    */
   error: { code: string; message: string } | null;
+  /**
+   * The automatic export (PDF or PNG) of notes of this sync could not be written (Q28): the notes are in the library and
+   * the sync did not fail for it; said after `error`, never as one. Null when every export was written or none was
+   * asked. Always sent by the service; optional for the statuses written before it (tests).
+   */
+  exportFailed?: ExportFailed | null;
+}
+
+/** The automatic exports a sync could not write (`LastSync.exportFailed`). */
+export interface ExportFailed {
+  /** Notes whose export could not be written. */
+  notes: number;
+  /** The first of them: the file it was to write, or the folder that cannot hold it, relative to the library. */
+  path: string;
+  /** Why, as the system says it (in its own language). */
+  reason: string;
 }
 
 export interface TabletStatus {
@@ -134,8 +150,12 @@ export interface TabletStatus {
   registerStep: RegisterStep | null;
   sync: SyncProgress | null;
   lastSync: LastSync | null;
-  /** What waits for the tablet to connect. */
-  pending: 'sync' | 'live' | null;
+  /**
+   * What waits for the tablet to connect. `slateSync`: a sync that waits for the Bamboo Slate alone, both tablets known
+   * (asked while the Xiaomi was not connected and « Delete after import » off, it does not import the Xiaomi's pages,
+   * Q15); it keeps waiting while the Xiaomi is connected, and runs when the Slate connects (Q28).
+   */
+  pending: 'sync' | 'slateSync' | 'live' | null;
   /** Last failure: `code` selects `errorCodes.*`. */
   error: { code: string; message: string } | null;
   /** Started with `--simulated-tablet`. */

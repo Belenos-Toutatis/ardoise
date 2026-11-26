@@ -438,7 +438,8 @@ again.
   sync, no question.
 - With that option off, Ardoise imports the Xiaomi tablet's pages **only on request**. The panel says "N pages are
   waiting on the Xiaomi tablet"; **Sync** first asks you to confirm that the pages will be deleted from the tablet
-  once imported (**Sync and delete**).
+  once imported (**Sync and delete**). A **Sync** clicked while it is not connected is for the Bamboo Slate: it waits
+  for the Slate, even if the Xiaomi tablet connects first, and does not import the Xiaomi's pages.
 - The progress counts the pages one by one, and the number of **pages in memory** goes down as it goes.
 - After a transfer that did not end cleanly (stopped or cancelled in the middle of a page), Ardoise closes the
   Bluetooth link and opens it again before using it for a page or for live mode again (at once during a sync,
@@ -490,7 +491,9 @@ it is in the trash or was deleted, or the new page does not contain it), a new n
 In **Settings**, **Automatic export after sync**: choose a **Format** (**Off**, **PDF** or **PNG (image)**) and a
 **Folder in the library** (for example `Exports`), then **Save**. Each page received is then also written as a PDF or a
 PNG in that folder: you can read your notes on your phone with the Nextcloud app. This folder is not shown in the list of
-binders.
+binders. If a file cannot be written (a read-only folder, a file held open by Nextcloud or a viewer), the note is imported
+all the same: at the end of the sync, the **Use** tab of the **Tablet** panel says so, under the result of the sync, with
+the number of notes, the file and why (the details are in `_ardoise\diagnostics\autoexport.log`, in the library).
 
 ## 6. Live mode and presenting in class
 
