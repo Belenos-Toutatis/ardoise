@@ -73,6 +73,8 @@
           return status!.failure
             ? { key: 'narration.status.failed', capture: 'failed', params: { detail: status!.failure } }
             : { key: 'narration.status.failedUnknown', capture: 'failed' };
+        case 'full':
+          return { key: 'narration.status.full', capture: 'full' };
         default:
           return { key: 'narration.status.waiting', capture: 'waiting' };
       }
@@ -81,7 +83,7 @@
   });
 
   /** The microphone does not deliver: the line is a warning, not a progress report. */
-  const problem = $derived(line !== null && ['silent', 'noData', 'failed'].includes(line.capture));
+  const problem = $derived(line !== null && ['silent', 'noData', 'failed', 'full'].includes(line.capture));
 
   async function loadList() {
     try {

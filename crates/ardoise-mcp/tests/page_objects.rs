@@ -530,6 +530,24 @@ async fn where_handwriting_cannot_be_read_the_typed_text_still_is() {
         .failure("get_note_text", json!({ "note": OPTIQUE }))
         .await;
     assert_eq!(error["code"], "handwritingUnsupported");
+
+    // ... unless the handwriting has a correction: it is the text, as for typed text alone.
+    session
+        .ok(
+            "set_note_text",
+            json!({ "note": OPTIQUE, "text": "La lumière se propage en ligne droite" }),
+        )
+        .await;
+    let corrected = session
+        .ok("get_note_text", json!({ "note": OPTIQUE }))
+        .await;
+    assert_eq!(corrected["text"], "La lumière se propage en ligne droite");
+    assert_eq!(corrected["is_correction"], true);
+    assert_eq!(corrected["lines"], json!([]));
+    assert_eq!(corrected["recognition"]["available"], false);
+    assert_eq!(corrected["recognition"]["code"], "handwritingUnsupported");
+    assert_eq!(corrected["structure"]["items"], json!([]));
+    assert_eq!(corrected["typed_text"], "");
 }
 
 #[tokio::test(flavor = "current_thread")]

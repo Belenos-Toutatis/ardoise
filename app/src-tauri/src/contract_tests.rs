@@ -341,6 +341,35 @@ fn every_error_code_of_the_tablet_paths_has_a_text_in_both_languages() {
     }
 }
 
+/// Every code a video export can fail with has its sentence in both languages (`video_error` picks among them).
+#[test]
+fn every_error_code_of_the_video_export_has_a_text_in_both_languages() {
+    use crate::video::{
+        CODEC_UNAVAILABLE, INVALID_VIDEO_SETTINGS, VIDEO_ENCODER_FAILED, VIDEO_EXPORT_FAILED,
+    };
+    for (language, file) in [
+        ("fr", include_str!("../../ui/src/locales/fr.json")),
+        ("en", include_str!("../../ui/src/locales/en.json")),
+    ] {
+        let texts: serde_json::Value = serde_json::from_str(file).unwrap();
+        for code in [
+            VIDEO_EXPORT_FAILED,
+            INVALID_VIDEO_SETTINGS,
+            CODEC_UNAVAILABLE,
+            VIDEO_ENCODER_FAILED,
+        ] {
+            let text = texts["errorCodes"][code].as_str();
+            assert!(
+                text.is_some_and(|text| !text.is_empty()),
+                "{language}: no text for the error code {code}"
+            );
+        }
+        // The new sentence points to the same backup and the same format as `codecUnavailable`.
+        let sentence = texts["errorCodes"][VIDEO_ENCODER_FAILED].as_str().unwrap();
+        assert!(sentence.contains("OpenH264") && sentence.contains("WebM"));
+    }
+}
+
 // --- Q27: a page of the Slate that could only be read in part ----------------------------------------------------------
 
 /// The editor is told when it opens the note (`OpenedNote.partialPage`, `lib/note.ts`), gives it back in `save_note`

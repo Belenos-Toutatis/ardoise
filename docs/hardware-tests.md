@@ -292,7 +292,7 @@ La première session avec la vraie tablette a montré que la synchronisation ét
 
 ## H4 — Montrer la feuille sur un autre ordinateur du réseau
 
-**Durée** : 30 à 40 minutes. **Matériel** : le PC d'Ardoise avec la tablette (chargée, dongle branché, téléphone Bluetooth **coupé**), un **second ordinateur sur le même réseau que lui** (l'idéal : le PC du bureau relié au vidéoprojecteur ; sinon n'importe quel PC) et un **téléphone ou une tablette** sur ce réseau, avec un appareil photo capable de filmer au ralenti (120 ou 240 images par seconde). Le réseau est celui de l'école, Wi-Fi ou prise réseau : noter lequel. Les parties A à E demandent la tablette (mode direct) ; la partie F n'en demande pas.
+**Durée** : 30 à 40 minutes (10 de plus pour la partie B bis). **Matériel** : le PC d'Ardoise avec la tablette (chargée, dongle branché, téléphone Bluetooth **coupé**), un **second ordinateur sur le même réseau que lui** (l'idéal : le PC du bureau relié au vidéoprojecteur ; sinon n'importe quel PC) et un **téléphone ou une tablette** sur ce réseau, avec un appareil photo capable de filmer au ralenti (120 ou 240 images par seconde) ; pour la partie B bis, un **troisième ordinateur de l'école**. Le réseau est celui de l'école, Wi-Fi ou prise réseau : noter lequel. Les parties A à E demandent la tablette (mode direct) ; la partie F n'en demande pas.
 
 Ce test vérifie le partage de la feuille (SPEC §4.10) : l'autorisation du pare-feu de Windows, la connexion avec l'adresse, le QR code et le code d'accès, le délai perçu, la pause, la reconnexion après une coupure, le partage d'une note ouverte, l'arrêt, et le fait que le port se referme. Les libellés des boutons du panneau de partage sont ceux de la fenêtre ; ceux donnés ici sont indicatifs.
 
@@ -331,6 +331,18 @@ Ce test vérifie le partage de la feuille (SPEC §4.10) : l'autorisation du pare
 4. **Plein écran** : appuyer sur `F11`, puis essayer le bouton plein écran de la page (et le double-clic). Le bouton et le curseur disparaissent-ils après 2 secondes d'immobilité ?
 5. **Téléphone ou tablette** : scanner le **code QR** du panneau. L'adresse s'ouvre dans le navigateur ; taper le code. Le panneau doit afficher **2 écrans**. Le noter (appareil, système, navigateur).
 6. *Facultatif, une seule fois (5 minutes d'attente ensuite)* : sur le second ordinateur, dans une fenêtre de navigation privée, taper **5 codes faux** de suite, puis un sixième (même juste) : la page doit demander d'attendre et dire combien de temps. Pendant ce temps, le téléphone (autre appareil, navigation privée aussi) doit encore pouvoir se connecter avec le bon code.
+
+#### B bis. Derrière le filtre web de l'école
+
+À l'école, les navigateurs des PC passent par le filtre web (proxy), même pour une adresse du réseau local : Ardoise voit alors la même adresse pour tous. Depuis le 2026-11-26, il compte les codes faux et les connexions **par poste** quand le filtre dit pour quel poste il transmet la page (en-tête `X-Forwarded-For`). On ne sait pas encore si celui de l'école le dit : c'est ce que cette partie vérifie. Il faut, en plus du second ordinateur, un **troisième ordinateur de l'école** (celui d'un collègue ou d'un poste élève de la salle), et 5 minutes.
+
+1. Sur le second et le troisième ordinateur, ouvrir l'invite de commandes, taper `ipconfig` et **noter l'« Adresse IPv4 »** de chacun.
+2. Sur le PC d'Ardoise, ouvrir le dossier `<bibliothèque>\_ardoise\diagnostics\` et le dernier fichier `share_<date>_<heure>.log` (le journal du partage en cours ; le Bloc-notes suffit). Chercher les lignes `POST /join` de l'étape B (bon code du second ordinateur) et **noter ce qui suit `POST /join`** :
+   - `(through a proxy, for 192.168.x.y from X-Forwarded-For)` : le filtre dit le poste. L'adresse est-elle celle du second ordinateur (étape 1) ? Faire alors l'étape 3.
+   - `(through a proxy that names no PC)` ou `(through a proxy, no address in …)` : le filtre ne dit pas le poste ; tous les PC de l'école comptent encore ensemble, comme avant. Le noter, ne pas faire l'étape 3 (le troisième ordinateur bloquerait aussi le second pendant 5 minutes).
+   - pas de « through a proxy » : ce navigateur ne passe pas par le filtre pour le partage. Le noter.
+3. *Seulement si le journal montre l'adresse du poste* : sur le **troisième** ordinateur, ouvrir l'adresse du partage, taper **5 codes faux** puis un sixième : la page demande d'attendre. Aussitôt, sur le **second** ordinateur, dans une fenêtre de navigation privée, ouvrir l'adresse et taper **le bon code** : il doit entrer tout de suite (**un poste qui se trompe cinq fois ne bloque pas les autres**). Dans le journal, les lignes du troisième ordinateur doivent montrer son adresse (étape 1), différente de celle du second.
+4. Le second ordinateur, connecté, recharge la page (`F5`) plusieurs fois : il ne doit jamais redemander le code.
 
 #### C. La feuille en direct et le délai perçu
 
@@ -378,7 +390,7 @@ Ce test vérifie le partage de la feuille (SPEC §4.10) : l'autorisation du pare
 ### Ce qui revient par Nextcloud
 
 - Les notes écrites en mode direct pendant le test (bibliothèque).
-- Dans `<bibliothèque>\_ardoise\diagnostics\` : un journal seulement en cas d'erreur de la tablette ou d'une session de mode direct anormale. Le partage lui-même n'écrit rien dans la bibliothèque.
+- Dans `<bibliothèque>\_ardoise\diagnostics\` : le journal de chaque partage, `share_<date>_<heure>.log` (une ligne par connexion : adresse, ce qui est demandé, et pour une page passée par le filtre, le poste qu'il nomme ; jamais le code ni le cookie) ; un journal de la tablette seulement en cas d'erreur ou d'une session de mode direct anormale.
 - Dans `ardoise.toml` : la section `[share]` si le port a été changé.
 
 ### À me signaler
@@ -394,7 +406,8 @@ Ce qui ne revient pas tout seul :
 | Le **délai perçu** (*instantané*, *léger retard*, *retard gênant*) et la mesure à la caméra (nombre d'images et cadence) ; si le tracé reste fluide pendant 2 minutes | C2, C3, C8 |
 | Si le tableau noir, le pointeur laser, le zoom, le déplacement et les pages suivent sur l'autre écran | C4 à C7 |
 | Si la pause fige bien l'image, y compris pour une page ouverte pendant la pause, et si la reprise remet à jour | D |
-| Si plusieurs écrans passent par **une même adresse** (point d'accès Wi-Fi en mode routeur, proxy) : le partage accepte au plus 4 écrans et 8 connexions par adresse, et 8 ouvertures d'écran de suite par adresse puis une toutes les 2 secondes ; noter si un écran a été refusé (« trop d'écrans ») ou a redemandé le code | B, E |
+| Si plusieurs écrans passent par **une même adresse** (point d'accès Wi-Fi en mode routeur, proxy) : le partage accepte au plus 4 écrans et 8 connexions par adresse, et 8 ouvertures d'écran de suite par adresse puis une toutes les 2 secondes (même derrière le filtre : ces limites-là ne se comptent pas par poste) ; noter si un écran a été refusé (« trop d'écrans ») ou a redemandé le code | B, E |
+| Derrière le filtre de l'école : ce que le journal écrit après `POST /join` (le poste nommé ou non, l'en-tête), si l'adresse nommée est bien celle du poste (`ipconfig`), et si le second ordinateur est entré pendant que le troisième attendait | B bis |
 | Le comportement après la coupure du réseau (page grisée ou non, reconnexion seule, temps de reprise, code redemandé ou non) | E |
 | Si la note ouverte s'affiche comme dans l'éditeur (fond compris), le délai d'un nouveau trait, et si un titre ou un chemin apparaît quelque part | F |
 | Ce que dit l'autre écran à l'arrêt du partage et à la fermeture d'Ardoise ; si le port est refermé | G1, G3 |

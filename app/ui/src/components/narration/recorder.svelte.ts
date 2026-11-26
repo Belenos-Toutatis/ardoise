@@ -47,6 +47,11 @@ export class NarrationRecorder {
   pending = $state(false);
   /** `retry` is writing the pending recording. */
   retrying = $state(false);
+  /**
+   * The recording under way, or the last one, reached the longest narration a note reads back (4 hours): its capture
+   * stopped by itself (`full`), and the panel stops it as « Arrêter et enregistrer » does and says why.
+   */
+  reachedLimit = $state(false);
 
   #timer: ReturnType<typeof setInterval> | undefined;
   #reading = false;
@@ -71,6 +76,7 @@ export class NarrationRecorder {
     if (this.phase !== 'idle' || this.pending || this.retrying) return false;
     this.error = null;
     this.status = null;
+    this.reachedLimit = false;
     this.phase = 'starting';
     try {
       // The microphone picker listening for the level stops with the phase change: wait until it
@@ -193,7 +199,10 @@ export class NarrationRecorder {
       this.#reading = true;
       try {
         const next = await this.#commands.narrationStatus();
-        if (this.phase === 'recording') this.status = next;
+        if (this.phase === 'recording') {
+          this.status = next;
+          if (next.capture === 'full') this.reachedLimit = true;
+        }
       } catch {
         // The next reading may work.
       } finally {

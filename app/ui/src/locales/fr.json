@@ -503,7 +503,8 @@
       "title": "Changer de bibliothèque",
       "hint": "Ardoise affichera aussitôt les notes de ce dossier, sur ce PC seulement ({machine}). Les notes de la bibliothèque actuelle restent dans leur dossier.",
       "confirm": "Utiliser ce dossier",
-      "current": "C'est déjà la bibliothèque de ce PC : rien ne change."
+      "current": "C'est déjà la bibliothèque de ce PC : rien ne change.",
+      "working": "Un travail est en cours sur vos notes : attendez qu'il se termine (ou arrêtez-le) pour changer de bibliothèque."
     },
     "tabletAdded": "Ajoutée le",
     "boardForgetConfirm": "Oublier la tablette Xiaomi ? Ardoise ne la cherchera plus et elle devra être ajoutée de nouveau, sur tous vos ordinateurs. Elle reste liée à Mi Home."
@@ -523,7 +524,8 @@
     "readOnlyHint": "L'assistant pourra lire et voir vos notes, mais ni les modifier ni piloter Ardoise. Conseillé quand il n'a besoin que de lire.",
     "code": {
       "title": "Claude Code",
-      "hint": "Une seule fois, dans PowerShell ou l'invite de commandes (Ardoise sera disponible dans tous vos projets). Copiez la commande telle quelle, guillemets autour de -- compris :"
+      "hint": "Une seule fois, dans PowerShell ou l'invite de commandes (Ardoise sera disponible dans tous vos projets). Copiez la commande telle quelle, guillemets autour de -- compris :",
+      "pathWarning": "Le chemin d'Ardoise contient un caractère ($, accent grave ou %) que PowerShell ou l'invite de commandes transforment : cette commande enregistrerait un chemin faux. Corrigez le chemin à la main dans la commande, ou utilisez plutôt l'entrée JSON de Claude Desktop ci-dessous, qui est exacte."
     },
     "desktop": {
       "title": "Claude Desktop",
@@ -631,6 +633,7 @@
     "hint": {
       "searching": "Appuyez brièvement sur le bouton de la tablette pour la connecter, et gardez-la près de l'ordinateur.",
       "pendingSync": "La synchronisation démarrera dès que la tablette sera connectée.",
+      "pendingSyncSlate": "La synchronisation demandée attend la Bamboo Slate : elle démarrera dès que celle-ci sera connectée (appui bref sur son bouton). Elle n'importe pas les pages de la tablette Xiaomi.",
       "pendingLive": "Le mode direct démarrera dès que la tablette sera connectée.",
       "searchingBoard": "Allumez la tablette Xiaomi et gardez-la près de l'ordinateur. Fermez Mi Home (ou coupez le Bluetooth du téléphone) : elle ne parle qu'à une application à la fois.",
       "searchingBoth": "Allumez la tablette Xiaomi, ou appuyez brièvement sur le bouton de la Bamboo Slate. Fermez Mi Home (ou coupez le Bluetooth du téléphone) : la tablette Xiaomi ne parle qu'à une application à la fois.",
@@ -678,7 +681,11 @@
       "boardConfirmYes": "Synchroniser et effacer",
       "boardWaitingOne": "1 page attend sur la tablette Xiaomi : elle n'est importée qu'à votre demande, avec « Synchroniser », et sera effacée de la tablette une fois sa note écrite.",
       "boardWaitingMany": "{count} pages attendent sur la tablette Xiaomi : elles ne sont importées qu'à votre demande, avec « Synchroniser », et seront effacées de la tablette une fois leurs notes écrites.",
-      "boardOnRequest": "La tablette Xiaomi n'importe ses pages qu'à votre demande : allumez-la, puis cliquez sur « Synchroniser » une fois qu'elle est connectée."
+      "boardOnRequest": "La tablette Xiaomi n'importe ses pages qu'à votre demande : allumez-la, puis cliquez sur « Synchroniser » une fois qu'elle est connectée.",
+      "exportFailed": {
+        "one": "Une note a bien été importée, mais son export automatique n'a pas pu être écrit : « {path} » ({reason}). Vérifiez que ce dossier n'est pas en lecture seule et que le fichier n'est pas ouvert dans un autre logiciel (Nextcloud, un lecteur de PDF ou d'images). Le détail est noté dans _ardoise\\diagnostics\\autoexport.log, dans la bibliothèque.",
+        "other": "{count} notes ont bien été importées, mais leur export automatique n'a pas pu être écrit (la première : « {path} », {reason}). Vérifiez que ce dossier n'est pas en lecture seule et que les fichiers ne sont pas ouverts dans un autre logiciel (Nextcloud, un lecteur de PDF ou d'images). Le détail est noté dans _ardoise\\diagnostics\\autoexport.log, dans la bibliothèque."
+      }
     },
     "live": {
       "open": "Mode direct",
@@ -771,6 +778,7 @@
       "title": "Tablettes",
       "notConnected": "Pas connectée",
       "add": "Ajouter une tablette",
+      "addUnavailable": "Impossible d'ajouter une tablette pour le moment.",
       "forgetLabel": "Oublier la tablette « {name} »"
     },
     "board": {
@@ -966,6 +974,7 @@
     "videoExportFailed": "la vidéo n'a pas pu être écrite ({detail}) ; choisissez un autre emplacement et vérifiez qu'il reste de la place",
     "invalidVideoSettings": "ces réglages vidéo ne sont pas valides ({detail}) ; vérifiez la taille de l'image, la durée et le fond",
     "codecUnavailable": "Windows ne peut pas écrire de MP4 sur ce PC (l'encodeur H.264 est absent) : installez le secours OpenH264 dans les Réglages, ou choisissez WebM",
+    "videoEncoderFailed": "l'encodeur vidéo de Windows a échoué ({detail}) ; réessayez, et vérifiez qu'il reste de la place sur le disque. Si cela se reproduit, installez l'encodeur de secours OpenH264 (Réglages, « Encodeur vidéo de secours (OpenH264) »), qu'Ardoise utilisera à la prochaine exportation, ou choisissez le format WebM",
     "microphoneNotFound": "le micro choisi est introuvable : branchez-le, ou choisissez-en un autre dans les Réglages",
     "microphoneSilent": "Windows bloque peut-être l'accès au micro : Paramètres > Confidentialité et sécurité > Microphone > « Autoriser les applications de bureau à accéder à votre microphone »",
     "microphoneFailed": "le micro ne peut pas être utilisé ({detail}) ; vérifiez qu'un autre logiciel ne s'en sert pas",
@@ -1550,7 +1559,7 @@
     },
     "export": {
       "button": "Exporter…",
-      "hint": "Exporter la note en PNG, JPG, SVG ou PDF"
+      "hint": "Exporter la note en PNG, JPG, WebP, SVG ou PDF"
     },
     "print": {
       "button": "Imprimer…",
@@ -1734,7 +1743,8 @@
       "noData": "Le micro ne transmet rien. Vérifiez qu'il est bien branché ou choisissez-en un autre.",
       "failed": "Le micro a échoué : {detail}",
       "failedUnknown": "Le micro ne fonctionne pas.",
-      "silent": "Windows bloque peut-être l'accès au micro : ouvrez Paramètres > Confidentialité et sécurité > Microphone et activez « Autoriser les applications de bureau à accéder à votre microphone ». Un interrupteur de coupure du micro donne le même résultat."
+      "silent": "Windows bloque peut-être l'accès au micro : ouvrez Paramètres > Confidentialité et sécurité > Microphone et activez « Autoriser les applications de bureau à accéder à votre microphone ». Un interrupteur de coupure du micro donne le même résultat.",
+      "full": "Durée maximale atteinte (4 heures) : l'enregistrement s'arrête."
     },
     "record": {
       "open": "Enregistrer une narration",
@@ -1756,7 +1766,8 @@
       "unsavedWarning": "Cette note a des modifications non enregistrées. Enregistrez-la d'abord (Ctrl+S), sinon elles ne seront pas conservées avec la narration.",
       "replaceQuestion": "Cette note a déjà une narration ({duration}). La remplacer par ce nouvel enregistrement ?",
       "replaceYes": "Remplacer",
-      "replaceNo": "Garder l'ancienne"
+      "replaceNo": "Garder l'ancienne",
+      "limitReached": "L'enregistrement s'est arrêté de lui-même : il a atteint sa durée maximale (4 heures)."
     },
     "pending": {
       "title": "Enregistrement en attente",
@@ -2110,7 +2121,7 @@
       "damaged": "Fichier endommagé : supprimez-le, puis téléchargez-le de nouveau"
     },
     "download": "Télécharger depuis Cisco",
-    "downloadHint": "Le fichier vient du serveur de Cisco ; son empreinte est vérifiée avant l'installation. Sa licence figure ci-dessous.",
+    "downloadHint": "Le fichier vient du serveur de Cisco ; son empreinte est vérifiée avant l'installation. Sa licence figure ci-dessus.",
     "downloading": "Téléchargement…",
     "downloadProgress": "{received} sur {total} Mo",
     "downloadReceived": "{received} Mo reçus",

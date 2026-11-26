@@ -264,7 +264,9 @@ pub fn render_page(
         scale: render_scale(source.note.page, placement),
         background: options.background,
     };
-    let image = render_note(source.view(), &render).map_err(render_error)?;
+    let image = source
+        .with_view(|view| render_note(view, &render))
+        .map_err(render_error)?;
     Ok(bitmap_of(&image))
 }
 

@@ -469,7 +469,9 @@ importée de nouveau.
   Slate : synchronisation automatique, sans question.
 - Avec cette option désactivée, Ardoise n'importe les pages de la tablette Xiaomi **qu'à votre demande**. Le panneau dit
   « N pages attendent sur la tablette Xiaomi » ; **Synchroniser** demande d'abord de confirmer que les pages
-  seront effacées de la tablette une fois importées (**Synchroniser et effacer**).
+  seront effacées de la tablette une fois importées (**Synchroniser et effacer**). Un **Synchroniser** cliqué alors
+  qu'elle n'est pas connectée est pour la Bamboo Slate : il attend celle-ci, même si la tablette Xiaomi se connecte
+  la première, et n'importe pas les pages de la Xiaomi.
 - La progression compte les pages une à une, et le nombre de **pages en mémoire** diminue au fur et à mesure.
 - Après un transfert qui ne s'est pas terminé proprement (interrompu ou annulé en cours de page), Ardoise ferme la
   liaison Bluetooth et la rétablit avant de s'en servir de nouveau pour une page ou pour le direct (tout de suite pendant
@@ -524,7 +526,11 @@ page ne la contient pas), une nouvelle note est ajoutée, comme pour n'importe q
 Dans **Réglages**, **Export automatique après synchronisation** : choisissez un **Format** (**Désactivé**, **PDF** ou
 **PNG (image)**) et un **Dossier dans la bibliothèque** (par exemple `Exports`), puis **Enregistrer**. Chaque page
 reçue est alors aussi écrite en PDF ou en PNG dans ce dossier : vous pouvez lire vos notes sur votre téléphone avec
-l'application Nextcloud. Ce dossier n'est pas affiché dans la liste des classeurs.
+l'application Nextcloud. Ce dossier n'est pas affiché dans la liste des classeurs. Si un fichier ne peut pas être
+écrit (dossier en lecture seule, fichier ouvert par Nextcloud ou par un lecteur), la note est quand même importée :
+à la fin de la synchronisation, l'onglet **Utiliser** du panneau **Tablette** le dit, sous le résultat de la
+synchronisation, avec le nombre de notes, le fichier et la raison (le détail est dans
+`_ardoise\diagnostics\autoexport.log`, dans la bibliothèque).
 
 ## 6. Le mode direct et la présentation en classe
 
@@ -1073,7 +1079,8 @@ lui-même.
 
 **Confidentialité.** Le partage ne démarre que si vous cliquez, et s'arrête avec **Arrêter le partage** ou à la
 fermeture d'Ardoise (le port est alors refermé). Le code change à chaque partage. Après 5 codes faux en 5 minutes,
-l'ordinateur concerné doit attendre (la page dit combien de temps), sans gêner les autres. Les échanges ne sont *pas
+l'ordinateur concerné doit attendre (la page dit combien de temps), sans gêner les autres (sauf parfois derrière le
+filtre web d'une école, voir plus bas). Les échanges ne sont *pas
 chiffrés* (c'est du `http` sur le réseau local) : n'utilisez ce partage que sur un réseau de confiance, et pas pour des
 notes confidentielles sur un réseau ouvert. L'écriture et l'image des notes partagées sont visibles par quiconque a
 l'adresse *et* le code.
@@ -1086,6 +1093,10 @@ l'adresse *et* le code.
   autre jour : le port peut avoir changé si un autre programme tenait le 8765.
 - Le pare-feu a-t-il été autorisé pour ce type de réseau (voir plus haut) ? C'est la cause la plus fréquente.
 - La page dit que le code est incorrect : relisez le code du panneau (il n'y a ni `0`, ni `O`, ni `1`, ni `I`, ni `L`).
+- La page demande d'attendre alors que cet ordinateur n'a tapé aucun code faux : à l'école, les ordinateurs passent
+  souvent par le filtre web, et le partage ne les distingue que si le filtre dit de quel ordinateur vient la page.
+  Sinon, ou après beaucoup de codes faux en peu de temps (40 en 5 minutes), tous ceux qui passent par lui attendent
+  ensemble. Attendez le temps indiqué.
 - La page dit qu'il y a trop d'écrans : le partage accepte 32 écrans à la fois (4 par ordinateur). Elle réessaie
   toute seule toutes les 5 secondes.
 - Le navigateur affiche seulement « Misdirected Request » : tapez l'adresse en chiffres que montre le panneau. Par
@@ -1937,6 +1948,10 @@ sécurité > Microphone* et activez *Autoriser les applications de bureau à acc
 de coupure du micro, sur certains PC, donne le même résultat).
 
 En mode direct, **Enregistrer la narration** enregistre le son pendant la séance, découpé page par page.
+
+Un enregistrement dure au plus 4 heures (s'il est resté lancé à la fin d'un cours, par exemple) : il s'arrête alors de
+lui-même et est enregistré comme avec **Arrêter et enregistrer**, et Ardoise le dit (« L'enregistrement s'est arrêté de
+lui-même : il a atteint sa durée maximale (4 heures). »).
 
 ### Exporter en vidéo
 

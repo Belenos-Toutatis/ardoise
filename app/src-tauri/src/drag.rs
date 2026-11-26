@@ -105,7 +105,7 @@ pub fn prepare_files(
     let written = loaded
         .iter()
         .map(|source| {
-            let bytes = png_for_drag(source.view())?;
+            let bytes = source.with_view(png_for_drag)?;
             write_new_file(&dir, &source.stem, "png", &bytes).map_err(write_error)
         })
         .collect::<CommandResult<Vec<PathBuf>>>();

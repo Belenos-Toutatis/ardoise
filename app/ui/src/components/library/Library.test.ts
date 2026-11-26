@@ -215,6 +215,11 @@ describe('library: listing and sidebar', () => {
     // A third tag no note carries with the other two: nothing is left.
     await ui.view('[data-tag="réunion"]');
     expect(ui.titles()).toEqual([]);
+    // In « Toutes les notes » too, the empty view is the filter's, not the empty library's.
+    expect(ui.q('[data-view="all"]')?.getAttribute('aria-current')).toBe('true');
+    expect(ui.target.textContent).toContain('Aucune note de cette vue ne porte toutes ces étiquettes.');
+    expect(ui.target.textContent).not.toContain("Aucune note pour l'instant");
+    expect(ui.q('.empty-state button.primary')).toBeNull();
     // A click on a tag of the sidebar takes it off again.
     await ui.view('[data-tag="réunion"]');
     expect(ui.titles()).toEqual(['Cours de physique']);

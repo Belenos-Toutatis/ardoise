@@ -156,6 +156,25 @@ describe('microphone picker', () => {
     expect(view.meter()!.getAttribute('aria-valuenow')).toBe('0');
   });
 
+  it('says that a recording stopped at its longest length', async () => {
+    vi.spyOn(api, 'narrationStatus').mockResolvedValue({
+      state: 'recording',
+      capture: 'full',
+      level: { peak: 0, rms: 0 },
+      elapsedMs: 14_340_000,
+      device: 'Microphone Array (Realtek Audio)',
+      failure: null,
+      pending: false,
+    });
+    const view = render({ disabled: true });
+    await vi.waitFor(() => expect(view.line()?.dataset.capture).toBe('full'));
+    expect(view.line()?.textContent).toBe("Durée maximale atteinte (4 heures) : l'enregistrement s'arrête.");
+    expect(view.line()?.classList.contains('problem')).toBe(true);
+    setLocale('en');
+    await tick();
+    expect(view.line()?.textContent).toBe('Longest length reached (4 hours): the recording stops.');
+  });
+
   it('explains the Windows privacy setting in English too', async () => {
     setLocale('en');
     mockNarration.silent = true;

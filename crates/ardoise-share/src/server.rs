@@ -6,14 +6,14 @@
 //!
 //! One machine of the network must not be able to take the share from the others (a hostile
 //! classmate's PC must never keep the projector's PC out): connections and event streams are
-//! limited per address, a request must start within 3 s and be answered within 5 s, part of
-//! the connection slots is kept for addresses that joined with the code, and when there is no
-//! room a connection is closed for the newcomer by fair share: one still waiting for its request
-//! head, else a request of the address that holds the most slots if it holds at least two more
-//! (never an event stream). An address may open an event stream only so often (each one copies
-//! the whole page). The one long answer is the picture of the paper (`GET /paper/<key>`): for those
-//! who joined, it goes as slowly as the client reads, within a time limit, as a request that makes
-//! room like any other.
+//! limited per address, a request must start and be read in time, part of the connection slots
+//! is kept for addresses that joined with the code, and when there is no room a connection is
+//! closed for the newcomer by fair share: one still waiting for its request head, else a request
+//! of the address that holds the most slots if it holds at least two more (never an event
+//! stream). An address may open an event stream only so often (each one copies the whole page).
+//! An answer goes as slowly as the client reads, within a time limit, as a request that makes
+//! room like any other: the long ones are the picture of the paper (`GET /paper/<key>`, for those
+//! who joined) and the viewer's WebAssembly module (about 3 MB).
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
@@ -33,14 +33,10 @@ use tokio::time::{Instant, MissedTickBehavior, timeout, timeout_at};
 
 use crate::access::{self, Access, StreamRate, Verdict};
 use crate::content::{Content, Frame, JoinRefused, Viewer, end_frame};
-use crate::http::{self, ContentLength, Head, HeadError, ResponseHead};
+use crate::http::{self, ContentLength, ForwardedFor, Head, HeadError, ResponseHead};
 use crate::journal::Journal;
 use crate::{Assets, Limits, LiveFeed, OnChange, ShareConfig, ShareError, ShareStatus};
 
-/// Time to write an answer: the largest, a script of about 200 KB, takes milliseconds on a
-/// LAN; a client that does not read must not hold its slot long. Not the picture of the paper,
-/// which may weigh 10 MB on a shared Wi-Fi: see [`Limits::stall`] and [`Limits::paper_answer`].
-const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Connections waiting to be accepted (std's value).
 const LISTEN_BACKLOG: u32 = 128;
 /// How long answers are cut: each piece must go within [`Limits::stall`].
@@ -460,7 +456,7 @@ impl Server {
         shutdown: &mut watch::Receiver<bool>,
     ) {
         let started = Instant::now();
-        reply(stream, head, body, shutdown).await;
+        reply(stream, head, body, &self.limits, shutdown).await;
         self.note(format_args!(
             "#{id} answered {} in {} ms",
             status_of(head),
@@ -674,15 +670,21 @@ impl Server {
         let Ok(JoinBody { code }) = serde_json::from_slice::<JoinBody>(&body) else {
             return Some(bad_request());
         };
+        // Behind a proxy, each PC it names has its attempts and tokens (the proxy's address has
+        // its own limits too: the name is the browser's word).
+        let client = access::Client {
+            connection: address,
+            device: head.forwarded_for.address(),
+        };
         let mut access = lock(&self.access);
-        let answer = match access.try_code(address, &code, std::time::Instant::now()) {
+        let answer = match access.try_code(client, &code, std::time::Instant::now()) {
             Verdict::Right => match access::random_token() {
                 Ok(token) => {
                     let cookie = format!(
                         "{}={token}; Path=/; HttpOnly; SameSite=Strict",
                         http::COOKIE
                     );
-                    access.add_token(address, token);
+                    access.add_token(client, token);
                     // `200` with a body and its length, not `204`: through a school's filtering
                     // proxy, a `204` (which has no length) held the browser 2 minutes
                     // (2026-11-03).
@@ -870,10 +872,17 @@ fn describe(head: &Head) -> String {
     } else {
         "?"
     };
-    let proxy = if head.proxied {
-        " (through a proxy)"
-    } else {
-        ""
+    // The PC a proxy names is written only once read as an address, never the header's text: at
+    // a school, it tells whether the proxy names the PCs, so whether they count apart.
+    let proxy = match (head.proxied, head.forwarded_for) {
+        (false, _) => String::new(),
+        (true, ForwardedFor::Address(address, header)) => {
+            format!(" (through a proxy, for {address} from {header})")
+        }
+        (true, ForwardedFor::Unreadable(header)) => {
+            format!(" (through a proxy, no address in {header})")
+        }
+        (true, ForwardedFor::Absent) => " (through a proxy that names no PC)".to_owned(),
     };
     format!("{method} {route}{proxy}")
 }
@@ -957,19 +966,32 @@ async fn reply(
     mut stream: TcpStream,
     head: &[u8],
     body: &[u8],
+    limits: &Limits,
     shutdown: &mut watch::Receiver<bool>,
 ) {
     let written = tokio::select! {
-        written = timeout(RESPONSE_TIMEOUT, async {
-            stream.write_all(head).await?;
-            stream.write_all(body).await?;
-            stream.flush().await
-        }) => matches!(written, Ok(Ok(()))),
+        written = write_answer(&mut stream, head, body, limits) => written,
         _ = stopping(shutdown) => false,
     };
     if written {
         linger(stream, shutdown).await;
     }
+}
+
+/// Writes a whole answer, as the picture of the paper goes: each 64 KiB within [`Limits::stall`]
+/// (a client that stopped reading is gone), the whole within [`Limits::paper_answer`] (a client
+/// that reads a trickle gives its slot back). Whether it went.
+async fn write_answer<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    head: &[u8],
+    body: &[u8],
+    limits: &Limits,
+) -> bool {
+    let written = timeout(limits.paper_answer, async {
+        write_paced(writer, head, limits.stall).await?;
+        write_paced(writer, body, limits.stall).await
+    });
+    matches!(written.await, Ok(Ok(())))
 }
 
 /// After a whole answer. No FIN from here yet: the client closes first (see `LINGER_TIME`).
@@ -1427,5 +1449,89 @@ mod tests {
         request(&mut connections, ip(2), true, &limits).unwrap();
         assert!(evicted(&first[0].1));
         assert!(request(&mut connections, ip(2), true, &limits).is_none());
+    }
+
+    /// Writes an answer of `pieces` × 64 KiB into a pipe that holds 64 KiB, read by a client that
+    /// takes up to `read` bytes every `every`: whether it went, and what was read.
+    fn answer_through(
+        limits: Limits,
+        pieces: usize,
+        read: usize,
+        every: Duration,
+    ) -> (bool, usize) {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let (mut writer, mut reader) = tokio::io::duplex(WRITE_PIECE);
+            let body = vec![7u8; pieces * WRITE_PIECE];
+            let head = b"HTTP/1.1 200 OK\r\n\r\n";
+            let got = std::cell::Cell::new(0);
+            let client = async {
+                let mut chunk = vec![0u8; read];
+                loop {
+                    match reader.read(&mut chunk).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => got.set(got.get() + n),
+                    }
+                    tokio::time::sleep(every).await;
+                }
+            };
+            tokio::pin!(client);
+            let written = tokio::select! {
+                written = write_answer(&mut writer, head, &body, &limits) => written,
+                () = &mut client => false,
+            };
+            // The server lets go of the connection; a whole answer is then read to its end.
+            drop(writer);
+            if written {
+                let _ = timeout(Duration::from_secs(30), client).await;
+            }
+            (written, got.get())
+        })
+    }
+
+    /// The viewer's WebAssembly module (about 3 MB) through a slow Wi-Fi took longer than the 5 s
+    /// once allowed for a whole answer: cut, it left the viewer without any stroke. An answer now
+    /// goes as the picture of the paper does, each 64 KiB within `Limits::stall`.
+    #[test]
+    fn an_answer_goes_as_slowly_as_the_client_reads() {
+        // 1 MiB at 64 KiB every 400 ms: more than 6 s.
+        let started = std::time::Instant::now();
+        let (written, read) = answer_through(
+            Limits::default(),
+            16,
+            WRITE_PIECE,
+            Duration::from_millis(400),
+        );
+        let took = started.elapsed();
+        assert!(written, "cut after {took:?}");
+        assert_eq!(read, 16 * WRITE_PIECE + 19);
+        assert!(took > Duration::from_secs(5), "{took:?}");
+    }
+
+    #[test]
+    fn an_answer_to_a_client_that_stopped_reading_or_reads_a_trickle_ends() {
+        // Nothing read after the first 64 KiB: cut once a piece waited `stall`.
+        let stall = Limits {
+            stall: Duration::from_millis(300),
+            ..Limits::default()
+        };
+        let started = std::time::Instant::now();
+        let (written, read) = answer_through(stall, 16, WRITE_PIECE, Duration::from_secs(3600));
+        assert!(!written);
+        assert!(read <= WRITE_PIECE, "{read}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        // A trickle that keeps each piece within `stall`: cut at the time allowed for the whole.
+        let whole = Limits {
+            paper_answer: Duration::from_millis(500),
+            ..Limits::default()
+        };
+        let started = std::time::Instant::now();
+        let (written, read) = answer_through(whole, 16, 1024, Duration::from_millis(10));
+        assert!(!written);
+        assert!(read < 16 * WRITE_PIECE, "{read}");
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 }

@@ -273,9 +273,11 @@
    * (and `live.orientation`, which counts the blackboard's quarter turns under the Slate's names, is never shown); the
    * blackboard's own switch shows instead, with its four drawings (`docs/questions.md` Q19). The session says which
    * tablet it writes with (kept while it reconnects, when no tablet is connected); until it does, the tablet that is
-   * connected.
+   * connected, else the only one known (the Xiaomi alone, not switched on yet, is the one awaited).
    */
-  const onBoard = $derived((live.tablet ?? tablet.active) === 'blackboard');
+  const onBoard = $derived(
+    (live.tablet ?? tablet.active ?? (tablet.board !== null && tablet.slate === null ? 'blackboard' : null)) === 'blackboard',
+  );
   /** How the blackboard is held: its run's position; before the run streams, the setting it will take. */
   const boardHeld = $derived<BoardPosition>(live.boardPosition ?? boardPositionOf(tablet.status?.options));
   /**
@@ -788,7 +790,7 @@
 
   /** The page on screen when the last click in the Fond tab was made (the choice of a file, which takes a while). */
   let imageFrom: number | null = null;
-  /** The last thing done in the side tabs was a pointer's (a choice made with a key keeps its focus). */
+  /** The last thing done in the side tabs or the toolbar was a pointer's (a choice made with a key keeps its focus). */
   let pointerChoice = false;
 
   /** An act in the Fond tab: refused as a whole, told in a notice; resolved once Rust has answered. */
@@ -809,9 +811,10 @@
   }
 
   /**
-   * A choice made in a select or with the slider of the Page and Fond tabs by the mouse gives the focus back, so that
-   * the class's remote (Page Up, Page Down: they turn the page whoever has the focus, but the arrows are the control's)
-   * and the keys of live mode go on at once.
+   * A choice made in a select or with a slider of the Page and Fond tabs or of the toolbar (the tablet's tool and width,
+   * the computer's ink) by the mouse gives the focus back, so that the class's remote (Page Up, Page Down: they turn the
+   * page whoever has the focus, but the arrows are the control's) and the keys of live mode (P, V, B, L, →, Ctrl+Z) go
+   * on at once: a select keeping the focus would take P for a search among its tools.
    */
   function releaseFocus(e: Event) {
     const el = e.target;
@@ -1044,7 +1047,15 @@
     </div>
   {/if}
 
-  <div class="live-toolbar" role="toolbar" aria-label={t('live.toolbar')}>
+  <!-- The menu of tools and the sliders of width give the focus back after a choice made with the mouse (`releaseFocus`). -->
+  <div
+    class="live-toolbar"
+    role="toolbar"
+    aria-label={t('live.toolbar')}
+    onpointerdowncapture={() => (pointerChoice = true)}
+    onkeydowncapture={() => (pointerChoice = false)}
+    onchange={releaseFocus}
+  >
     <div class="group" role="group" aria-labelledby="live-tablet-style">
       <span class="group-label" id="live-tablet-style">{t('live.tabletStyle')}</span>
       <label class="group">

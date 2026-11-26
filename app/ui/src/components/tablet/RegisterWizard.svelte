@@ -22,6 +22,12 @@
   type Step = 'holdButton' | 'searching' | 'connecting' | 'pressButton';
 
   const DRAWING = { holdButton: 'hold', searching: 'wait', connecting: 'wait', pressButton: 'press' } as const;
+  /**
+   * (supposé) How long the service takes, at most, to say something once asked: it takes a request at once when it is not
+   * busy. It says nothing when it refuses with the error its status holds already (Bluetooth still off): its status
+   * is published only when it changes (`Publisher::update`, crates/ardoise-device/src/service/worker.rs).
+   */
+  const NO_NEWS_MS = 1500;
 
   // A registration already under way (started before the wizard was opened) is followed, not restarted.
   const underWay = untrack(() => tablet.status?.connection === 'registering');
@@ -35,6 +41,10 @@
   let startError: TabletStatus['error'] = null;
   let startRegistered = false;
   let leaving = false;
+  let noNews: ReturnType<typeof setTimeout> | undefined;
+  /** The status the wizard gave up on for want of news; a later one with a step says the registration began after all. */
+  let quiet: TabletStatus | null = null;
+  $effect(() => () => clearTimeout(noNews));
 
   const status = $derived(tablet.status);
   const step = $derived<Step>((status?.registerStep as Step | null) ?? 'holdButton');
@@ -47,7 +57,13 @@
 
   // Follows the service while a registration is under way.
   $effect(() => {
-    if (phase !== 'running' || !status || leaving) return;
+    if (!status || leaving) return;
+    if (phase === 'error' && quiet !== null && status !== quiet && status.registerStep !== null) {
+      quiet = null;
+      failure = null;
+      phase = 'running';
+    }
+    if (phase !== 'running') return;
     const reported = status.registerStep;
     if (reported === 'done') {
       phase = 'done';
@@ -72,15 +88,28 @@
   });
 
   async function begin() {
+    clearTimeout(noNews);
+    quiet = null;
     sawStep = false;
     startError = status?.error ?? null;
     startRegistered = status?.registered != null;
     failure = null;
     phase = 'running';
+    const asked = tablet.status;
     if (!(await tablet.register())) {
       failure = tablet.actionError;
       phase = 'error';
+      return;
     }
+    // Nothing came since the request, and the status holds an error: that error is the service's answer.
+    noNews = setTimeout(() => {
+      const now = tablet.status;
+      if (phase === 'running' && !leaving && !sawStep && now !== null && now === asked && now.error) {
+        failure = errorMessage(now.error);
+        quiet = now;
+        phase = 'error';
+      }
+    }, NO_NEWS_MS);
   }
 
   async function leave() {
@@ -94,7 +123,7 @@
 <Modal title={t('tablet.register.title')} onclose={leave}>
   <div bind:this={root} class="register-wizard" data-slot="register-wizard">
     {#if phase === 'warning'}
-      <div class="step" data-step="warning">
+      <div class="wizard-step" data-step="warning">
         <h3>{t('tablet.register.warningTitle')}</h3>
         <p class="warning" role="note">{t('tablet.register.warning')}</p>
         <p>{t('tablet.register.warningPhone')}</p>
@@ -108,7 +137,7 @@
         </button>
       </div>
     {:else if phase === 'running'}
-      <div class="step" data-step={step}>
+      <div class="wizard-step" data-step={step}>
         <TabletDrawing mode={DRAWING[step]} />
         <div aria-live="polite">
           <h3>{t(`tablet.register.step.${step}.title`)}</h3>
@@ -121,7 +150,7 @@
         </button>
       </div>
     {:else if phase === 'done'}
-      <div class="step" data-step="done">
+      <div class="wizard-step" data-step="done">
         <TabletDrawing mode="done" />
         <div aria-live="polite">
           <h3>{t('tablet.register.step.done.title')}</h3>
@@ -154,7 +183,7 @@
         </button>
       </div>
     {:else}
-      <div class="step" data-step="error" role="alert">
+      <div class="wizard-step" data-step="error" role="alert">
         <h3>{t('tablet.register.error.title')}</h3>
         {#if failure}
           <p class="error">{failure}</p>
@@ -174,11 +203,12 @@
 </Modal>
 
 <style>
-  .step h3 {
+  /* Not `.step`: the diagnostic's global rule (app.css) would lay a step's parts out side by side. */
+  .wizard-step h3 {
     margin: 0.5rem 0 0.25rem;
   }
 
-  .step p {
+  .wizard-step p {
     margin: 0.4rem 0;
   }
 

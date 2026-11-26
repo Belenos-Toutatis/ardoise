@@ -24,9 +24,14 @@
   const SLOW_MS = 12_000;
   /** The cursor and the full-screen button hide after this long without moving. */
   const HIDE_CURSOR_MS = 2000;
+  /** A geometry module that could not be fetched is asked again after this long (and when the stream opens again). */
+  const INK_RETRY_MS = 10_000;
 
   const viewer = new ViewerState();
   let ink = $state.raw<Ink | null>(null);
+  let alive = false;
+  let inkLoading = false;
+  let inkRetry: ReturnType<typeof setTimeout> | undefined;
   let idle = $state(false);
   let fullscreen = $state(false);
   /** The code was just accepted: a `401` right after it means that the browser dropped the cookie. */
@@ -43,6 +48,7 @@
       if (status === 'open') {
         joined = false;
         cookiesRefused = false;
+        loadGeometry();
       } else if (status === 'needsCode') {
         cookiesRefused = joined;
         joined = false;
@@ -52,23 +58,38 @@
   });
 
   onMount(() => {
-    let alive = true;
-    loadInk()
-      .then((module) => {
-        if (alive) ink = module;
-      })
-      .catch(() => {
-        // Without the geometry module the page and its paper still show.
-      });
+    alive = true;
+    loadGeometry();
     stream.start();
     wake();
     return () => {
       alive = false;
       clearTimeout(idleTimer);
+      clearTimeout(inkRetry);
       stream.stop();
       viewer.close();
     };
   });
+
+  /**
+   * The stroke geometry (`ardoise-ink` in WebAssembly, some 3 MB over the network), fetched until it loads: without it
+   * the page and its paper show, but not a single stroke.
+   */
+  function loadGeometry() {
+    if (!alive || ink || inkLoading) return;
+    clearTimeout(inkRetry);
+    inkLoading = true;
+    loadInk()
+      .then((module) => {
+        if (alive) ink = module;
+      })
+      .catch(() => {
+        if (alive) inkRetry = setTimeout(loadGeometry, INK_RETRY_MS);
+      })
+      .finally(() => {
+        inkLoading = false;
+      });
+  }
 
   $effect(() => {
     document.title = t('viewer.title');

@@ -231,6 +231,38 @@ fn the_status_has_the_shape_of_the_interface() {
     assert_eq!(json["boardSearch"], serde_json::Value::Null);
 }
 
+/// The fields of Q28 (`lib/tablet.ts`): a sync waiting for the Slate alone, and the automatic
+/// exports a sync could not write.
+#[test]
+fn the_slate_sync_and_the_exports_not_written_have_the_shape_of_the_interface() {
+    let mut status = TabletStatus::initial(false, TabletOptions::default());
+    status.pending = Some(Pending::SlateSync);
+    status.last_sync = Some(LastSync {
+        at: 1,
+        saved: vec!["Cours.ardoise".into()],
+        deleted: 1,
+        error: None,
+        export_failed: Some(ExportFailed {
+            notes: 2,
+            path: "Exports\\Cours.pdf".into(),
+            reason: "Access is denied. (os error 5)".into(),
+        }),
+    });
+    let json = serde_json::to_value(&status).unwrap();
+    assert_eq!(json["pending"], "slateSync");
+    assert_eq!(
+        json["lastSync"]["exportFailed"],
+        serde_json::json!({"notes": 2, "path": "Exports\\Cours.pdf",
+            "reason": "Access is denied. (os error 5)"})
+    );
+    status.last_sync = status.last_sync.map(|last| LastSync {
+        export_failed: None,
+        ..last
+    });
+    let json = serde_json::to_value(&status).unwrap();
+    assert_eq!(json["lastSync"]["exportFailed"], serde_json::Value::Null);
+}
+
 #[test]
 fn the_blackboard_fields_have_the_shape_of_the_contract() {
     let mut status = TabletStatus::initial(false, TabletOptions::default());

@@ -15,12 +15,14 @@
   import KnownTablets from './tablet/KnownTablets.svelte';
   import TabletSettings from './tablet/TabletSettings.svelte';
 
-  let { app, onchange, onclose, ontest }: {
+  let { app, onchange, onclose, ontest, workBusy = false }: {
     app: AppState;
     onchange: (next: AppState) => void;
     onclose: () => void;
     /** Opens the tablet test. */
     ontest?: () => void;
+    /** The library is running an operation on its notes: the library folder cannot be changed meanwhile. */
+    workBusy?: boolean;
   } = $props();
 
   let error = $state<string | null>(null);
@@ -36,12 +38,15 @@
 
   onMount(() => tablet.start());
 
-  async function run(action: () => Promise<AppState>) {
+  /** Runs a change of the settings; false when it was refused (the error is shown). */
+  async function run(action: () => Promise<AppState>): Promise<boolean> {
     error = null;
     try {
       onchange(await action());
+      return true;
     } catch (e) {
       error = errorMessage(e);
+      return false;
     }
   }
 
@@ -61,9 +66,11 @@
     }
   }
 
-  function selectTheme(event: Event) {
-    const theme = (event.currentTarget as HTMLSelectElement).value as ThemePreference;
-    void run(() => api.setTheme(theme));
+  async function selectTheme(event: Event) {
+    const select = event.currentTarget as HTMLSelectElement;
+    const theme = select.value as ThemePreference;
+    // A refused save changes nothing: the field must not go on showing the choice.
+    if (!(await run(() => api.setTheme(theme)))) select.value = app.theme;
   }
 </script>
 
@@ -84,7 +91,7 @@
     </select>
   </label>
 
-  <LibrarySetting {app} {onchange} />
+  <LibrarySetting {app} {onchange} {workBusy} />
 
   <section class="settings-section" aria-labelledby="settings-tablet">
     <h3 id="settings-tablet">{t('settings.tablet')}</h3>

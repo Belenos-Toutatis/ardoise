@@ -522,15 +522,18 @@ fn apply_texture(pixmap: &mut Pixmap, paper: Paper, px_per_mm: f32) {
     }
 }
 
-/// Paints the page background: paper colour, template, texture.
-pub(crate) fn paint(pixmap: &mut Pixmap, background: &Background, scale: f32) {
+/// Paints the page background: paper colour, template, texture. `pixmap` is `page` at `scale`.
+pub(crate) fn paint(pixmap: &mut Pixmap, background: &Background, page: PageSize, scale: f32) {
     let paper = paper_color(background.paper);
     pixmap.fill(Color::from_rgba8(paper.r, paper.g, paper.b, 255));
     let px_per_mm = scale * UNITS_PER_MM;
     let palette = Palette::for_paper(is_dark(background.paper));
+    // The page's own size, as the vector exports and the snap grid use it. The pixmap's sides
+    // are rounded to whole pixels: 210 mm read back as 209.99 mm would hold one square less,
+    // and the centred grid would sit half a square away from the one the other outputs draw.
     let (width_mm, height_mm) = (
-        pixmap.width() as f32 / px_per_mm,
-        pixmap.height() as f32 / px_per_mm,
+        page.width as f32 / UNITS_PER_MM,
+        page.height as f32 / UNITS_PER_MM,
     );
     let mut canvas = Canvas {
         pixmap: &mut *pixmap,
@@ -687,7 +690,7 @@ fn texture_image(paper: Paper, page: PageSize) -> Option<Image> {
         template: Template::Blank,
         texture: true,
     };
-    paint(&mut pixmap, &plain, scale);
+    paint(&mut pixmap, &plain, page, scale);
     Some(image_from(&pixmap))
 }
 
@@ -720,7 +723,11 @@ mod tests {
                 ..Background::default()
             };
             let mut pixmap = Pixmap::new(210, 297).unwrap();
-            paint(&mut pixmap, &background, 0.01);
+            let page = PageSize {
+                width: 21_000,
+                height: 29_700,
+            };
+            paint(&mut pixmap, &background, page, 0.01);
             pixmap
         };
         let lined_page = drawn(Template::Lined);
@@ -730,6 +737,43 @@ mod tests {
         };
         assert!(darker(15..=17, 12), "no rule at 16 mm");
         assert!(darker(23..=25, 20), "no rule at 24 mm");
+    }
+
+    #[test]
+    fn a_grid_is_centred_on_the_page_whatever_the_pixel_size() {
+        // A4 landscape, 1024 px wide: 21 000 units make 724.04 px, rounded to 724, which read
+        // back is 209.99 mm. The grid is centred on the page's 210 mm (42 squares, no margin).
+        let page = PageSize {
+            width: 29_700,
+            height: 21_000,
+        };
+        let scale = 1024.0 / 29_700.0;
+        let background = Background {
+            template: Template::Grid5mm,
+            ..Background::default()
+        };
+        let mut pixmap = Pixmap::new(1024, 724).unwrap();
+        paint(&mut pixmap, &background, page, scale);
+        let px_per_mm = scale * UNITS_PER_MM;
+        // A column between two vertical lines (they are at 1, 6, 11 mm: 297 mm leaves 2 mm).
+        let x = (3.5 * px_per_mm) as u32;
+        let row = |mm: f32| (mm * px_per_mm).round() as u32;
+        let ink = |y: u32| pixmap.pixel(x, y).unwrap().red();
+        let paper = ink(row(1.25));
+        for line in [5.0, 10.0, 15.0] {
+            let y = row(line);
+            assert!(
+                (y - 1..=y + 1).any(|y| ink(y) < paper),
+                "no line at {line} mm"
+            );
+        }
+        for gap in [2.5, 7.5, 12.5] {
+            let y = row(gap);
+            assert!(
+                (y - 1..=y + 1).all(|y| ink(y) == paper),
+                "a line at {gap} mm"
+            );
+        }
     }
 
     #[test]

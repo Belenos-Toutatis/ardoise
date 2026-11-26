@@ -165,6 +165,8 @@ export class LibraryState {
   private dragPaths: string[] = [];
   private anchor: string | null = null;
   private sequence = 0;
+  /** The message `refresh` put in `error` when the listing could not be read: only that one goes when it is read again. */
+  #refreshError: string | null = null;
   private thumbnails = new Map<string, Promise<string | null>>();
   /** Length of each cached picture once known, and their total. */
   private thumbnailChars = new Map<string, number>();
@@ -296,6 +298,9 @@ export class LibraryState {
       // A move made while the listing was being read: the orders it holds are older than the grid's, which wins.
       this.listing = epoch === this.#orderEpoch || !this.listing ? listing : { ...listing, orders: this.listing.orders };
       this.trash = trash;
+      // The list is back: its loading error is over (the errors of actions are the user's to dismiss).
+      if (this.#refreshError !== null && this.error === this.#refreshError) this.error = null;
+      this.#refreshError = null;
       const known = new Set(listing.notes.map((n) => n.path));
       if (this.selected.some((path) => !known.has(path))) {
         this.selected = this.selected.filter((path) => known.has(path));
@@ -308,7 +313,10 @@ export class LibraryState {
       // Notes may have moved or changed: their handwriting hits too.
       if (queryWords(this.#query).length > 0) this.searchHandwritingSoon(false);
     } catch (error) {
-      if (mine === this.sequence) this.error = errorMessage(error);
+      if (mine === this.sequence) {
+        this.error = errorMessage(error);
+        this.#refreshError = this.error;
+      }
     }
   }
 
@@ -329,22 +337,39 @@ export class LibraryState {
     }
   }
 
-  /** Applies `action` to each note, keeps going after a failure and reports the first one. Returns the notes it was done for. */
-  private async each(notes: NoteSummary[], action: (note: NoteSummary) => Promise<unknown>): Promise<NoteSummary[]> {
-    this.error = null;
-    let first: string | null = null;
-    const done: NoteSummary[] = [];
-    for (const note of notes) {
-      try {
-        await action(note);
-        done.push(note);
-      } catch (error) {
-        first ??= errorMessage(error);
+  #writes: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Runs `job` once the writes asked before it are over and the listing was read again: a note then carries the stamp its
+   * file has now (two quick writes on one note, with the stamp of before the first, would be refused as « modified meanwhile »).
+   */
+  private inOrder<T>(job: () => Promise<T>): Promise<T> {
+    const next = this.#writes.then(job);
+    this.#writes = next.catch(() => undefined);
+    return next;
+  }
+
+  /**
+   * Applies `action` to each note (as the library holds it when its turn comes), keeps going after a failure and reports
+   * the first one. Returns the notes it was done for.
+   */
+  private each(notes: NoteSummary[], action: (note: NoteSummary) => Promise<unknown>): Promise<NoteSummary[]> {
+    return this.inOrder(async () => {
+      this.error = null;
+      let first: string | null = null;
+      const done: NoteSummary[] = [];
+      for (const note of notes) {
+        try {
+          await action(this.notes.find((now) => now.path === note.path) ?? note);
+          done.push(note);
+        } catch (error) {
+          first ??= errorMessage(error);
+        }
       }
-    }
-    if (first) this.error = first;
-    await this.refresh();
-    return done;
+      if (first) this.error = first;
+      await this.refresh();
+      return done;
+    });
   }
 
   dismissError(): void {
@@ -870,9 +895,17 @@ export class LibraryState {
 
   // --- Operations on notes -------------------------------------------------------------------
 
-  /** Creates a note in the current binder and returns it. */
+  #creating = false;
+
+  /** Creates a note in the current binder and returns it; asked again while one is being made, it makes none (an empty note nobody opens). */
   async createNote(): Promise<NoteSummary | undefined> {
-    return this.run(() => api.createNote(this.currentBinder, ''));
+    if (this.#creating) return undefined;
+    this.#creating = true;
+    try {
+      return await this.run(() => api.createNote(this.currentBinder, ''));
+    } finally {
+      this.#creating = false;
+    }
   }
 
   async createBinder(parent: string, name: string): Promise<boolean> {
@@ -1108,7 +1141,10 @@ export class LibraryState {
   }
 
   async toggleFavorite(note: NoteSummary): Promise<void> {
-    await this.run(() => api.setNoteFavorite(note.path, !note.favorite, note.stamp));
+    await this.inOrder(() => {
+      const now = this.notes.find((one) => one.path === note.path) ?? note;
+      return this.run(() => api.setNoteFavorite(now.path, !now.favorite, now.stamp));
+    });
   }
 
   async setFavorite(notes: NoteSummary[], favorite: boolean): Promise<void> {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LiveBatch, LiveEvent, LiveSnapshot, LiveStopped, MonitorInfo } from './live';
-import { LiveState } from './live-state.svelte';
+import type { LiveBatch, LiveEvent, LiveSnapshot, LiveStopped, LiveStyle, LiveViewState, MonitorInfo } from './live';
+import { LiveState, VIEW_SEND_MS } from './live-state.svelte';
 import { mockLibrary, resetMockLibrary } from './mock-data';
 import {
   mockLiveConfig,
@@ -181,6 +181,51 @@ describe('browser stand-in for live mode', () => {
     invoke('live_set_view', { view: { ...view, board: false } });
     expect(sub.last()?.page.background.paper).toBe('white');
     expect(sub.last()?.style).toEqual(red);
+  });
+
+  it('echoes no view or style that changes nothing, and two windows go on following each other both ways', async () => {
+    mockLiveConfig.pen = false;
+    mockLiveConfig.waitMs = 0;
+    const control = new LiveState();
+    const projector = new LiveState();
+    for (const live of [control, projector]) live.initial(await mockLiveSubscribe((batch) => live.receive(batch)));
+    const sub = await subscribe();
+    const whole = (invoke('live_start') as LiveSnapshot).view;
+    vi.advanceTimersByTime(1);
+    const setView = (view: LiveViewState) => Promise.resolve(invoke('live_set_view', { view }));
+    const setStyle = (style: LiveStyle) => Promise.resolve(invoke('live_set_style', { style }));
+    const next = () => vi.advanceTimersByTimeAsync(VIEW_SEND_MS);
+
+    // `0` on the projector over the whole page: nothing to echo, as in Rust.
+    const before = sub.events().length;
+    projector.changeView({ ...whole }, setView);
+    expect(sub.events().length).toBe(before);
+    // The control window zooms, then turns the laser pointer on: the projector follows both.
+    await next();
+    control.changeView({ ...whole, zoom: 2 }, setView);
+    expect(projector.view.zoom).toBe(2);
+    await next();
+    control.changeView({ ...control.view, laser: true }, setView);
+    expect(projector.view.laser).toBe(true);
+
+    // The other way round: the control window asks for what it shows already, then follows the projector.
+    await next();
+    control.changeView({ ...control.view }, setView);
+    await next();
+    projector.changeView({ ...projector.view, zoom: 3 }, setView);
+    expect(control.view.zoom).toBe(3);
+    await next();
+    projector.changeView({ ...projector.view, laser: false }, setView);
+    expect(control.view.laser).toBe(false);
+
+    // The swatch of the colour already chosen sends no snapshot; B turned on then gives the chalk to the toolbar.
+    const snapshots = sub.snapshots().length;
+    await control.changeStyle({ ...control.style, color: { ...control.style.color } }, setStyle);
+    expect(sub.snapshots()).toHaveLength(snapshots);
+    await next();
+    projector.changeView({ ...projector.view, board: true }, setView);
+    expect(control.style).toMatchObject({ tool: 'chalk', color: { r: 255, g: 255, b: 255, a: 255 } });
+    expect(projector.style.tool).toBe('chalk');
   });
 
   it('follows a snapshot with the stroke in progress, so a window never holds a partial stroke', async () => {

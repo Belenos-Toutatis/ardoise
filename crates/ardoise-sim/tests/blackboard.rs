@@ -1296,7 +1296,7 @@ fn the_blackboards_pages_are_deleted_only_with_a_permission() {
     let off = options(true, false);
 
     // Both known, nothing connected, deletion off: a sync asked (for the Slate) does nothing
-    // for the blackboard that connects.
+    // for the blackboard that connects, and keeps waiting for the Slate (Q28).
     let library = new_library();
     let tablet = SimTablet::new(SimConfig::slate_large());
     let board = board_with_pages(Some(tablet.clock()));
@@ -1316,10 +1316,14 @@ fn the_blackboards_pages_are_deleted_only_with_a_permission() {
     );
     run.wait(|s| s.connection == Connection::Searching);
     run.service.sync_now(false).unwrap();
-    run.wait(|s| s.pending == Some(ardoise_device::service::Pending::Sync));
+    run.wait(|s| s.pending == Some(ardoise_device::service::Pending::SlateSync));
     board.power_on();
-    let status = run.wait(|s| s.connection == Connection::Connected && s.pending.is_none());
+    let status = run.wait(|s| s.connection == Connection::Connected);
     assert_eq!(status.active, Some(TabletKind::Blackboard));
+    assert_eq!(
+        status.pending,
+        Some(ardoise_device::service::Pending::SlateSync)
+    );
     assert_eq!(status.error, None);
     assert_eq!((board.stats().downloads, board.stored_page_count()), (0, 3));
     run.service.shutdown();

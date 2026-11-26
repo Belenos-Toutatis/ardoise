@@ -7,7 +7,9 @@
 
 use std::path::Path;
 
-use windows::Win32::Foundation::{GlobalFree, HGLOBAL, HWND};
+use windows::Win32::Foundation::{
+    ERROR_CANCELLED, GetLastError, GlobalFree, HGLOBAL, HWND, WIN32_ERROR,
+};
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, DEVMODEW, DIB_RGB_COLORS, DM_ORIENTATION, DeleteDC,
     GetDeviceCaps, HALFTONE, HDC, HORZRES, LOGPIXELSX, LOGPIXELSY, ResetDCW, SRCCOPY,
@@ -104,6 +106,7 @@ fn sheet_of(hdc: HDC) -> Sheet {
 /// Draws the sheets `sheets` (each the indexes of the notes of `sources` it holds) on `hdc`, in
 /// the orientation [`sheet_orientation`] gives. `output` names a file to print to (a "print to
 /// file" printer), else the printer sends the job to its port. Returns the number of sheets
+/// printed, or `None` when the user cancelled the printer's own file window before anything was
 /// printed; the job is aborted on the first failure.
 pub fn print_job(
     hdc: HDC,
@@ -113,7 +116,7 @@ pub fn print_job(
     sheets: &[Vec<usize>],
     options: &PrintOptions,
     output: Option<&Path>,
-) -> CommandResult<u32> {
+) -> CommandResult<Option<u32>> {
     let name = wide(title);
     let file = output.map(|path| wide(&path.to_string_lossy()));
     let info = DOCINFOW {
@@ -126,6 +129,12 @@ pub fn print_job(
     // SAFETY: `hdc` is a live printer device context and `info` points to null-terminated
     // strings that outlive the call.
     if unsafe { StartDocW(hdc, &info) } <= 0 {
+        // Read at once, before anything else can change it. "Microsoft Print to PDF" asks for the
+        // file inside this call, and closing that window is the user's choice, not a fault.
+        // SAFETY: plain read of the thread's last error.
+        if is_cancel(unsafe { GetLastError() }) {
+            return Ok(None);
+        }
         return Err(print_error("the printer refused the document"));
     }
     let mut pages = 0;
@@ -148,7 +157,13 @@ pub fn print_job(
     if unsafe { EndDoc(hdc) } <= 0 {
         return Err(print_error("the printer could not finish the document"));
     }
-    Ok(pages)
+    Ok(Some(pages))
+}
+
+/// Whether `error`, read right after a failed `StartDocW`, says the user cancelled (the printer's
+/// "save as" window closed): `ERROR_CANCELLED`.
+fn is_cancel(error: WIN32_ERROR) -> bool {
+    error == ERROR_CANCELLED
 }
 
 /// One sheet: the notes `notes` (at most the number per sheet), each in its cell.
@@ -353,7 +368,13 @@ fn finish(
     } else {
         title
     };
-    let pages = print_job(dialog.hDC, devmode, &title, sources, &sheets, options, None)?;
+    let Some(pages) = print_job(dialog.hDC, devmode, &title, sources, &sheets, options, None)?
+    else {
+        return Ok(PrintResult {
+            printed: false,
+            pages: 0,
+        });
+    };
     Ok(PrintResult {
         printed: true,
         pages,
@@ -497,7 +518,7 @@ mod tests {
         unsafe {
             let _ = DeleteDC(hdc);
         }
-        assert_eq!(pages.unwrap(), 3);
+        assert_eq!(pages.unwrap(), Some(3));
         let sizes = page_sizes(&output);
         println!("pages of the printed PDF (points): {sizes:?}");
         assert_eq!(sizes.len(), 3);
@@ -538,8 +559,18 @@ mod tests {
         unsafe {
             let _ = DeleteDC(hdc);
         }
-        assert_eq!(pages.unwrap(), 1);
+        assert_eq!(pages.unwrap(), Some(1));
         assert_eq!(page_sizes(&partial).len(), 1);
+    }
+
+    /// Closing the printer's own "save as" window cannot be driven by a test: only the mapping
+    /// of the error it leaves is checked.
+    #[test]
+    fn only_error_cancelled_after_start_doc_is_the_users_cancel() {
+        assert!(is_cancel(ERROR_CANCELLED));
+        assert!(!is_cancel(WIN32_ERROR(0)));
+        // ERROR_INSUFFICIENT_BUFFER, which some printer drivers leave on a real fault.
+        assert!(!is_cancel(WIN32_ERROR(122)));
     }
 
     /// Four notes, two or four to a sheet, printed to "Microsoft Print to PDF": the sheets turn
@@ -587,7 +618,7 @@ mod tests {
             unsafe {
                 let _ = DeleteDC(hdc);
             }
-            (pages.unwrap(), page_sizes(&output))
+            (pages.unwrap().unwrap(), page_sizes(&output))
         };
         // Two per sheet: portrait notes make landscape sheets (5 notes: 3 sheets).
         let sheets = crate::print::selected_sheets(5, 2, &[]);

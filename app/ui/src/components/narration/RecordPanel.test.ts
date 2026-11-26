@@ -6,9 +6,10 @@ import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setLocale } from '../../lib/i18n.svelte';
 import { resetMockNarration } from '../../lib/mock-narration';
+import type { CaptureState, NarrationStatus } from '../../lib/video';
 import { monitorSettled } from './MicrophonePicker.svelte';
 import RecordPanel from './RecordPanel.svelte';
-import { NarrationRecorder } from './recorder.svelte';
+import { NarrationRecorder, type RecorderCommands } from './recorder.svelte';
 
 let cleanup: (() => void) | null = null;
 
@@ -106,5 +107,71 @@ describe('the replace question', () => {
     );
     expect(action('narration-replace-yes')!.textContent?.trim()).toBe('Replace');
     expect(action('narration-replace-no')!.textContent?.trim()).toBe('Keep the old one');
+  });
+});
+
+describe('a recording that reaches its longest length', () => {
+  it('is stopped and saved as « Arrêter et enregistrer » does, once, and the panel says why', async () => {
+    let capture: CaptureState = 'receiving';
+    const status = (): NarrationStatus => ({
+      state: 'recording',
+      capture,
+      level: { peak: 0, rms: 0 },
+      elapsedMs: 14_340_000,
+      device: 'Fake microphone',
+      failure: null,
+      pending: false,
+    });
+    const commands = {
+      narrationStart: vi.fn(async () => undefined),
+      narrationStatus: vi.fn(async () => status()),
+      narrationStop: vi.fn(async () => ({ stamp: null, durationMs: 14_340_000, pages: 1 })),
+      narrationRetry: vi.fn(),
+      narrationDiscard: vi.fn(),
+    };
+    const recorder = new NarrationRecorder(commands as unknown as RecorderCommands);
+    const onstop = vi.fn(() => void recorder.stop(true, null));
+    const target = document.createElement('div');
+    document.body.append(target);
+    const component = mount(RecordPanel, {
+      target,
+      props: {
+        recorder,
+        device: null,
+        ondevice: vi.fn(),
+        onstart: vi.fn(),
+        onstop,
+        oncancel: vi.fn(),
+        open: true,
+        openLabel: 'Enregistrer',
+      },
+    });
+    cleanup = () => {
+      recorder.dispose();
+      unmount(component);
+      target.remove();
+    };
+    const notice = () => target.querySelector('[data-slot="record-limit"]');
+
+    expect(await recorder.start(null, { kind: 'live' })).toBe(true);
+    await vi.waitFor(() => expect(recorder.status?.capture).toBe('receiving'));
+    expect(onstop).not.toHaveBeenCalled();
+    capture = 'full';
+    await vi.waitFor(() => expect(recorder.phase).toBe('idle'));
+    expect(onstop).toHaveBeenCalledTimes(1);
+    expect(commands.narrationStop).toHaveBeenCalledTimes(1);
+    expect(commands.narrationStop).toHaveBeenCalledWith(true, null, null, null);
+    await tick();
+    expect(notice()?.textContent).toBe("L'enregistrement s'est arrêté de lui-même : il a atteint sa durée maximale (4 heures).");
+    setLocale('en');
+    await tick();
+    expect(notice()?.textContent).toBe('The recording stopped by itself: it reached its longest length (4 hours).');
+
+    // The next recording starts afresh.
+    capture = 'receiving';
+    expect(await recorder.start(null, { kind: 'live' })).toBe(true);
+    await tick();
+    expect(notice()).toBeNull();
+    await recorder.stop(false, null);
   });
 });

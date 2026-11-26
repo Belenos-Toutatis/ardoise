@@ -55,14 +55,16 @@ pub use error::MediaError;
 pub use estimate::estimate_export_time;
 pub use export::{
     AnimationExport, ExportPlan, ExportProgress, FormatOptions, export_animation, page_frame_size,
-    plan_export,
+    plan_export, plan_export_from_header,
 };
 pub use mp4::{
     CISCO_NOTICE, CodecStatus, Mp4Backend, Mp4Options, OPENH264_LICENSE, OPENH264_SHA256,
     OPENH264_URL, OPENH264_VERSION, OpenH264Codec, create_mp4, media_foundation_available,
     probe_mp4_animation,
 };
-pub use narration::{Narration, NarrationBase, decode_narration, encode_narration, wav_bytes};
+pub use narration::{
+    MAX_NARRATION_FRAMES, Narration, NarrationBase, decode_narration, encode_narration, wav_bytes,
+};
 pub use narration::{NarrationHeader, narration_header};
 pub use opus::{OPUS_FRAME_SAMPLES, OpusEncoder, OpusHead, OpusPacket, default_opus_bitrate};
 pub use settings::{

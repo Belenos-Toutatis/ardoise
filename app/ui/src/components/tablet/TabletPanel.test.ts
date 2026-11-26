@@ -268,6 +268,72 @@ describe('tablet panel: sync', () => {
     expect(text).not.toContain('a continué');
   });
 
+  it('says that the automatic export could not be written, as a notice of a sync that did not fail (Q28)', async () => {
+    const { q } = await render();
+    const failed = { notes: 2, path: 'Exports\\2026-11-26 Cours.pdf', reason: 'Accès refusé. (os error 5)' };
+    mockTabletPatch({ lastSync: { at: Date.now(), saved: ['a', 'b', 'c'], deleted: 3, error: null, exportFailed: failed }, error: null });
+    await settle();
+    const notice = q('[data-slot="export-failed"]')!;
+    expect(notice.getAttribute('role')).toBe('status');
+    expect(notice.classList.contains('error')).toBe(false);
+    expect(notice.getAttribute('data-count')).toBe('2');
+    const text = notice.textContent!;
+    expect(text).toContain('2 notes ont bien été importées');
+    expect(text).toContain("leur export automatique n'a pas pu être écrit");
+    expect(text).toContain('« Exports\\2026-11-26 Cours.pdf »');
+    expect(text).toContain('Accès refusé. (os error 5)');
+    expect(text).toContain('lecture seule');
+    expect(text).toContain('_ardoise\\diagnostics\\autoexport.log');
+    expect(text).not.toContain('a échoué');
+    // The sync itself is said as a sync that worked, and nothing else is shown as an error.
+    const last = q('[data-slot="last-sync"]')!;
+    expect(last.getAttribute('data-failed')).toBeNull();
+    expect(last.textContent).toContain('3 notes enregistrées.');
+    expect(q('[data-slot="tablet-error"]')).toBeNull();
+    expect(q('[role="alert"]')).toBeNull();
+
+    // One note.
+    mockTabletPatch({ lastSync: { at: Date.now(), saved: ['a'], deleted: 1, error: null, exportFailed: { ...failed, notes: 1 } } });
+    await settle();
+    expect(q('[data-slot="export-failed"]')!.textContent).toContain(
+      "Une note a bien été importée, mais son export automatique n'a pas pu être écrit : « Exports\\2026-11-26 Cours.pdf » (Accès refusé. (os error 5))",
+    );
+    // A sync whose exports were all written says nothing of them.
+    mockTabletPatch({ lastSync: { at: Date.now(), saved: ['a'], deleted: 1, error: null, exportFailed: null } });
+    await settle();
+    expect(q('[data-slot="export-failed"]')).toBeNull();
+  });
+
+  it('says a real failure of the sync first, then the automatic export that could not be written', async () => {
+    const { q, target } = await render();
+    const error = { code: 'libraryAccess', message: 'disk full' };
+    const exportFailed = { notes: 1, path: 'Exports\\a.pdf', reason: 'Accès refusé. (os error 5)' };
+    mockTabletPatch({ lastSync: { at: Date.now(), saved: ['a'], deleted: 1, error, exportFailed }, error });
+    await settle();
+    const last = q('[data-slot="last-sync"]')!;
+    expect(last.getAttribute('data-failed')).toBe('true');
+    expect(last.getAttribute('role')).toBe('alert');
+    expect(last.textContent).toContain('a échoué');
+    const notice = q('[data-slot="export-failed"]')!;
+    expect(notice.getAttribute('role')).toBe('status');
+    expect(notice.classList.contains('error')).toBe(false);
+    // The failure comes first, in the panel's banner and in the last sync.
+    const shown = [...target.querySelectorAll('[data-slot="tablet-error"], [data-slot="last-sync"], [data-slot="export-failed"]')];
+    expect(shown.map((el) => el.getAttribute('data-slot'))).toEqual(['tablet-error', 'last-sync', 'export-failed']);
+  });
+
+  it('says the automatic export that could not be written at the end of a sync of the simulated tablet, in English too', async () => {
+    mockTablet.exportFailure = { path: 'Exports\\2026-11-26.pdf', reason: 'Access is denied. (os error 5)' };
+    const { q, action, click } = await render({ locale: 'en' });
+    await click(action('sync'));
+    await beat(3);
+    expect(q('[data-slot="last-sync"]')!.textContent).toContain('3 notes saved.');
+    const text = q('[data-slot="export-failed"]')!.textContent!;
+    expect(text).toContain('3 notes were imported, but their automatic export could not be written');
+    expect(text).toContain('"Exports\\2026-11-26.pdf"');
+    expect(text).toContain('Access is denied. (os error 5)');
+  });
+
   it('says that a page cut short stays on the tablet', async () => {
     const { q } = await render();
     const cut = { code: 'pageCutShort', message: 'the tablet sent 300 of the 812 bytes of a page' };
@@ -517,6 +583,28 @@ describe('tablet panel: no tablet registered', () => {
     expect(q('[data-slot="tablet-options"]')).toBeNull();
     // The test of the tablet stays reachable.
     expect(action('test')).not.toBeNull();
+  });
+
+  it('offers no addition while Bluetooth is off, and says why under the buttons', async () => {
+    const { q, action, target } = await render({ forget: true });
+    expect(q('[data-slot="add-unavailable"]')).toBeNull();
+    // The service would refuse with the error its status holds already, and say nothing more.
+    mockTabletPatch({ connection: 'unavailable', error: { code: 'bluetoothOff', message: '' } });
+    await settle();
+    expect(action('register')!.disabled).toBe(true);
+    expect(action('add-blackboard')!.disabled).toBe(true);
+    expect(q('[data-slot="add-unavailable"]')!.textContent).toBe(
+      "Impossible d'ajouter une tablette pour le moment. Le Bluetooth est désactivé : activez-le dans les paramètres de Windows.",
+    );
+    // The « Tablets » tab says so too.
+    const known = target.querySelector('[data-tab-panel="tablets"]')!;
+    expect(known.querySelector<HTMLButtonElement>('[data-action="register"]')!.disabled).toBe(true);
+    expect(known.querySelector('[data-slot="add-unavailable"]')).not.toBeNull();
+    // Bluetooth back: both again.
+    mockTabletPatch({ connection: 'notRegistered', error: null });
+    await settle();
+    expect(action('register')!.disabled).toBe(false);
+    expect(q('[data-slot="add-unavailable"]')).toBeNull();
   });
 
   it('opens the wizard on its warning', async () => {

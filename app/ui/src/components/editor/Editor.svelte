@@ -110,7 +110,7 @@
   } from '../../lib/editor/objects';
   import type { Vec } from '../../lib/editor/geometry';
   import type { EquationDrawing } from '../../lib/equation';
-  import { paperRgb } from '../../lib/live-render';
+  import { isDarkPaper, paperRgb } from '../../lib/live-render';
   import { LINE_HEIGHT, registerTextFonts } from '../../lib/text';
   import type { PixelsRef } from '../../lib/background';
   import { pixelsOf, removeBackgroundImage, setBackgroundImage, setImageFit, setImageOpacity } from '../../lib/editor/image';
@@ -519,6 +519,8 @@
     const [r, g, b] = doc ? paperRgb(doc.note.background.paper) : [255, 255, 255];
     return `rgb(${r}, ${g}, ${b})`;
   });
+  /** The note's paper is dark: what the panel writes over it is light. */
+  const paperDark = $derived(doc ? isDarkPaper(doc.note.background.paper) : false);
   /** The split panel is open or a replay runs: the tabs that edit the note are disabled. */
   const locked = $derived(split !== null || replaying);
   /** The rail's badges (docs/design/side-panel.md, §4): layers, a layer in use hidden, recording, a share running. */
@@ -2829,7 +2831,8 @@
     }
     if (action?.kind === 'save') {
       e.preventDefault();
-      if (dirty) void save();
+      // `dirty` ignores the title: a title typed alone is renamed by `save` too.
+      if (dirty || titleEdited()) void save();
       return;
     }
     // Ctrl + P: Ardoise's printing of the note, like the toolbar's button (never the web view's; held down it asks once).
@@ -2844,7 +2847,8 @@
     }
     if (leaving || equationAsk) return;
     // A dialog or the split panel is open: the editing keys wait; Ctrl + W closes the panel.
-    if (exporting || printing || video || share.panelOpen || revisionDialog) return;
+    // The recovery question (`offer`) and any other modal too: their answer comes first.
+    if (exporting || printing || video || share.panelOpen || revisionDialog || offer || modalOpen()) return;
     if (split) {
       if (closes) {
         e.preventDefault();
@@ -3222,6 +3226,7 @@
             editing={equationEdit.id !== null}
             color={equationColor}
             paper={paperCss}
+            darkPaper={paperDark}
             left={place.left}
             top={place.top}
             width={place.width}

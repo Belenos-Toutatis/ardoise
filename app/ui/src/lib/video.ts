@@ -103,10 +103,11 @@ export type NarrationTarget =
 
 /**
  * `silent`: only exact digital silence for a second or more: Windows blocks desktop apps from the
- * microphone (Settings > Privacy & security > Microphone), or a hardware mute.
+ * microphone (Settings > Privacy & security > Microphone), or a hardware mute. `full`: the recording
+ * reached the longest narration a note reads back (4 hours) and stopped by itself; the stop saves it.
  */
 export type CaptureState =
-  'waiting' | 'noData' | 'receiving' | 'silent' | 'failed';
+  'waiting' | 'noData' | 'receiving' | 'silent' | 'failed' | 'full';
 
 export interface NarrationStatus {
   state: 'idle' | 'monitoring' | 'recording';

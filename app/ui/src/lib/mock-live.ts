@@ -1610,7 +1610,12 @@ function runCommand(s: Session, command: LiveCommand): void {
 
 function setView(s: Session, requested: LiveViewState): void {
   const zoom = Math.min(8, Math.max(1, Number.isFinite(requested.zoom) ? requested.zoom : 1));
-  const view = { ...requested, zoom };
+  const { width, height } = s.pages[s.pageIndex].page;
+  const within = (value: number, max: number) => (Number.isFinite(value) ? Math.min(max, Math.max(0, value)) : max / 2);
+  const view = { ...requested, zoom, x: within(requested.x, width), y: within(requested.y, height) };
+  // Like Rust (`LiveSession::set_view`): a view that changes nothing is not broadcast, no echo.
+  const { view: was } = s;
+  if (view.zoom === was.zoom && view.x === was.x && view.y === was.y && view.board === was.board && view.laser === was.laser) return;
   const boardChanged = view.board !== s.view.board;
   s.view = view;
   if (!boardChanged) {
@@ -1780,7 +1785,13 @@ export function mockLiveInvoke(command: string, args: Record<string, unknown>): 
       return stopSession();
     case 'live_set_style': {
       const s = running();
-      s.style = copy(args.style as LiveStyle);
+      const style = copy(args.style as LiveStyle);
+      if (Number.isFinite(style.width) && style.width > 0) style.width = Math.min(5000, Math.max(1, style.width));
+      // Like Rust (`LiveSession::set_style`): a style that changes nothing sends no snapshot.
+      const { style: was } = s;
+      const sameColour = (['r', 'g', 'b', 'a'] as const).every((c) => style.color?.[c] === was.color[c]);
+      if (style.tool === was.tool && style.width === was.width && sameColour) return undefined;
+      s.style = style;
       broadcastSnapshot();
       return undefined;
     }

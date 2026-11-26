@@ -103,12 +103,26 @@ pub(super) enum Loaded<T> {
     Unreadable(io::Error),
     /// Not a tags file, or too large.
     Damaged(FileStamp),
+    /// Written by a newer version in a shape this one cannot read (its `version` is above the
+    /// one given to [`load`]): never to be replaced.
+    Newer(FileStamp),
     Readable(T, FileStamp),
 }
 
-/// Reads and parses `path`; the stamp describes the bytes parsed (or the version just before
-/// them, if the file kept changing: a write then notices it).
-pub(super) fn load<T: serde::de::DeserializeOwned>(path: &Path, max_bytes: u64) -> Loaded<T> {
+/// Only the version of a file, to tell a newer one from a damaged one.
+#[derive(Deserialize)]
+struct VersionOnly {
+    version: u64,
+}
+
+/// Reads and parses `path` (`current_version`: the version this code writes); the stamp
+/// describes the bytes parsed (or the version just before them, if the file kept changing: a
+/// write then notices it).
+pub(super) fn load<T: serde::de::DeserializeOwned>(
+    path: &Path,
+    max_bytes: u64,
+    current_version: u64,
+) -> Loaded<T> {
     let stamp_of = |path: &Path| FileStamp::of(path);
     let mut attempt = 1;
     loop {
@@ -141,7 +155,11 @@ pub(super) fn load<T: serde::de::DeserializeOwned>(path: &Path, max_bytes: u64) 
         }
         return match serde_json::from_slice::<T>(&bytes) {
             Ok(file) => Loaded::Readable(file, before),
-            Err(_) => Loaded::Damaged(before),
+            // The version is read before judging the file: a newer shape is not damage.
+            Err(_) => match serde_json::from_slice::<VersionOnly>(&bytes) {
+                Ok(found) if found.version > current_version => Loaded::Newer(before),
+                _ => Loaded::Damaged(before),
+            },
         };
     }
 }
@@ -233,10 +251,15 @@ impl Library {
             extra: Map::new(),
         };
         let main_path = state.path.clone();
-        state.main = match load(&main_path, MAX_FILE_BYTES) {
+        state.main = match load(&main_path, MAX_FILE_BYTES, VERSION) {
             Loaded::Missing => Main::Missing,
             Loaded::Unreadable(e) => Main::Unreadable(e),
             Loaded::Damaged(stamp) => Main::Damaged(stamp),
+            // Not understood, and never moved aside or replaced: `newer` stops every write.
+            Loaded::Newer(stamp) => {
+                state.newer = Some(main_path.clone());
+                Main::Readable(stamp)
+            }
             Loaded::Readable(file, stamp) => {
                 state.merge(&main_path, file);
                 Main::Readable(stamp)
@@ -267,9 +290,14 @@ impl Library {
         for name in names {
             let path = dir.join(name);
             // A copy that cannot be understood is left alone: it is never deleted.
-            if let Loaded::Readable(file, stamp) = load(&path, MAX_FILE_BYTES) {
-                state.merge(&path, file);
-                state.copies.push(MergedCopy { path, stamp });
+            match load(&path, MAX_FILE_BYTES, VERSION) {
+                Loaded::Readable(file, stamp) => {
+                    state.merge(&path, file);
+                    state.copies.push(MergedCopy { path, stamp });
+                }
+                // Not merged, not deleted, and no write while it is there.
+                Loaded::Newer(_) if state.newer.is_none() => state.newer = Some(path),
+                _ => {}
             }
         }
         Ok(state)
@@ -965,6 +993,38 @@ mod tests {
             fs::read(main_path(&library)).unwrap(),
             br#"{"version":1,"tags":{}}"#
         );
+    }
+
+    /// A newer version may change the shape of the file: it is still its version that decides,
+    /// not whether this version can parse the rest (it used to be moved aside as damaged).
+    #[test]
+    fn a_newer_version_in_another_shape_is_never_replaced() {
+        let (_dir, library) = new_library();
+        let meta = library.meta_dir();
+        let content = br#"{"version":2,"tags":[{"name":"physique","color":{"id":"blue"}}]}"#;
+        fs::write(main_path(&library), content).unwrap();
+        assert_eq!(library.tag_colors().unwrap(), colors(&[]));
+
+        let error = library.set_tag_color("a", Some("red")).unwrap_err();
+        assert!(
+            matches!(error, LibraryError::TagColorsNewer { ref path } if *path == main_path(&library))
+        );
+        assert_eq!(fs::read(main_path(&library)).unwrap(), content);
+        assert_eq!(names_in(&meta), [TAG_COLORS_FILE]);
+
+        // A copy of that shape stops the writes as well, and stays.
+        fs::write(main_path(&library), br#"{"version":1,"tags":{}}"#).unwrap();
+        let copy = meta.join(COPY_NAME);
+        fs::write(&copy, content).unwrap();
+        let error = library.set_tag_color("a", Some("red")).unwrap_err();
+        assert!(matches!(error, LibraryError::TagColorsNewer { ref path } if *path == copy));
+        assert_eq!(fs::read(&copy).unwrap(), content);
+
+        // A file without a version is still damaged, and is moved aside.
+        fs::remove_file(&copy).unwrap();
+        fs::write(main_path(&library), br#"{"tags":[]}"#).unwrap();
+        library.set_tag_color_at("a", Some("red"), T0).unwrap();
+        assert!(meta.join(format!("tags.damaged-{T0}.json")).exists());
     }
 
     #[test]

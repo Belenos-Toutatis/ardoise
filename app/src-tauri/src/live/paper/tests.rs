@@ -27,6 +27,7 @@ use super::{
 use crate::background::tests::halves;
 use crate::background::{Staged, Staging, key_of};
 use crate::library::tests::library;
+use crate::live::pen::tests::{at_once, begin, end, points};
 
 const T0: f64 = 1_792_843_200_000.0;
 
@@ -774,6 +775,67 @@ fn a_worksheet_without_ink_follows_the_tablet_and_one_written_on_stays() {
     assert_eq!(snapshot.view, LiveViewState::whole(A5_PORTRAIT));
     write_at(&mut session, 4_000, 6_000, T0 + 2_000.0);
     let point = session.pages()[0].note.strokes.last().unwrap().points[0];
+    assert_eq!((point.x, point.y), (4_000.0, 6_000.0));
+}
+
+/// The image goes while both pens write on the worksheet held fixed, the tablet turned since: their strokes end first,
+/// in the frame they were written in, and turn with the page's ink (as when the tablet is turned, `hold`); what the pens
+/// write next is a stroke of its own, landing as their points come.
+#[test]
+fn removing_the_image_under_strokes_in_progress_ends_them_before_the_page_turns() {
+    let run = |lifted: bool| {
+        let mut session = running();
+        set_image(
+            &mut session,
+            placed("fiche.png", A5, (40, 20), ImageFit::Contain),
+            pixels_of(40, 20),
+        );
+        write_at(&mut session, 3_000, 2_000, T0);
+        session.reorient(
+            A5.width,
+            A5.height,
+            Orientation::PortraitLeft,
+            &mut Vec::new(),
+        );
+        let mut out = Vec::new();
+        session.records(&[pen(4_000, 6_000, 500)], T0 + 1_000.0, &mut out);
+        let begun = session.computer_call(begin(1, 0, at_once(&[5_000.0, 5_100.0])), T0, &mut out);
+        assert_eq!(begun, Ok(true));
+        if lifted {
+            session.records(&[LiveRecord::ProximityOut], T0 + 1_005.0, &mut out);
+            let ended = session.computer_call(end(1, Vec::new()), T0 + 5.0, &mut out);
+            assert_eq!(ended, Ok(true));
+        }
+        let mut out = Vec::new();
+        session
+            .set_page_image(0, ImageChange::Remove, &mut out)
+            .unwrap();
+        (session, out)
+    };
+    let (lifted, _) = run(true);
+    let (mut session, out) = run(false);
+    let ends = out
+        .iter()
+        .filter(|event| matches!(event, LiveEvent::StrokeEnd { .. }))
+        .count();
+    assert_eq!(ends, 2, "both strokes end before the page turns");
+    assert_eq!(session.pages()[0].note.page, A5_PORTRAIT);
+    assert_eq!(
+        session.pages()[0].note.strokes,
+        lifted.pages()[0].note.strokes,
+        "turned with the page, as strokes ended just before"
+    );
+    let mut out = Vec::new();
+    let more = session.computer_call(points(1, at_once(&[5_200.0])), T0 + 10.0, &mut out);
+    assert_eq!(more, Ok(false), "the computer's stroke is over");
+    session.records(
+        &[pen(4_000, 6_000, 500), LiveRecord::ProximityOut],
+        T0 + 1_010.0,
+        &mut out,
+    );
+    let strokes = &session.pages()[0].note.strokes;
+    assert_eq!(strokes.len(), lifted.pages()[0].note.strokes.len() + 1);
+    let point = strokes.last().unwrap().points[0];
     assert_eq!((point.x, point.y), (4_000.0, 6_000.0));
 }
 

@@ -126,8 +126,10 @@ OR Apache-2.0, already in the tree through tokio) for clients bound to other loo
     twice and gave up (`ERR_TOO_MANY_RETRIES`, 2026-11-03). A waiting connection takes no room from others: it is
     the first closed to make room. A first byte that is not a letter is no HTTP request — above all a browser
     trying `https://` (a TLS handshake starts with 0x16) — and is closed at once, so that the browser falls back
-    to `http://` without waiting; **an answer written within 5 s** (the largest, a script of about 200 KB, takes milliseconds on a LAN;
-    the picture of a live page's paper has its own limits, see "The paper of a live page"),
+    to `http://` without waiting; **an answer written as the client reads it**, each 64 KiB within 15 s and the whole
+    within 5 minutes (`Limits::stall`, `Limits::paper_answer`, as the picture of a live page's paper, see "The paper of a
+    live page"): the largest file, the WebAssembly module of about 2.7 MB, needed more than 4 Mbit/s to go within the 5 s
+    allowed before (2026-11 audit), and a viewer on a slow Wi-Fi was left without any stroke,
     then the browser closes first (the server waits up to 2 s, see "Through a school's filtering proxy"). A head is parsed again only when a blank line may have arrived.
     `TCP_NODELAY` on every socket (no Nagle delay on the stream).
 
@@ -172,26 +174,79 @@ bytes. The server only ever does `map.get(path)`: `/assets/../x`, `/assets/%2e%2
 - **Code**: 6 characters drawn uniformly (rejection sampling on `getrandom` bytes) from the 31 unambiguous symbols
   `ABCDEFGHJKMNPQRSTUVWXYZ23456789` (no `0 O 1 I L`): 31⁶ ≈ 8.9 × 10⁸ codes. New for each share. Shown as two
   groups of three (`K7M Q2X`); the page accepts it in any case, with or without spaces or a dash.
-- **Token**: 32 random bytes in hex, one per successful join, valid until the share stops; at most 8 per address
-  (an address's new join forgets its own oldest, never another address's) and 256 in all (then the oldest token of
-  the address that holds the most is forgotten: an address with a single token, the projector, keeps it while
-  others hold several). Compared in constant time. An address that holds a token may use the reserved connection
-  slots (above).
-- **Attempts**, per IP address: at most **5 wrong codes in 5 minutes**; the 6th attempt (right or wrong) within the
-  window gets `429` with the seconds until the oldest wrong code is 5 minutes old. A right code clears the
-  address's record. At most 4 096 addresses remembered: when all have running records, nothing is evicted and a
-  new address gets `429` until the first record expires (cycling through addresses gains nothing). **Nearby
-  addresses have room of their own**: an address on the same /24 network as one of this PC's addresses (found at
-  share start by `addresses::local_ipv4()`), or one of the first 64 addresses that joined, keeps its record in a
+- **Client**: what the attempts and the tokens are counted for. A browser straight on the network is its IP address.
+  A request that came through a proxy and names the PC it is forwarded for is the pair (proxy's address, PC's
+  address); one through a proxy that names no PC is the proxy's address, as a browser would be (see "Behind a proxy"
+  below).
+- **Token**: 32 random bytes in hex, one per successful join, valid until the share stops; at most 8 per client
+  (a client's new join forgets its own oldest, never another client's), 128 per connection address whatever PCs it
+  names, and 256 in all. When an address is at its 128, or the whole at 256, the oldest token of the client that
+  holds the most, of the address that holds the most, is forgotten: a client with a single token, the projector,
+  keeps it while others hold several. Compared in constant time. An address that holds a token (for any of its
+  clients) may use the reserved connection slots (above).
+- **Attempts**, per client: at most **5 wrong codes in 5 minutes**; the 6th attempt (right or wrong) within the
+  window gets `429` with the seconds until the client's oldest wrong code is 5 minutes old. A right code clears that
+  client's wrong codes, never those of the other PCs behind the same proxy. Each connection address also has at most
+  **40 wrong codes in 5 minutes** in all, whatever PCs its requests name (below). The records are kept per
+  connection address (each wrong code with the PC it was typed for, at most 40 that still count), at most 4 096
+  addresses: when all have running records, nothing is evicted and a new address gets `429` until the first record
+  expires (cycling through addresses gains nothing). **Nearby addresses have room of their own**: an address on the
+  same /24 network as one of this PC's addresses (found at share start by `addresses::local_ipv4()`), or one of the
+  first 64 addresses that joined (its record then moves to that table with what it holds), keeps its record in a
   second table that is never full by construction (at most 254 addresses per address of this PC, plus 64). PCs with
   thousands of addresses elsewhere on a large network therefore cannot keep the projector of the classroom's
-  network from typing the code; nearby addresses still have their 5 wrong codes in 5 minutes. Per address only: a
-  classmate's PC can lock itself out, never the projector's PC.
+  network from typing the code; nearby addresses still have their limits. A classmate's PC can lock itself out,
+  never the projector's PC, as long as the two are not one client: straight on the network, or behind a proxy that
+  names its PCs. Behind a proxy that names no PC, every PC behind it is one client, as before.
+- **Behind a proxy** (decided by the user on 2026-11-26, Q28, knowing the risk). At school every browser goes through
+  the filtering proxy, even to a local address (see "Through a school's filtering proxy"): the share saw one address
+  for the whole school, so a pupil who typed five wrong codes kept the projector's PC from typing the code for five
+  minutes, and the ninth join through the proxy forgot the oldest token, perhaps the projector's. Now a request that
+  says it came through a proxy is counted for the PC the proxy names:
+  - **The header read**: `X-Forwarded-For` when the request has one, else `Forwarded: for=` (RFC 7239). Several
+    lines of a header are one list, in order. The nearest proxy writes its entry **last**, after any the browser
+    sent (MDN "X-Forwarded-For", RFC 7239 §4): only that last entry is read, so a browser behind an honest proxy
+    cannot choose its own. `X-Forwarded-For` first: a `Forwarded` header made up next to the one the proxy adds is
+    never read. Who adds what (read in their sources and documentation, 2026-11-26): squid appends its client's
+    address to `X-Forwarded-For` by default (`forwarded_for on`) and adds `Via`; e2guardian 5.5 adds no `Via`, and adds
+    an `X-Forwarded-For` line of its own, after the browser's lines, only when its option `addforwardedfor` (formerly
+    `forwardedfor`, off by default) is on **and** the request goes through its upstream proxy, not straight to the
+    server (`HTTPHeader::out`, `isdirect`). Since the padding for proxies worked at school (one of the three headers
+    arrived), another proxy, most likely a squid, is probably on the way, or e2guardian adds its line; whether the
+    school's filter names the PCs is not known (H4 looks at it, the journal says it).
+  - **Two proxies on one machine**: e2guardian handing each request to a squid on the same router gives
+    `<PC>, 127.0.0.1` (squid appends its client, e2guardian, at a loopback address). A loopback last entry can only
+    be written by a proxy whose client runs on its own machine, never for a browser elsewhere: such entries are
+    skipped from the end, and the one before is the PC (`http::nearest_pc`; that the school's filter is built so is
+    (supposé)). An entry before them that is no address names no PC; only loopback entries are a browser on the
+    proxy's own machine.
+  - **The value**: an IPv4 or IPv6 address, with or without a port, brackets or quotes; an IPv4 address written as
+    IPv6 is the IPv4 address. The last entry is parsed only if it holds 64 bytes at most
+    (`http::MAX_FORWARDED_ADDRESS`); anything else (empty, `unknown`, `_hidden`, a name, not UTF-8, longer) names no
+    PC, and the request counts for the connection's address. The header's text is never kept: the key is the parsed
+    address (16 bytes at most).
+  - **The risk accepted**: a client can make up the header. A pupil's PC on the network that sends its own
+    `X-Forwarded-For` straight to the share, or a browser behind a proxy that adds no such header, names whatever PC
+    it likes, so it gets fresh attempts and tokens for each name. **The net**: per connection address, 40 wrong codes
+    in 5 minutes (eight PCs' five; a class of about thirty behind the school's proxy, a few of whom mistype the code
+    once, stays far below it; past it every PC behind that address waits, the right code too, with the seconds until
+    the address's oldest wrong code expires) and 128 tokens (half of the 256: four classes of thirty in one share
+    with room to rejoin; a client that names a new PC at each join holds the most under its own address and loses its
+    own tokens). The memory stays bounded whatever the names: one record per connection address of at most 40 wrong
+    codes, and 256 tokens.
+  - **Known limits**: through one proxy, more than 128 PCs each holding a single token push out the oldest (perhaps
+    the projector's, which then asks for the code at its next reconnection); eight pupils typing their five wrong
+    codes in the same five minutes make the whole school wait. The connection limits (8 at once, 4 event streams and
+    the stream rate per address) are still per connection address: a connection is counted before its request is
+    read, and the stream limits were not part of this decision.
 - **Brute force**: the code changes at each share; it is one of 31⁶ = 887 503 681. With N addresses, at most 5·N
-  tries per 5 minutes (60·N an hour): 100 PCs trying all the time make 6 000 tries an hour, about 1 chance in
-  148 000. However many addresses an attacker has, the two tables hold at most 4 096 + 254 per address of this PC
-  + 64 running records: with one address, at most 4 414 × 60 ≈ 265 000 tries an hour, about 1 chance in 3 350 per
-  hour of share (an attacker with thousands of addresses on the network).
+  tries per 5 minutes (60·N an hour) when they name no PC, 40·N when they make up a PC at each try (480·N an hour):
+  100 PCs trying all the time make 6 000 tries an hour, about 1 chance in 148 000, or 48 000 an hour making up names,
+  about 1 chance in 18 500. One address alone making up names: 480 an hour, 1 chance in 1.8 million. However many
+  addresses an attacker has, the two tables hold at most 4 096 + 254 per address of this PC + 64 running records:
+  at most 4 414 × 480 ≈ 2.1 million tries an hour, about 1 chance in 420 per hour of share (an attacker with
+  thousands of addresses on the network, which needs administrator rights and a network that lets it, making up a
+  PC at each try; 1 chance in 3 350 before 2026-11-26, when an address was always one client).
 - The page and its assets are public (they are the GPL viewer, no data); only `/events` and `/paper/<key>` need the
   token.
 
@@ -382,8 +437,9 @@ page still costs nothing.
 - **Limits.** Same slots, same per-address limits, same deadlines for the request as any other request; it is a
   `Phase::Request`, so a slow download makes room by fair share and can keep nobody out. Writing: each 64 KiB within 15 s
   (`Limits::stall`: a client that stopped reading is gone), and the whole within 5 minutes (`Limits::paper_answer`: 10 MB at
-  35 KB/s, and a slot never held for ever by a client that reads a trickle). `RESPONSE_TIMEOUT` (5 s for a whole answer)
-  is the wrong measure for it: a viewer at 600 KB/s needs 17 s. No rate limit: unlike a stream, a fetch copies nothing.
+  35 KB/s, and a slot never held for ever by a client that reads a trickle). A fixed time for a whole answer (5 s, the
+  `RESPONSE_TIMEOUT` of the first version, since given up for every answer) is the wrong measure for it: a viewer at
+  600 KB/s needs 17 s. No rate limit: unlike a stream, a fetch copies nothing.
 - **`Cache-Control: no-store`**: another picture may come under the same key (below), and a teacher's picture has no reason
   to stay on a pupil's PC or in a proxy. The viewer holds the bytes as long as it needs them.
 - **Through a filtering proxy** it is an ordinary complete answer with a length (not a stream, not a `204`): e2guardian may
@@ -467,12 +523,19 @@ browser close first changed nothing at school. It stays, as most servers do: aft
 2 s for the browser to close (browsers close a `Connection: close` connection as soon as they have read the answer),
 then closes itself.
 
+Since every browser of the school reaches the share from the proxy's address, the wrong codes and the tokens of a
+request through a proxy count for the PC the proxy names, if it names one (2026-11-26: "Access: code, token,
+attempts", "Behind a proxy"). Whether this school's e2guardian names the PCs is not known yet: the journal says it.
+
 ### Journal
 
 While a share runs, `<library>/_ardoise/diagnostics/share_<local time>.log` gets one line per connection event:
 connected (address and port), what was asked (a route of the share, else "(other)"; `/paper/<key>` is named only if the
 key is hexadecimal digits, the digest it is meant to be; "through a proxy" when a
-`Via`, `Forwarded` or `X-Forwarded-For` header says so) and after how long, the status
+`Via`, `Forwarded` or `X-Forwarded-For` header says so, with the PC it names once read as an address and the header
+it came from, `(through a proxy, for 192.168.228.37 from X-Forwarded-For)`, or why none counts: `(through a proxy that
+names no PC)`, `(through a proxy, no address in X-Forwarded-For)`; the first share at school shows that way what its
+proxy really sends, so whether its PCs count apart) and after how long, the status
 answered and in how long (for a picture its size too, or why it was not finished), streams opened and closed, connections
 refused or closed to make room. Never the code, a cookie, a token, a query string or an unknown path. It comes back to the developer with the library, like the tablet's
 diagnostic logs.
@@ -651,8 +714,16 @@ written and flushed per message) → LAN → `fetch` reader → `LiveState` → 
   `GET /paper/<key>` (`tests/paper.rs`: cookie, `401` whatever the key, `404` for another key and for every variant of the
   path and method, only the paper of what is shown, a slow download with 60 batches a second going on and the viewer not
   kicked, a client that stops reading, the time limit, a paper that changes during a download, the share stopping during
-  one, fair share and the per-address limit, the journal). Unit tests for
-  the slot choice, the nearby attempts table, the token limit and the stream rate (injected clock).
+  one, fair share and the per-address limit, the journal). Behind a proxy (`tests/access.rs`, a loopback address for
+  the school's proxy): five wrong codes of one PC do not stop another PC of the same proxy, entries a browser puts
+  before the proxy's or a second proxy on the same machine do not change who it is, the ninth token of a PC does not
+  push out another PC's, a client
+  naming another PC at each try is stopped at its connection's 40, headers that name no PC count for the
+  connection, and the journal names the PC. Unit tests for
+  the slot choice, the nearby attempts table, the token limit and the stream rate (injected clock), reading
+  `X-Forwarded-For` and `Forwarded` (last entry, several lines, two proxies on one machine, ports, IPv6, mapped IPv4,
+  malformed, overlong and non-UTF-8 values),
+  the per-PC attempts and tokens, the connection's net and the memory bound (100 000 names from one address).
 - App (Linux): settings `[share] port` and this machine's `share_port` (order, bad values, atomic write), the fallback
   with a real listener on the port asked for (both ports reported, the port kept for this PC and asked for at the
   next share, nothing written when the port asked for is free), manifest walk (`viewer_assets` with a fake manifest), stripping of live

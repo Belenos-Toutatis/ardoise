@@ -247,9 +247,11 @@ describe('live state: hover, view, presentation', () => {
     expect(sent).toEqual([at(1000), at(3000)]);
     live.receive(batch({ type: 'view', view: at(3000) }));
     expect(live.view).toEqual(at(3000));
-    // Another window moves the view afterwards: followed.
+    // Another window moves the view afterwards: followed, every time.
     live.receive(batch({ type: 'view', view: at(7000) }));
     expect(live.view).toEqual(at(7000));
+    live.receive(batch({ type: 'view', view: at(8000) }));
+    expect(live.view).toEqual(at(8000));
   });
 
   it('shows Rust’s view again when a change is refused', async () => {
@@ -279,6 +281,58 @@ describe('live state: hover, view, presentation', () => {
     expect(live.style).toEqual(chalk);
     live.previewStyle({ ...chalk, width: 400 });
     expect(live.style.width).toBe(400);
+  });
+
+  // Rust broadcasts a view or a style only when it changes its own (`LiveSession::set_view`, `set_style`): a window
+  // that waited for the echo of one that changes nothing would ignore every other window from then on.
+  it('follows the other windows after sending a view that changes nothing', async () => {
+    vi.useFakeTimers();
+    const live = ready();
+    const whole = live.view;
+    const sent: LiveViewState[] = [];
+    // `0` or a pinch out on the whole page: the same view, which Rust does not echo.
+    live.changeView({ ...whole }, async (v) => {
+      sent.push(v);
+    });
+    expect(sent).toEqual([whole]);
+    await vi.advanceTimersByTimeAsync(VIEW_SEND_MS);
+    const zoomed: LiveViewState = { ...whole, zoom: 2, x: 9000 };
+    live.receive(batch({ type: 'view', view: zoomed }));
+    expect(live.view).toEqual(zoomed);
+    live.receive(batch({ type: 'view', view: { ...zoomed, laser: true } }));
+    expect(live.view.laser).toBe(true);
+  });
+
+  it('waits once for a view sent twice: the window keeps only the last of the views queued for it', async () => {
+    vi.useFakeTimers();
+    const live = ready();
+    const send = async () => {};
+    const at = (x: number): LiveViewState => ({ zoom: 2, x, y: 5000, board: false, laser: false });
+    live.changeView(at(1000), send);
+    await vi.advanceTimersByTimeAsync(VIEW_SEND_MS);
+    // The same view again before its echo came: Rust answers the second one with nothing.
+    live.changeView(at(1000), send);
+    await vi.advanceTimersByTimeAsync(VIEW_SEND_MS);
+    live.receive(batch({ type: 'view', view: at(1000) }));
+    live.receive(batch({ type: 'view', view: at(7000) }));
+    expect(live.view).toEqual(at(7000));
+  });
+
+  it('follows the session after choosing the style it already has', async () => {
+    const live = ready();
+    const pen = { tool: 'ballpoint' as const, color: BLACK, width: 60 };
+    // The swatch of the colour already chosen: Rust sends no snapshot for it.
+    await live.changeStyle({ ...pen, color: { ...BLACK } }, () => Promise.resolve());
+    // The blackboard turned on from any window: white chalk.
+    const chalk = { tool: 'chalk' as const, color: { r: 255, g: 255, b: 255, a: 255 }, width: 150 };
+    live.receive(batch({ type: 'snapshot', snapshot: snapshot({ style: chalk }) }));
+    expect(live.style).toEqual(chalk);
+    // The same style twice in a row is waited for once.
+    await live.changeStyle({ ...chalk, color: RED }, () => Promise.resolve());
+    await live.changeStyle({ ...chalk, color: RED }, () => Promise.resolve());
+    live.receive(batch({ type: 'snapshot', snapshot: snapshot({ style: { ...chalk, color: RED } }) }));
+    live.receive(batch({ type: 'snapshot', snapshot: snapshot({ style: pen }) }));
+    expect(live.style).toEqual(pen);
   });
 });
 

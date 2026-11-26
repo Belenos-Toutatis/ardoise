@@ -1,6 +1,11 @@
 //! Who may read the event stream (`docs/design/lan-share.md`, "Access: code, token, attempts"):
-//! the 6-character code, the session tokens it gives, the limit of wrong codes per address, and
+//! the 6-character code, the session tokens it gives, the limit of wrong codes per client, and
 //! how often an address may open a stream.
+//!
+//! A client is the address of the connection, and for a request that a proxy forwards, the PC the
+//! proxy names ([`Client`]): behind a school's proxy, every browser comes from the proxy's address.
+//! The PC's address is the browser's word, which a pupil's tools can change: each connection
+//! address therefore also has limits of its own, wider than a PC's, whatever PCs it names.
 //!
 //! Time is passed in (`now`) so that the tests can move the clock.
 
@@ -12,16 +17,27 @@ use std::time::{Duration, Instant};
 pub(crate) const ALPHABET: &[u8; 31] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 /// Characters in a code.
 pub(crate) const CODE_LEN: usize = 6;
-/// Wrong codes allowed per address within [`WINDOW`].
+/// Wrong codes allowed per client within [`WINDOW`].
 pub(crate) const MAX_WRONG: usize = 5;
+/// Wrong codes allowed per connection address within [`WINDOW`], whatever PCs its requests name:
+/// eight PCs' worth (a class of thirty behind the school's proxy, a few of whom mistype the code,
+/// stays far below it). A client that names another PC at each try gets 8 times the attempts of
+/// one that names none, never more.
+pub(crate) const MAX_WRONG_PER_CONNECTION: usize = 8 * MAX_WRONG;
 /// How long a wrong code counts.
 pub(crate) const WINDOW: Duration = Duration::from_secs(5 * 60);
-/// Session tokens kept per address: a new join from an address that has as many forgets that
-/// address's oldest token, so that one address can never push out the others' tokens.
-pub(crate) const MAX_TOKENS_PER_ADDRESS: usize = 8;
-/// Session tokens kept in all (a last resort: 32 addresses at their own limit). When full, the
-/// oldest token of the address that holds the most is forgotten: an address with a single
-/// token (the projector) keeps it while others hold several.
+/// Session tokens kept per client: a new join of a client that has as many forgets that
+/// client's oldest token, so that one client can never push out the others' tokens.
+pub(crate) const MAX_TOKENS_PER_CLIENT: usize = 8;
+/// Session tokens kept per connection address, whatever PCs its requests name: half of them
+/// all, so that one address (a client that makes up a PC at each join) never holds all the
+/// room, and four classes of thirty through a school's proxy in one share. When full, the oldest
+/// token of the client of that address that holds the most is forgotten.
+pub(crate) const MAX_TOKENS_PER_CONNECTION: usize = MAX_TOKENS / 2;
+/// Session tokens kept in all (a last resort: 32 clients at their own limit). When full, the
+/// oldest token of the client that holds the most, among those of the connection address that
+/// holds the most, is forgotten: a client with a single token (the projector) keeps it while
+/// others hold several.
 pub(crate) const MAX_TOKENS: usize = 256;
 /// Addresses whose wrong codes are remembered. When it is full of records still running, an
 /// address without one gets 429 until the first record expires: nothing is forgotten early,
@@ -87,29 +103,54 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-/// Answer to a code typed from an address.
+/// Who typed a code or holds a token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Client {
+    /// The address of the connection.
+    pub connection: IpAddr,
+    /// The PC that the proxy forwarding the request names (`http::ForwardedFor`); `None` for a
+    /// request straight from a browser, or through a proxy that names no PC.
+    pub device: Option<IpAddr>,
+}
+
+impl From<IpAddr> for Client {
+    /// A client that comes straight from a browser.
+    fn from(connection: IpAddr) -> Self {
+        Self {
+            connection,
+            device: None,
+        }
+    }
+}
+
+/// Answer to a code typed by a client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Verdict {
-    /// The right code: the address's record is cleared; give it a token.
+    /// The right code: the client's wrong codes are cleared; give it a token.
     Right,
-    /// A wrong code; `remaining` wrong codes left before the address must wait.
+    /// A wrong code; `remaining` wrong codes left before the client must wait.
     Wrong { remaining: u32 },
-    /// Too many wrong codes: wait `retry_after` seconds (the code was not even compared).
+    /// Too many wrong codes, of the client or of its connection address: wait `retry_after`
+    /// seconds (the code was not even compared).
     TooMany { retry_after: u64 },
 }
 
-/// The code, the tokens given, and the recent wrong codes of each address.
+/// The recent wrong codes of one connection address, oldest first, each with the PC it was
+/// typed for: at most [`MAX_WRONG_PER_CONNECTION`] that still count, however many PCs.
+type Record = VecDeque<(Instant, Option<IpAddr>)>;
+
+/// The code, the tokens given, and the recent wrong codes of each connection address.
 #[derive(Debug)]
 pub(crate) struct Access {
     code: String,
-    /// Tokens given, oldest first, with the address that joined.
-    tokens: VecDeque<(IpAddr, String)>,
+    /// Tokens given, oldest first, with the client that joined.
+    tokens: VecDeque<(Client, String)>,
     /// Recent wrong codes of the other addresses: at most [`MAX_ADDRESSES`].
-    wrong: HashMap<IpAddr, VecDeque<Instant>>,
+    wrong: HashMap<IpAddr, Record>,
     /// Recent wrong codes of the nearby addresses (see [`Access::is_near`]): never refused for
     /// want of room, and bounded by construction (254 per address of this PC, plus
     /// [`MAX_JOINED`]).
-    near: HashMap<IpAddr, VecDeque<Instant>>,
+    near: HashMap<IpAddr, Record>,
     /// This PC's addresses when the share started: their /24 networks are "nearby".
     local: Vec<Ipv4Addr>,
     /// The first addresses that joined.
@@ -146,7 +187,7 @@ impl Access {
     }
 
     /// The table of wrong codes of `address`'s kind.
-    fn table(&mut self, near: bool) -> &mut HashMap<IpAddr, VecDeque<Instant>> {
+    fn table(&mut self, near: bool) -> &mut HashMap<IpAddr, Record> {
         if near {
             &mut self.near
         } else {
@@ -154,49 +195,77 @@ impl Access {
         }
     }
 
-    /// Checks a code typed from `address` at `now`.
-    pub fn try_code(&mut self, address: IpAddr, typed: &str, now: Instant) -> Verdict {
+    /// Checks a code typed by `client` at `now`.
+    pub fn try_code(&mut self, client: impl Into<Client>, typed: &str, now: Instant) -> Verdict {
+        let client = client.into();
+        let address = client.connection;
         let near = self.is_near(address);
-        if let Some(refused) = self.refusal(address, near, now) {
+        if let Some(refused) = self.refusal(client, near, now) {
             return refused;
         }
         if constant_time_eq(normalize_code(typed).as_bytes(), self.code.as_bytes()) {
-            self.wrong.remove(&address);
-            self.near.remove(&address);
             if self.joined.len() < MAX_JOINED && !self.joined.contains(&address) {
                 self.joined.push(address);
+                // Now nearby: its record moves along, the other PCs behind it keep their count.
+                if let Some(record) = self.wrong.remove(&address) {
+                    self.near.entry(address).or_insert(record);
+                }
+            }
+            // Only this client's wrong codes are cleared: one that knows the code never gives
+            // the others behind the same address their attempts back.
+            for table in [&mut self.wrong, &mut self.near] {
+                if let Some(record) = table.get_mut(&address) {
+                    record.retain(|(_, device)| *device != client.device);
+                    if record.is_empty() {
+                        table.remove(&address);
+                    }
+                }
             }
             return Verdict::Right;
         }
-        let times = self.table(near).entry(address).or_default();
-        times.push_back(now);
-        let remaining = MAX_WRONG.saturating_sub(times.len());
+        let record = self.table(near).entry(address).or_default();
+        record.push_back((now, client.device));
+        let own = record.iter().filter(|(_, d)| *d == client.device).count();
+        let remaining = MAX_WRONG
+            .saturating_sub(own)
+            .min(MAX_WRONG_PER_CONNECTION.saturating_sub(record.len()));
         Verdict::Wrong {
             remaining: u32::try_from(remaining).unwrap_or(0),
         }
     }
 
-    /// `TooMany` if `address` may not try a code at `now`: too many wrong codes lately, or a
-    /// new address of the general kind while its table is full.
-    fn refusal(&mut self, address: IpAddr, near: bool, now: Instant) -> Option<Verdict> {
+    /// `TooMany` if `client` may not try a code at `now`: too many wrong codes lately, its own
+    /// or its connection address's, or a new address of the general kind while its table is full.
+    fn refusal(&mut self, client: Client, near: bool, now: Instant) -> Option<Verdict> {
         let table = self.table(near);
-        if let Some(times) = table.get_mut(&address) {
-            forget_old(times, now);
-            if times.len() >= MAX_WRONG {
-                let oldest = times.front().copied().unwrap_or(now);
+        if let Some(record) = table.get_mut(&client.connection) {
+            forget_old(record, now);
+            let mut own = record.iter().filter(|(_, d)| *d == client.device);
+            let oldest = if own.clone().count() >= MAX_WRONG {
+                own.next()
+            } else if record.len() >= MAX_WRONG_PER_CONNECTION {
+                record.front()
+            } else {
+                None
+            };
+            if let Some((oldest, _)) = oldest {
                 return Some(Verdict::TooMany {
-                    retry_after: seconds_until_expiry(oldest, now),
+                    retry_after: seconds_until_expiry(*oldest, now),
                 });
             }
         } else if !near && table.len() >= MAX_ADDRESSES {
             // A new address and no room to count its attempts: refused before the code is
             // compared, or the limit could be dodged from new addresses.
-            table.retain(|_, times| {
-                forget_old(times, now);
-                !times.is_empty()
+            table.retain(|_, record| {
+                forget_old(record, now);
+                !record.is_empty()
             });
             if table.len() >= MAX_ADDRESSES {
-                let first_to_expire = table.values().filter_map(|t| t.back().copied()).min();
+                let first_to_expire = table
+                    .values()
+                    .filter_map(|r| r.back())
+                    .map(|(t, _)| *t)
+                    .min();
                 return Some(Verdict::TooMany {
                     retry_after: seconds_until_expiry(first_to_expire.unwrap_or(now), now),
                 });
@@ -205,36 +274,73 @@ impl Access {
         None
     }
 
-    /// Keeps a token given to a viewer at `address`: at most [`MAX_TOKENS_PER_ADDRESS`] per
-    /// address (that address's oldest is forgotten), [`MAX_TOKENS`] in all (the oldest token of
-    /// the address that holds the most is forgotten).
-    pub fn add_token(&mut self, address: IpAddr, token: String) {
-        let own = self.tokens.iter().filter(|(a, _)| *a == address).count();
-        if own >= MAX_TOKENS_PER_ADDRESS
-            && let Some(index) = self.tokens.iter().position(|(a, _)| *a == address)
+    /// Keeps a token given to `client`: at most [`MAX_TOKENS_PER_CLIENT`] per client (that
+    /// client's oldest is forgotten), [`MAX_TOKENS_PER_CONNECTION`] per connection address and
+    /// [`MAX_TOKENS`] in all (see [`Access::forget_one`]).
+    pub fn add_token(&mut self, client: impl Into<Client>, token: String) {
+        let client = client.into();
+        let own = self.tokens.iter().filter(|(c, _)| *c == client).count();
+        if own >= MAX_TOKENS_PER_CLIENT
+            && let Some(index) = self.tokens.iter().position(|(c, _)| *c == client)
         {
             self.tokens.remove(index);
         }
+        let connection = client.connection;
+        while self
+            .tokens
+            .iter()
+            .filter(|(c, _)| c.connection == connection)
+            .count()
+            >= MAX_TOKENS_PER_CONNECTION
+        {
+            self.forget_one(Some(connection));
+        }
         while self.tokens.len() >= MAX_TOKENS {
-            let mut held: HashMap<IpAddr, usize> = HashMap::new();
-            for (a, _) in &self.tokens {
-                *held.entry(*a).or_default() += 1;
-            }
-            let most = held.values().copied().max().unwrap_or(0);
-            match self
-                .tokens
+            self.forget_one(None);
+        }
+        self.tokens.push_back((client, token));
+    }
+
+    /// Forgets one token of the connection address `within`, or of any: among the connection
+    /// addresses, the one that holds the most; among its clients, the one that holds the most;
+    /// its oldest token (between equals, the oldest first). A client that makes up a PC at each
+    /// join holds the most under its own address and loses its own tokens; one with a single
+    /// token keeps it while others hold several.
+    fn forget_one(&mut self, within: Option<IpAddr>) {
+        let candidates = || {
+            self.tokens
                 .iter()
-                .position(|(a, _)| held.get(a) == Some(&most))
-            {
-                Some(index) => {
-                    self.tokens.remove(index);
-                }
-                None => {
-                    self.tokens.pop_front();
-                }
+                .filter(move |(c, _)| within.is_none_or(|a| c.connection == a))
+        };
+        let mut per_connection: HashMap<IpAddr, usize> = HashMap::new();
+        let mut per_client: HashMap<Client, usize> = HashMap::new();
+        for (c, _) in candidates() {
+            *per_connection.entry(c.connection).or_default() += 1;
+            *per_client.entry(*c).or_default() += 1;
+        }
+        let most = per_connection.values().copied().max().unwrap_or(0);
+        let chosen = candidates()
+            .find(|(c, _)| per_connection.get(&c.connection) == Some(&most))
+            .map(|(c, _)| c.connection);
+        let index = chosen.and_then(|connection| {
+            let most = per_client
+                .iter()
+                .filter(|(c, _)| c.connection == connection)
+                .map(|(_, held)| *held)
+                .max()
+                .unwrap_or(0);
+            self.tokens
+                .iter()
+                .position(|(c, _)| c.connection == connection && per_client.get(c) == Some(&most))
+        });
+        match index {
+            Some(index) => {
+                self.tokens.remove(index);
+            }
+            None => {
+                self.tokens.pop_front();
             }
         }
-        self.tokens.push_back((address, token));
     }
 
     /// True if `candidate` is one of the tokens given (compared in constant time).
@@ -244,10 +350,10 @@ impl Access {
         })
     }
 
-    /// True if a token given to `address` is still valid: its connections may use the slots
-    /// reserved for screens that joined.
+    /// True if a token given to a client of the connection address `address` is still valid:
+    /// its connections may use the slots reserved for screens that joined.
     pub fn holds_token(&self, address: IpAddr) -> bool {
-        self.tokens.iter().any(|(a, _)| *a == address)
+        self.tokens.iter().any(|(c, _)| c.connection == address)
     }
 
     /// Addresses remembered (tests).
@@ -332,12 +438,12 @@ fn seconds_until_expiry(at: Instant, now: Instant) -> u64 {
 }
 
 /// Drops the wrong codes older than [`WINDOW`].
-fn forget_old(times: &mut VecDeque<Instant>, now: Instant) {
-    while times
+fn forget_old(record: &mut Record, now: Instant) {
+    while record
         .front()
-        .is_some_and(|t| now.saturating_duration_since(*t) >= WINDOW)
+        .is_some_and(|(t, _)| now.saturating_duration_since(*t) >= WINDOW)
     {
-        times.pop_front();
+        record.pop_front();
     }
 }
 
@@ -443,10 +549,10 @@ mod tests {
             "another address's token is kept"
         );
         // The address keeps its last 8 tokens only.
-        let (old, last) = own.split_at(own.len() - MAX_TOKENS_PER_ADDRESS);
+        let (old, last) = own.split_at(own.len() - MAX_TOKENS_PER_CLIENT);
         assert!(last.iter().all(|t| access.token_valid(t)));
         assert!(old.iter().all(|t| !access.token_valid(t)));
-        assert_eq!(access.tokens.len(), 1 + MAX_TOKENS_PER_ADDRESS);
+        assert_eq!(access.tokens.len(), 1 + MAX_TOKENS_PER_CLIENT);
 
         // The global limit, as a last resort: one address with a single token (the projector),
         // then 40 addresses at their own limit. Tokens are taken from the addresses that hold
@@ -456,7 +562,7 @@ mod tests {
         let single = random_token().unwrap();
         access.add_token(projector, single.clone());
         for a in 0..40u8 {
-            for _ in 0..MAX_TOKENS_PER_ADDRESS {
+            for _ in 0..MAX_TOKENS_PER_CLIENT {
                 access.add_token(ip(a), random_token().unwrap());
             }
         }
@@ -464,8 +570,12 @@ mod tests {
         assert!(access.token_valid(&single));
         assert!(access.holds_token(projector));
         for a in 0..40u8 {
-            let held = access.tokens.iter().filter(|(t, _)| *t == ip(a)).count();
-            assert!((6..=MAX_TOKENS_PER_ADDRESS).contains(&held), "{a}: {held}");
+            let held = access
+                .tokens
+                .iter()
+                .filter(|(t, _)| t.connection == ip(a))
+                .count();
+            assert!((6..=MAX_TOKENS_PER_CLIENT).contains(&held), "{a}: {held}");
         }
         assert!(!access.holds_token(ip(200)));
     }
@@ -596,6 +706,264 @@ mod tests {
         let later = start + Duration::from_secs(3);
         rate.spend(extra, later);
         assert_eq!(rate.addresses(), 1);
+    }
+
+    /// A PC behind the proxy at `proxy`, as the proxy names it.
+    fn behind(proxy: IpAddr, pc: u8) -> Client {
+        Client {
+            connection: proxy,
+            device: Some(IpAddr::V4(Ipv4Addr::new(192, 168, 228, pc))),
+        }
+    }
+
+    #[test]
+    fn behind_a_proxy_each_pc_has_its_attempts() {
+        let proxy = IpAddr::V4(Ipv4Addr::new(10, 1, 0, 254));
+        for local in [Vec::new(), vec![Ipv4Addr::new(10, 1, 0, 23)]] {
+            // A proxy elsewhere, then one on this PC's network (its record is "nearby").
+            let mut access = Access::new("K7MQ2X".into(), local);
+            let start = Instant::now();
+            for remaining in (0..5).rev() {
+                assert_eq!(
+                    access.try_code(behind(proxy, 37), "WRONG1", start),
+                    Verdict::Wrong { remaining }
+                );
+            }
+            let later = start + Duration::from_secs(20);
+            assert_eq!(
+                access.try_code(behind(proxy, 37), "K7MQ2X", later),
+                Verdict::TooMany { retry_after: 280 }
+            );
+            // Another PC behind the proxy, and the proxy itself (no PC named), are not affected.
+            assert_eq!(
+                access.try_code(behind(proxy, 12), "WRONG1", later),
+                Verdict::Wrong { remaining: 4 }
+            );
+            assert_eq!(
+                access.try_code(proxy, "WRONG1", later),
+                Verdict::Wrong { remaining: 4 }
+            );
+            assert_eq!(
+                access.try_code(behind(proxy, 12), "K7MQ2X", later),
+                Verdict::Right
+            );
+            // A right code clears that PC's wrong codes only: the one that waits still waits,
+            // and the proxy's one wrong code still counts.
+            assert_eq!(
+                access.try_code(behind(proxy, 37), "K7MQ2X", later),
+                Verdict::TooMany { retry_after: 280 }
+            );
+            assert_eq!(
+                access.try_code(proxy, "WRONG1", later),
+                Verdict::Wrong { remaining: 3 }
+            );
+            assert_eq!(access.addresses(), 1);
+            // The proxy's address joined: a record of the general table moved to the nearby one
+            // with what it held.
+            assert!(access.is_near(proxy));
+            assert!(access.wrong.is_empty());
+            assert_eq!(access.near[&proxy].len(), 7);
+        }
+    }
+
+    #[test]
+    fn a_connection_has_a_limit_whatever_pcs_it_names() {
+        let mut access = Access::new("K7MQ2X".into(), Vec::new());
+        let start = Instant::now();
+        let forger = IpAddr::V4(Ipv4Addr::new(10, 1, 0, 66));
+        // One wrong code for each of 40 PCs made up, a second apart.
+        for i in 0..MAX_WRONG_PER_CONNECTION as u32 {
+            let at = start + Duration::from_secs(u64::from(i));
+            let client = Client {
+                connection: forger,
+                device: Some(IpAddr::V4(Ipv4Addr::from(0x0a00_0000 + i))),
+            };
+            let left = MAX_WRONG_PER_CONNECTION as u32 - i - 1;
+            assert_eq!(
+                access.try_code(client, "WRONG1", at),
+                Verdict::Wrong {
+                    remaining: left.min(4)
+                }
+            );
+        }
+        // Then a new PC, the right code, or no PC at all: the connection waits until its oldest
+        // wrong code is 5 minutes old (it was made 40 s before).
+        let at = start + Duration::from_secs(40);
+        for client in [behind(forger, 1), Client::from(forger)] {
+            assert_eq!(
+                access.try_code(client, "K7MQ2X", at),
+                Verdict::TooMany { retry_after: 260 }
+            );
+        }
+        // Another address is not affected.
+        assert_eq!(
+            access.try_code(IpAddr::V4(Ipv4Addr::new(10, 1, 0, 67)), "K7MQ2X", at),
+            Verdict::Right
+        );
+        // Once the oldest expired, one more.
+        let at = start + WINDOW;
+        assert_eq!(
+            access.try_code(behind(forger, 1), "WRONG1", at),
+            Verdict::Wrong { remaining: 0 }
+        );
+        assert_eq!(
+            access.try_code(behind(forger, 2), "K7MQ2X", at),
+            Verdict::TooMany { retry_after: 1 }
+        );
+        // A PC at its own limit waits for its own oldest wrong code, which may be later than
+        // the connection's.
+        let mut access = Access::new("K7MQ2X".into(), Vec::new());
+        access.try_code(behind(forger, 9), "WRONG1", start);
+        for i in 0..5 {
+            let at = start + Duration::from_secs(100 + i);
+            access.try_code(behind(forger, 1), "WRONG1", at);
+        }
+        assert_eq!(
+            access.try_code(
+                behind(forger, 1),
+                "K7MQ2X",
+                start + Duration::from_secs(200)
+            ),
+            Verdict::TooMany { retry_after: 200 }
+        );
+    }
+
+    #[test]
+    fn the_attempts_take_bounded_memory_whatever_pcs_are_named() {
+        let local = Ipv4Addr::new(192, 168, 1, 23);
+        let mut access = Access::new("K7MQ2X".into(), vec![local]);
+        let start = Instant::now();
+        // A nearby address and a far one name a new PC at each of 100 000 tries, a fraction of a
+        // second apart, for hours: each keeps one record of at most 40 wrong codes.
+        let near = ip(66);
+        let far = IpAddr::V4(Ipv4Addr::new(10, 1, 0, 66));
+        for i in 0..100_000u32 {
+            let at = start + Duration::from_millis(u64::from(i) * 250);
+            for connection in [near, far] {
+                let client = Client {
+                    connection,
+                    device: Some(IpAddr::V4(Ipv4Addr::from(i))),
+                };
+                access.try_code(client, "WRONG1", at);
+            }
+        }
+        assert_eq!(access.addresses(), 2);
+        assert!(access.near[&near].len() <= MAX_WRONG_PER_CONNECTION);
+        assert!(access.wrong[&far].len() <= MAX_WRONG_PER_CONNECTION);
+        assert!(access.joined.is_empty());
+    }
+
+    #[test]
+    fn behind_a_proxy_each_pc_keeps_its_tokens() {
+        let proxy = IpAddr::V4(Ipv4Addr::new(10, 1, 0, 254));
+        let mut access = Access::new("ABCDEF".into(), Vec::new());
+        let projector = random_token().unwrap();
+        access.add_token(behind(proxy, 12), projector.clone());
+        // A pupil's PC joins 20 times: it keeps its last 8, the projector's token stays.
+        let pupil: Vec<String> = (0..20).map(|_| random_token().unwrap()).collect();
+        for token in &pupil {
+            access.add_token(behind(proxy, 37), token.clone());
+        }
+        assert!(access.token_valid(&projector));
+        assert!(pupil[12..].iter().all(|t| access.token_valid(t)));
+        assert!(pupil[..12].iter().all(|t| !access.token_valid(t)));
+        // So does a client of the proxy's address that names no PC.
+        access.add_token(proxy, random_token().unwrap());
+        assert_eq!(access.tokens.len(), 1 + MAX_TOKENS_PER_CLIENT + 1);
+        assert!(access.holds_token(proxy));
+    }
+
+    #[test]
+    fn a_connection_that_names_a_new_pc_at_each_join_loses_its_own_tokens() {
+        let mut access = Access::new("ABCDEF".into(), Vec::new());
+        // The projector straight from its PC, and a pupil's PC behind the school's proxy.
+        let projector = random_token().unwrap();
+        access.add_token(ip(1), projector.clone());
+        let proxy = IpAddr::V4(Ipv4Addr::new(10, 1, 0, 254));
+        let pupil = random_token().unwrap();
+        access.add_token(behind(proxy, 37), pupil.clone());
+        // A client that holds the code joins 10 000 times, naming a new PC each time.
+        let forger = ip(66);
+        for i in 0..10_000u32 {
+            let client = Client {
+                connection: forger,
+                device: Some(IpAddr::V4(Ipv4Addr::from(i))),
+            };
+            access.add_token(client, random_token().unwrap());
+        }
+        let held = |address: IpAddr| {
+            access
+                .tokens
+                .iter()
+                .filter(|(c, _)| c.connection == address)
+                .count()
+        };
+        assert_eq!(held(forger), MAX_TOKENS_PER_CONNECTION);
+        assert!(access.token_valid(&projector));
+        assert!(access.token_valid(&pupil));
+        // Through the proxy itself (it names the PCs it forwards): the projector joins once, then
+        // 60 PCs join four times each, more than the proxy's share. Each token forgotten is one
+        // of a PC that holds the most: the projector keeps its single one.
+        let mut access = Access::new("ABCDEF".into(), Vec::new());
+        let projector = random_token().unwrap();
+        access.add_token(behind(proxy, 12), projector.clone());
+        for _ in 0..4 {
+            for pc in 100..160 {
+                access.add_token(behind(proxy, pc), random_token().unwrap());
+            }
+        }
+        assert_eq!(access.tokens.len(), MAX_TOKENS_PER_CONNECTION);
+        assert!(access.token_valid(&projector));
+        for pc in 100..160 {
+            let held = access
+                .tokens
+                .iter()
+                .filter(|(c, _)| *c == behind(proxy, pc))
+                .count();
+            assert!((2..=3).contains(&held), "{pc}: {held}");
+        }
+        // The known limit: more PCs than the proxy's share, each with a single token. The
+        // oldest goes, whoever it was.
+        let mut access = Access::new("ABCDEF".into(), Vec::new());
+        access.add_token(behind(proxy, 12), projector.clone());
+        for i in 0..MAX_TOKENS_PER_CONNECTION as u32 {
+            let client = Client {
+                connection: proxy,
+                device: Some(IpAddr::V4(Ipv4Addr::from(0x0a00_0000 + i))),
+            };
+            access.add_token(client, random_token().unwrap());
+            assert_eq!(
+                access.token_valid(&projector),
+                i + 1 < MAX_TOKENS_PER_CONNECTION as u32
+            );
+        }
+        // When every address is at its share, the global limit takes from the address that
+        // holds the most: other addresses keep theirs.
+        let mut access = Access::new("ABCDEF".into(), Vec::new());
+        let single = random_token().unwrap();
+        access.add_token(ip(1), single.clone());
+        for forger in [ip(66), ip(67), ip(68)] {
+            for i in 0..1000u32 {
+                let client = Client {
+                    connection: forger,
+                    device: Some(IpAddr::V4(Ipv4Addr::from(i))),
+                };
+                access.add_token(client, random_token().unwrap());
+            }
+        }
+        assert_eq!(access.tokens.len(), MAX_TOKENS);
+        assert!(access.token_valid(&single));
+        for forger in [ip(66), ip(67), ip(68)] {
+            let held = access
+                .tokens
+                .iter()
+                .filter(|(c, _)| c.connection == forger)
+                .count();
+            assert!(
+                (80..=MAX_TOKENS_PER_CONNECTION).contains(&held),
+                "{forger}: {held}"
+            );
+        }
     }
 
     #[test]

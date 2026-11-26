@@ -334,6 +334,41 @@ describe('the text tool', () => {
     expect(v.strokes()).toBe(0);
   });
 
+  it('ends the typing before the back of the pen erases: two steps, the erasure kept (audit R10-1)', async () => {
+    // A focused window: jsdom answers false once the field is blurred, and the field then ignores the blur.
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const v = await render();
+    v.tool('Texte').click();
+    await tick();
+    await v.tap(6000, 9000);
+    await v.type('Bonjour');
+    expect(v.strokes()).toBe(1);
+    // The back of the pen goes over the stroke while the frame's field still has the focus.
+    const pen = { pointerType: 'pen', buttons: 32, pressure: 0.3 };
+    v.pointer('pointerdown', 3000, 4000, pen);
+    v.pointer('pointermove', 4000, 4000, pen);
+    v.pointer('pointerup', 4000, 4000, { ...pen, buttons: 0 });
+    await tick();
+    await tick();
+    expect(v.field()).toBeNull();
+    expect(v.strokes()).toBe(0);
+    expect(v.frames()).toHaveLength(1);
+    // Escape and a tap elsewhere change nothing more.
+    await v.key('Escape');
+    expect(v.strokes()).toBe(0);
+    expect(v.frames()).toHaveLength(1);
+    // Undo gives the stroke back, the text stays; the next one removes the text.
+    v.undoButton().click();
+    await tick();
+    expect(v.strokes()).toBe(1);
+    expect(v.frames()).toHaveLength(1);
+    v.undoButton().click();
+    await tick();
+    expect(v.strokes()).toBe(1);
+    expect(v.frames()).toHaveLength(0);
+    expect(v.undoButton().disabled).toBe(true);
+  });
+
   it('refuses a new frame on a hidden layer, and says so', async () => {
     const v = await render();
     v.tool('Texte').click();

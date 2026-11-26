@@ -259,18 +259,72 @@ describe('mock blackboard: syncing', () => {
     expect((await api.tabletStatus()).pending).toBeNull();
   });
 
-  it('brings nothing, without an error, when a sync waited for the blackboard with deletion off', async () => {
+  it('brings nothing of the blackboard, without an error, when a sync waited with deletion off: it waits for the Slate (Q28)', async () => {
     await api.tabletSetOptions({ ...OPTIONS, deleteAfterImport: false });
     await addBoard();
     await api.tabletSync();
-    expect((await api.tabletStatus()).pending).toBe('sync');
+    expect((await api.tabletStatus()).pending).toBe('slateSync');
     await beat(2);
-    const status = await api.tabletStatus();
+    let status = await api.tabletStatus();
     expect(status.connection).toBe('connected');
-    expect(status.pending).toBeNull();
+    expect(status.active).toBe('blackboard');
+    expect(status.pending).toBe('slateSync');
     expect(status.lastSync).toBeNull();
     expect(status.error).toBeNull();
     expect(status.device?.storedPages).toBe(3);
+
+    // The Slate, the only tablet left, takes it when it connects.
+    mockTablet.inRange = true;
+    await api.tabletForgetBlackboard();
+    expect((await api.tabletStatus()).pending).toBe('sync');
+    await beat(4);
+    status = await api.tabletStatus();
+    expect(status.active).toBe('slate');
+    expect(status.pending).toBeNull();
+    // Its oldest page: without deletion it hands over only that one.
+    expect(status.lastSync?.saved).toHaveLength(1);
+  });
+
+  it('drops the sync that waits for the Slate on cancel, or with the Slate forgotten', async () => {
+    await api.tabletSetOptions({ ...OPTIONS, deleteAfterImport: false });
+    await addBoard();
+    await api.tabletSync();
+    await beat(2);
+    expect((await api.tabletStatus()).pending).toBe('slateSync');
+    await api.tabletCancel();
+    expect((await api.tabletStatus()).pending).toBeNull();
+
+    // The blackboard's own sync, confirmed, leaves the Slate's waiting.
+    resetMockTablet();
+    mockTablet.inRange = false;
+    await api.tabletSetOptions({ ...OPTIONS, deleteAfterImport: false });
+    await addBoard();
+    await api.tabletSync();
+    await beat(2);
+    await api.tabletSync(true);
+    await beat(0.1);
+    expect(await api.tabletStatus()).toMatchObject({ connection: 'syncing', pending: 'slateSync' });
+    await beat(3);
+    expect(await api.tabletStatus()).toMatchObject({ connection: 'connected', pending: 'slateSync' });
+
+    // The Slate forgotten: nothing waits any more.
+    await api.forgetTablet();
+    const status = await api.tabletStatus();
+    expect(status.known.map((k) => k.kind)).toEqual(['blackboard']);
+    expect(status.pending).toBeNull();
+  });
+
+  it('names the automatic exports a sync could not write, and how many (Q28)', async () => {
+    mockTablet.exportFailure = { path: 'Exports\\2026-11-26.pdf', reason: 'Accès refusé. (os error 5)' };
+    await addBoard();
+    await beat(5);
+    const status = await api.tabletStatus();
+    expect(status.lastSync).toMatchObject({
+      deleted: 3,
+      error: null,
+      exportFailed: { notes: 3, path: 'Exports\\2026-11-26.pdf', reason: 'Accès refusé. (os error 5)' },
+    });
+    expect(status.error).toBeNull();
   });
 
   it('takes the page its button stores', async () => {

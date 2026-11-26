@@ -795,8 +795,11 @@ pub fn get_note_text(host: &Host, args: GetNoteTextArgs) -> ToolResult {
         note,
         args.language.map(Language::from),
     );
-    // Typed text needs no recognition: a page that holds some is still read where the
-    // handwriting cannot be (no recognizer on this PC), without any line, and says why.
+    // A transcription corrected with `set_note_text` replaces the recogniser's text (the lines
+    // and the structure, with their positions, stay the recogniser's).
+    let correction = host.handwriting.correction_of(note);
+    // Typed text and a correction need no recognition: a page that holds either is still read
+    // where the handwriting cannot be (no recognizer on this PC), without any line, and says why.
     let (recognition, unreadable, structure) = match read {
         Ok(recognition) => {
             // The handwriting's structure (the app finds it once), the typed text put in it.
@@ -806,7 +809,7 @@ pub fn get_note_text(host: &Host, args: GetNoteTextArgs) -> ToolResult {
                 .with_typed(&typed);
             (recognition, None, structure)
         }
-        Err(error) if !typed.is_empty() => {
+        Err(error) if !typed.is_empty() || correction.is_some() => {
             let language = args
                 .language
                 .map_or(host.environment.language(), Language::from);
@@ -849,9 +852,6 @@ pub fn get_note_text(host: &Host, args: GetNoteTextArgs) -> ToolResult {
             }),
         })
         .collect();
-    // A transcription corrected with `set_note_text` replaces the recogniser's text (the lines
-    // and the structure, with their positions, stay the recogniser's).
-    let correction = host.handwriting.correction_of(note);
     let recognised = recognition.text();
     let mut result = json!({
         "note": NoteSummary::of_entry(&library, &entry),
@@ -862,6 +862,7 @@ pub fn get_note_text(host: &Host, args: GetNoteTextArgs) -> ToolResult {
         "lines": lines,
         "structure": {
             "source": match (&unreadable, structure.analyzed) {
+                (Some(_), _) if typed.is_empty() => "none",
                 (Some(_), _) => "typed_text_only",
                 (None, true) => "ink_analysis",
                 (None, false) => "layout_heuristics",

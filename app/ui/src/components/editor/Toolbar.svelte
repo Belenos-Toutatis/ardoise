@@ -15,7 +15,7 @@
   import { equationToolSize, textSettings, type EraserMode, type Mode, type TextSettings, type ToolSettings } from '../../lib/editor/state';
   import { CSS_FAMILY, TEXT_SIZES, TEXT_SIZE_NAMES, cssFamilies } from '../../lib/text';
   import { FONT_FAMILIES } from '../../lib/note';
-  import { t } from '../../lib/i18n.svelte';
+  import { currentLocale, t } from '../../lib/i18n.svelte';
   import { TOOLS, type Tool } from '../../lib/ink';
   import { INKSPACE_COLORS, cssColor, type Rgba, type ShapeSettings } from '../../lib/note';
   import StraightenPanel from './StraightenPanel.svelte';
@@ -186,7 +186,11 @@
   /** A toggle is pressed; the snap one is not while the page has nothing to snap to. */
   const pressed = (toggle: ShapeToggle) => shapePrefs[toggle] && (toggle !== 'snap' || snapAvailable);
 
-  const mm = (units: number) => (units / 100).toFixed(units < 100 ? 2 : 1);
+  /** The eraser's size as the language writes it (6,0 in French, 6.0 in English). */
+  const mm = (units: number) => {
+    const digits = units < 100 ? 2 : 1;
+    return new Intl.NumberFormat(currentLocale(), { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(units / 100);
+  };
 
   function pickCustom(e: Event) {
     const color = fromHex((e.currentTarget as HTMLInputElement).value);

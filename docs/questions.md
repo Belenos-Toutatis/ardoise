@@ -464,3 +464,35 @@ Décisions du développeur, à confirmer :
 - *Lecture par une version plus ancienne* : elle garde l'avertissement sans le montrer ; « Revenir à l'original » y reste refusé (« original illisible ») pour cette note.
 
 **SPEC** : §4.1 le dit depuis le 2026-11-25, avec l'accord de l'utilisateur (« Oui, écris-la »).
+
+## Q28 — Audit complet du 2026-11-26 : ce qui restait à décider — **tranchée le 2026-11-26, à essayer**
+
+Un audit de tout le code (douze relectures, une par partie) et de l'affichage (dans le navigateur, avec les maquettes) a relevé une soixantaine de défauts ; ils sont corrigés, chacun avec son test quand il se laisse tester (branche `audit-2026-11`). Quatre points demandaient une décision de l'utilisateur :
+
+- **Partage derrière le proxy de l'école.** Les limites « par adresse » du partage (cinq codes faux bloquent l'adresse cinq minutes ; huit jetons par adresse, le neuvième chasse le plus ancien) valent pour toute l'école quand tous les navigateurs passent par le même proxy (e2guardian) : un élève qui tape cinq codes faux bloque aussi le projecteur, et le neuvième écran peut déconnecter le premier. Compter par poste demanderait de se fier à l'en-tête `X-Forwarded-For`, qu'un navigateur peut falsifier. À choisir : laisser (et le dire dans le guide), se fier à l'en-tête quand la requête vient d'un proxy, ou relever les limites.
+- **« Synchroniser » sans tablette connectée, avec les deux tablettes connues.** Si la Xiaomi se connecte la première, la demande est abandonnée sans rien dire, et rien n'est importé quand la Bamboo arrive ensuite (Q15 dit seulement que cette demande n'importe pas les pages de la Xiaomi). À choisir : garder la demande pour la Bamboo, ou dire à l'écran qu'elle est abandonnée.
+- **Encodeur vidéo de Windows qui tombe en panne en cours d'export.** Le secours OpenH264 n'est essayé qu'à la création du fichier ; une panne pendant l'encodage (connue avec certains pilotes graphiques) donne le message « choisissez un autre emplacement », qui n'a rien à voir. Non reproduit sur ce PC. À choisir : un message juste qui propose OpenH264 ou le WebM, et peut-être un nouvel essai automatique en logiciel.
+- **Échec de l'export automatique après une synchronisation.** Il est maintenant écrit dans `_ardoise/diagnostics/autoexport.log` (avant : nulle part, l'exe n'ayant pas de console), mais rien ne le dit à l'écran. L'afficher demande un avertissement de plus dans l'état de la tablette.
+
+Choix de l'utilisateur (2026-11-26), mis en œuvre le même jour :
+
+- *Partage derrière le proxy* : « compter par poste, en lisant l'adresse que le proxy transmet dans la requête », en sachant qu'un élève outillé peut la falsifier. Les codes faux et les jetons se comptent par poste quand le proxy nomme le poste (dernière entrée de , sinon ). Filet ajouté par le développeur, à confirmer : chaque adresse de connexion garde une limite plus large (40 codes faux en 5 minutes, 128 jetons). **À vérifier à l'école** (, H4, partie B bis) : le filtre e2guardian ne nomme les postes que si son option  est activée, ce qui n'est pas son réglage par défaut ; sinon rien ne change, et le journal du partage le dit. Non traité : la limite de 4 écrans et de 8 connexions reste par adresse de connexion, donc commune à toute l'école derrière le proxy.
+- *« Synchroniser » sans tablette connectée* : « garder la demande ». Elle attend la Bamboo Slate et s'exécute à sa connexion, même si la Xiaomi se connecte avant ou si un direct a lieu entre-temps ; le panneau le dit. Elle n'importe toujours pas les pages de la Xiaomi (Q15). Elle disparaît si l'utilisateur l'annule ou si la Bamboo est oubliée ; avec la seule Xiaomi connue, rien ne change.
+- *Encodeur vidéo* : « corriger le message ». Une panne de l'encodeur de Windows pendant l'encodage a sa propre phrase, qui propose OpenH264 ou le WebM. Complément du développeur, à confirmer : pour que le conseil soit vrai, après une telle panne les exports MP4 suivants de la même session passent par OpenH264 s'il est installé (avant, Ardoise ne l'utilisait que si l'encodeur de Windows ne démarrait pas du tout). Rien n'est relancé tout seul.
+- *Échec de l'export automatique* : « l'afficher dans le panneau de la tablette à la fin de la synchronisation, comme un avertissement ». Fait, pour la Bamboo et la Xiaomi : le nombre de notes, le fichier ou le dossier concerné et la raison donnée par Windows, sans couleur d'erreur ; une vraie erreur s'affiche avant lui. Le journal  reste écrit.
+
+Décisions du développeur prises pendant les corrections, à confirmer :
+
+- *Durée d'un enregistrement sonore* : il s'arrête de lui-même juste avant 4 heures (la limite que la lecture accepte), est enregistré comme avec « Arrêter et enregistrer », et Ardoise le dit. Avant, un son plus long était écrit dans la note puis refusé à la lecture.
+- *Un titre qui ressemble à une copie en conflit* : « Incident (conflit entre élèves 2026-11-03) » donne un fichier « Incident [conflit entre élèves 2026-11-03] », pour ne plus être pris pour une copie de Nextcloud. Le titre affiché ne change pas ; un fichier déjà nommé à l'ancienne ne change de nom que si la note est retitrée ou redatée.
+- *Double clic sur l'étoile* : les deux clics comptent, la note revient donc à son état de départ (avant : le second donnait une fausse erreur « modifiée entre-temps »).
+- *Changer de bibliothèque* : refusé tant qu'un travail par lot est en cours sur les notes (une synchronisation de la tablette ne le bloque pas).
+- *Page du direct sans encre mais avec du son* (un trait commencé puis abandonné, pendant une narration) : elle devient une note, pour ne pas perdre le son.
+- *Ajout d'une tablette avec le Bluetooth coupé* : les boutons sont inactifs et disent pourquoi ; un assistant déjà ouvert passe à l'erreur après 1,5 s sans nouvelle du service.
+- *Nombres* : l'épaisseur du trait et la taille de la gomme suivent la langue (« 0,60 mm » en français). Les compteurs restent sans séparateur de milliers.
+- *Assistant (MCP)* : `get_note_text` rend la transcription corrigée même sans module d'écriture sur le PC ; `structure.source` vaut alors `"none"` quand la page n'a pas non plus de texte tapé.
+- *`ardoise.exe --self-test`* : ne démarre plus le service de la tablette, l'indexation de l'écriture ni l'entretien de la bibliothèque.
+
+Restes connus, non corrigés : le PDF d'un export reste entier en mémoire avant d'être écrit (environ 0,5 Go pour 80 pages scannées, contre 2,9 Go d'images décodées avant la correction) ; le glisser-déposer d'une page de plus de 5,7 m échoue encore ; l'opacité du crayon (pression, grain) n'est pas rendue dans l'éditeur comme dans les exports.
+
+**SPEC** : rien n'y est changé. La limite de 4 heures d'un enregistrement et la page écrite pour son seul son pourraient y figurer, si l'utilisateur le veut.

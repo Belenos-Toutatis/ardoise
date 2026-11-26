@@ -167,18 +167,26 @@ fn live_changed(app: &AppHandle) {
     let thread = std::thread::Builder::new()
         .name("session-end-reason".to_owned())
         .spawn(move || {
-            let running = LIVE.get().is_some_and(Activity::live);
             let french = app
                 .try_state::<AppContext>()
                 .is_some_and(|context| report_language(&context) == "fr");
-            reasons().live = running
-                .then(|| block_reason(Some(live_reason(french))))
-                .flatten();
+            follow_live(&REASONS, LIVE.get(), french);
             show_reason(&app);
         });
     if let Err(error) = thread {
         eprintln!("Ardoise: cannot update the reason shown at the end of the session: {error}");
     }
+}
+
+/// Gives `reasons` the lesson's reason while `live` says live mode runs, none otherwise. Read
+/// under their lock: of the threads of a start and of the stop that follows at once, the one that
+/// writes last reads the state after both, so the reason never outlives live mode.
+fn follow_live(reasons: &Mutex<Reasons>, live: Option<&Activity>, french: bool) {
+    let mut reasons = reasons.lock().unwrap_or_else(PoisonError::into_inner);
+    let running = live.is_some_and(Activity::live);
+    reasons.live = running
+        .then(|| block_reason(Some(live_reason(french))))
+        .flatten();
 }
 
 /// Watches the session's end on the main window and tao's hidden one, and live mode's state (call
@@ -512,6 +520,35 @@ mod tests {
         reasons.editor = None;
         reasons.live = None;
         assert_eq!(reasons.shown(), None);
+    }
+
+    /// Each start or stop of live mode sets the reason from a thread of its own: a start followed
+    /// at once by a stop must not leave the lesson's reason once live mode is over, whichever
+    /// thread writes last.
+    #[test]
+    fn the_lessons_reason_follows_live_mode_whatever_the_order_of_the_threads() {
+        let reasons = Mutex::new(Reasons::default());
+        let live = Activity::default();
+        live.set_live(true);
+        // The thread told of the start is held up (another one has the lock) while live mode stops.
+        let held = reasons.lock().unwrap();
+        std::thread::scope(|scope| {
+            let started = scope.spawn(|| follow_live(&reasons, Some(&live), true));
+            std::thread::sleep(Duration::from_millis(100));
+            live.set_live(false);
+            drop(held);
+            started.join().unwrap();
+        });
+        assert_eq!(reasons.lock().unwrap().live, None);
+        // Running: the reason, in the language asked for.
+        live.set_live(true);
+        follow_live(&reasons, Some(&live), false);
+        assert_eq!(
+            reasons.lock().unwrap().live,
+            block_reason(Some(live_reason(false)))
+        );
+        follow_live(&reasons, None, false);
+        assert_eq!(reasons.lock().unwrap().live, None);
     }
 
     #[test]

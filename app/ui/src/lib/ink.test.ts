@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
-import { DEFAULT_SHAPE_TUNING, TOOLS, instantiateInk, type InkStroke, type ShapeStroke } from './ink';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_SHAPE_TUNING, TOOLS, instantiateInk, loadInk, type InkStroke, type ShapeStroke } from './ink';
 import { DEFAULT_SHAPE_SETTINGS, toShapeTuning } from './shape-settings';
 
 const bytes = readFileSync(new URL('../assets/ardoise_ink.wasm', import.meta.url));
@@ -122,5 +122,27 @@ describe('stroke geometry in WebAssembly', () => {
 
   it('has the same default tuning as the settings', () => {
     expect(toShapeTuning({ ...DEFAULT_SHAPE_SETTINGS })).toEqual(DEFAULT_SHAPE_TUNING);
+  });
+});
+
+describe('loading the module', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('fetches it again after a failed load, and keeps it once loaded', async () => {
+    // The viewer page fetches it over the network: an HTTP error or a download cut short is not kept.
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValue(new Response(bytes, { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+    await expect(loadInk()).rejects.toThrow('HTTP 503');
+    await expect(loadInk()).rejects.toThrow('Failed to fetch');
+    const ink = await loadInk();
+    expect(ink.widthAt('ballpoint', 50, 1)).toBeGreaterThan(0);
+    expect(await loadInk()).toBe(ink);
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
 });

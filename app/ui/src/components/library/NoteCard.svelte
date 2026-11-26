@@ -46,6 +46,7 @@
 
   let src = $state<string | null>(null);
   let host = $state<HTMLElement | null>(null);
+  let item = $state<HTMLElement | null>(null);
   let renaming = $state(false);
   let draft = $state('');
   let input = $state<HTMLInputElement | null>(null);
@@ -205,25 +206,35 @@
     renaming = true;
   }
 
-  async function finishRename(commit: boolean) {
+  /**
+   * Ends the in-place rename. `refocus` (the key ended it, not a click elsewhere): the focus goes back to the card, which
+   * the field's removal would leave on the page, unless it went elsewhere meanwhile. A renamed card is focused by `onrenamed`.
+   */
+  async function finishRename(commit: boolean, refocus = false) {
     if (!renaming) return;
     renaming = false;
-    if (!commit || draft.trim() === note.title.trim()) return;
-    const path = await lib.retitle(note, draft);
-    if (path) {
-      await tick();
-      onrenamed(path);
+    if (commit && draft.trim() !== note.title.trim()) {
+      const path = await lib.retitle(note, draft);
+      if (path) {
+        await tick();
+        onrenamed(path);
+        return;
+      }
     }
+    if (!refocus) return;
+    await tick();
+    const active = document.activeElement;
+    if (!active || active === document.body || item?.contains(active)) item?.querySelector<HTMLElement>('.card-open')?.focus({ preventScroll: true });
   }
 
   function renameKey(event: KeyboardEvent) {
     if (event.key === 'Enter') {
       event.preventDefault();
-      void finishRename(true);
+      void finishRename(true, true);
     } else if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
-      void finishRename(false);
+      void finishRename(false, true);
     }
   }
 </script>
@@ -241,6 +252,7 @@
 <!-- The right click and the drag over are the pointer's extras: the keyboard has the card's menu and Alt + arrows. -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <li
+  bind:this={item}
   class="note-card"
   class:selected
   class:conflict={note.conflict}

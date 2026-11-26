@@ -6,8 +6,8 @@
 //! synced again: PDF at the note's actual size, or PNG at 150 dpi, with the paper. A page too
 //! large for a PNG at 150 dpi is exported at the highest lower resolution that fits (the report
 //! says so). A failed export never fails the sync (the note is safe in the library): the hook
-//! reports it to its caller, which logs it (`tablet::store_page_in`, the tablet service's page
-//! store).
+//! reports it to its caller, which logs it and hands it to the sync, whose end says it in the
+//! tablet panel (`tablet::store_stored_page_in`, the tablet service's page store; Q28).
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -38,6 +38,21 @@ pub enum AutoExportError {
     Render(#[from] RenderError),
     #[error("cannot write {}: {source}", path.display())]
     Write { path: PathBuf, source: io::Error },
+}
+
+impl AutoExportError {
+    /// What the end of a sync says of it (`docs/questions.md` Q28): the file the export was to
+    /// write, or the folder that cannot hold it (the note itself when it cannot be drawn or is
+    /// outside the library), and why, without that path (the system's own words for a file that
+    /// cannot be written).
+    pub fn target_and_reason(&self, note: &Path) -> (PathBuf, String) {
+        match self {
+            Self::InvalidFolder(folder) => (PathBuf::from(folder), self.to_string()),
+            Self::NotInLibrary(path) => (path.clone(), self.to_string()),
+            Self::Render(error) => (note.to_path_buf(), error.to_string()),
+            Self::Write { path, source } => (path.clone(), source.to_string()),
+        }
+    }
 }
 
 /// Where the export of the note stored at `note_path` goes, or `None` when the automatic
@@ -171,6 +186,9 @@ pub struct AutoExportReport {
     pub lowered: Vec<(PathBuf, u32)>,
     /// Notes not exported, with the reason.
     pub failures: Vec<(PathBuf, String)>,
+    /// The same failures as the end of the sync says them, in the same order: what could not be
+    /// written, and why ([`AutoExportError::target_and_reason`]).
+    pub unwritten: Vec<(PathBuf, String)>,
 }
 
 impl AutoExportReport {
@@ -187,7 +205,10 @@ impl AutoExportReport {
                 }
             }
             Ok(None) => {}
-            Err(error) => self.failures.push((saved.path.clone(), error.to_string())),
+            Err(error) => {
+                self.failures.push((saved.path.clone(), error.to_string()));
+                self.unwritten.push(error.target_and_reason(&saved.path));
+            }
         }
     }
 }

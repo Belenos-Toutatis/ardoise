@@ -225,6 +225,16 @@ Errors keep the `{ code, message }` shape. New codes (translated in `errorCodes.
 `narrationBusy` (a recording or monitor already runs), `noRecording`, `openh264DownloadFailed`, `liveNotRunning`
 (exists), `noteConflict` (exists).
 
+`videoEncoderFailed`: a Media Foundation error of an MP4 export other than a place problem (file creation, or a
+Win32 code such as disk full or access denied, which stay `videoExportFailed`), for instance a hardware encoder
+failing in `WriteSample` or `Finalize`; its sentence says to retry, check the disk space, then install OpenH264 or
+choose WebM. Nothing is retried automatically: `Auto` tries OpenH264 only when no Media Foundation writer can be
+created, so after a `videoEncoderFailed` (a process-wide flag, `WINDOWS_ENCODER_FAILED` in `video.rs`, kept until the
+application restarts) the next MP4 exports of that run use `Mp4Backend::OpenH264` when it is installed and allowed
+(`mp4_backend`), and stay on `Auto` otherwise; OpenH264 failing in turn is reported as it is. The failing export
+itself is not redone, and a real driver failure cannot be reproduced without the faulty driver: to reconsider if
+the failure is observed.
+
 `video.rs` (`VideoExportOptions` etc. are the TypeScript types of `app/ui/src/lib/video.ts`, camelCase):
 
 | Command | Arguments | Returns |
@@ -395,3 +405,26 @@ need), then sent it through IPC in one response and the editor wrapped it in a B
   ready to play, and the peak private memory of the app and its WebView2 processes: before (release exe of main
   f3841d4) 25.3 s and 3273 MB (398 MB before, 785 MB after); after (debug build) 2.7 s and 382 MB (266 MB before, 360 MB
   after). Both seek right: the replay put at 30:00 and 58:20 puts the sound at 1802.5 s and 3502.4 s.
+
+
+## Audit of 2026-11: the longest recording, the estimate, the capture's states
+
+- **The longest recording.** Nothing bounded a recording while the reading refused an `audio.opus` of more than 4 hours:
+  a narration left running after a lesson was written into its note, then read as `noteDamaged`, and the next recording
+  replaced it without asking. One constant now holds both ends: `ardoise_media::MAX_NARRATION_FRAMES` (4 hours) is what
+  `decode_narration`, `narration_header` and `Narration::merge` accept, and the recorder stops by itself at
+  `microphone::MAX_RECORDING_FRAMES` (that, less a minute). The capture then ends as after an unplugged microphone (the
+  device closes, the audio is kept), with its own state `CaptureState` `full`. The recording panel (`RecordPanel`) stops
+  it through its `onstop`, the very path of « Arrêter et enregistrer » for the three uses (replay, writing, live mode),
+  and says why (`narration.record.limitReached`) until the next start; the microphone picker says `narration.status.full`
+  meanwhile. A panel that is not shown (another tab of the side panel) stops it when it is shown, or the usual stops do
+  (leaving live mode, closing the editor); memory stays bounded (about 1.4 GB) in between.
+- **The estimate of a video export** (`estimate_video_export`, asked again 250 ms after each change of the dialog) reads
+  the narration's headers only (`narration_header`, `plan_export_from_header`), no longer decoding it (96 kB/s of PCM);
+  the export itself still decodes it.
+- **Capture states.** The level falls to zero when the capture fails, ends at its limit or receives nothing; `noData`
+  is also given when a stream stops delivering for 3 s after having started (a silence delivers frames: it is not this).
+  The interface only shows these states: none of them stops a recording, but `full`.
+- The narration commands that open a device, wait for the capture's lock or read a note (`list_microphones`,
+  `microphone_monitor`, `microphone_monitor_stop`, `narration_start`, `narration_status`, `narration_retry`,
+  `narration_info`) run on a blocking thread (`notes::blocking`), as `narration_audio` already did.

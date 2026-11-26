@@ -167,7 +167,11 @@ Taken while building:
    while the blackboard was the connected tablet (`tablet_sync({ confirmBlackboardDelete: true })` with
    `active === 'blackboard'`). Without one, a sync does nothing for the blackboard, without an error: a request made
    while nothing or the Slate is connected, a sync queued behind live mode or the Slate's automatic sync never deletes
-   the blackboard's pages when the option is off. A request without the flag while the blackboard is connected and the
+   the blackboard's pages when the option is off. With the Slate known too, such a request is the Slate's alone
+   (`pending: 'slateSync'`): the blackboard connecting first leaves it waiting, through its own syncs and live mode, and
+   it runs at the Slate's next connection (`docs/questions.md` Q28; before, it was dropped there). Cancelling with
+   nothing under way, or forgetting the Slate, drops it; cancelling the blackboard's own sync leaves it. With
+   the blackboard alone known it is dropped when the blackboard connects, as before (the panel does not offer it). A request without the flag while the blackboard is connected and the
    option off is refused (`blackboardConfirmDelete`, nothing done). A sync resumed after a lost link, a fresh link, a
    cancelled step or another library keeps exactly its permission. With the option on, nothing changes: the blackboard
    syncs automatically and on request.
@@ -244,6 +248,7 @@ Taken while building:
     (and the blackboard while the Slate does) does not interrupt the worker at all.
 17. **Forgetting a tablet** stops a live mode waiting for a tablet, the sync waiting and the pending state, as before
     the blackboard existed, unless the other tablet holds the link: then its sync, live mode and what waits for it stay.
+    A sync waiting for the Slate alone (§2.6, Q28) is the Slate's: forgetting the blackboard leaves it.
     Forgotten from another computer (its file gone from the shared library): a live run waiting for it ends once the
     other tablet is known (§2.10).
 18. **`blackboard.json` unreadable**: no blackboard known (a Slate goes on working), one line in the diagnostic log
@@ -416,7 +421,8 @@ export interface DeviceDetails {
 }
 
 export interface TabletStatus {
-  /* every field of today, unchanged */
+  /* every field of today, unchanged, except: pending may be 'slateSync' (§2.6, Q28), and
+     lastSync.exportFailed: { notes, path, reason } | null, the automatic exports a sync could not write (Q28) */
   active: TabletKind | null;        // the tablet of a connection: set only while connection is
                                     // 'connecting', 'connected', 'syncing' or 'live'
   known: KnownTablet[];             // every known tablet, the Slate first ([] when none)
@@ -436,7 +442,7 @@ the last connected tablet said (check `device.kind`); `lastSync` is the last syn
 | Just added | `searching` | `null` | contains `{ kind: 'blackboard' }` | | `boardSearch: null` |
 | Waiting for a known tablet | `searching` | `null` | 1 or 2 entries | last one | |
 | Connecting to the blackboard | `connecting` | `'blackboard'` | | | |
-| Connected | `connected` | `'blackboard'` | | `{ kind: 'blackboard', batteryPercent, storedPages, memory: { total, free }, firmware: '', charging: false, model: 'Xiaomi Mijia LCD blackboard', width: 20500, height: 27200 }` | `pending: 'sync'` when a sync waits |
+| Connected | `connected` | `'blackboard'` | | `{ kind: 'blackboard', batteryPercent, storedPages, memory: { total, free }, firmware: '', charging: false, model: 'Xiaomi Mijia LCD blackboard', width: 20500, height: 27200 }` | `pending: 'sync'` when a sync waits; `'slateSync'` when it waits for the Slate (§2.6) |
 | Syncing | `syncing` | `'blackboard'` | | `storedPages` = pages left, going down page by page | `sync: { current, total, saved }`, then `lastSync: { saved, deleted, error }` and back to `connected` with `active: 'blackboard'` (also after a sync of 0 pages, a failed or a cancelled one) |
 | Live | `live` | `'blackboard'` | | | live window as for the Slate |
 | Link lost | `searching` | `null` | | kept | live mode shows "reconnecting" |
@@ -524,7 +530,8 @@ page (§10, Q19).
 - Sync: with `options.deleteAfterImport === false` and `active === 'blackboard'`, `tablet_sync()` answers
   `blackboardConfirmDelete`: say that the pages will be deleted from the blackboard (it only gives its oldest page)
   and, if the user agrees, call `tablet_sync({ confirmBlackboardDelete: true })`. The automatic sync does nothing for
-  it then, nor does a sync asked while it is not connected.
+  it then, nor does a sync asked while it is not connected: with the Slate known, that one waits for the Slate
+  (`pending: 'slateSync'`, also while the blackboard is connected): name the Slate when saying it waits.
 - Forget: one "forget" per known tablet (`forget_tablet` for the Slate, `tablet_forget_blackboard` for the blackboard).
 - Resume in live mode: a blackboard note with the blackboard only, any other note with the Slate only (§5.5).
 - Limits for the guide (SPEC §4.1): one application at a time; pages go to whichever application imports them first;

@@ -28,6 +28,14 @@ export function claudeCodeCommand(exe: string, readOnly: boolean): string {
   return `claude mcp add --scope user ${SERVER_NAME} "--" "${exe}" ${mcpArgs(readOnly).join(' ')}`;
 }
 
+/**
+ * Whether PowerShell (`$` and the backtick, expanded inside double quotes) or the command prompt (`%name%`) would change the
+ * path inside the quotes of `claudeCodeCommand`: the command would then declare another path. The JSON is not concerned.
+ */
+export function pathChangedByShell(exe: string): boolean {
+  return /[$`%]/.test(exe);
+}
+
 /** The JSON for Claude Desktop (backslashes doubled by JSON itself). */
 export function claudeDesktopConfig(exe: string, readOnly: boolean): string {
   return JSON.stringify({ mcpServers: { [SERVER_NAME]: { command: exe, args: mcpArgs(readOnly) } } }, null, 2);

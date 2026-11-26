@@ -11,17 +11,19 @@
   import { onDestroy } from 'svelte';
   import { t } from '../../lib/i18n.svelte';
   import type { LibraryActivity } from '../../lib/library-activity.svelte';
+  import { modalOpen } from '../Modal.svelte';
 
-  let { activity }: { activity: LibraryActivity } = $props();
+  /** `active` false: the library is mounted but something else (live mode) is in front of it, and owns Ctrl+Z. */
+  let { activity, active = true }: { activity: LibraryActivity; active?: boolean } = $props();
 
   const progress = $derived(activity.progress);
 
   onDestroy(() => activity.dismissOffer());
 
-  /** Ctrl+Z in the library (not in a text field, nor with an editor open: it has its own undo). */
+  /** Ctrl+Z in the library (not in a text field, nor with an editor, live mode or a dialog in front: they have their own undo). */
   function onkeydown(event: KeyboardEvent) {
     if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'z') return;
-    if (event.defaultPrevented || !activity.canUndo || document.querySelector('.editor')) return;
+    if (event.defaultPrevented || !active || !activity.canUndo || document.querySelector('.editor') || modalOpen()) return;
     const target = event.target instanceof Element ? event.target : null;
     if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
     event.preventDefault();

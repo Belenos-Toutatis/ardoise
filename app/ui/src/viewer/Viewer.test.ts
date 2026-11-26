@@ -2,6 +2,7 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setLocale } from '../lib/i18n.svelte';
+import { loadInk } from '../lib/ink';
 import { FakeContext } from '../lib/live-fake-canvas';
 import type { LiveEvent, LiveSnapshot } from '../lib/live';
 import type { Layer, Note, Stroke } from '../lib/note';
@@ -13,7 +14,7 @@ vi.mock('../lib/ink', async (importOriginal) => {
   const { readFileSync } = await import('node:fs');
   const { resolve } = await import('node:path');
   const ink = actual.instantiateInk(readFileSync(resolve(process.cwd(), 'ui/src/assets/ardoise_ink.wasm')));
-  return { ...actual, loadInk: () => ink };
+  return { ...actual, loadInk: vi.fn(() => ink) };
 });
 
 const BLACK = { r: 0, g: 0, b: 0, a: 255 };
@@ -436,6 +437,25 @@ describe('viewer page: the shared page', () => {
     expect(ops).toContain('drawImage');
   });
 
+  it('fetches the stroke geometry again when it could not be fetched, and then draws the strokes', async () => {
+    // The module (about 3 MB) cut on the way: the page without a stroke, and no message, until a reload.
+    vi.mocked(loadInk).mockRejectedValueOnce(new Error('the download was cut'));
+    const calls = vi.mocked(loadInk).mock.calls.length;
+    const contexts: FakeContext[] = [];
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => {
+      const ctx = new FakeContext();
+      contexts.push(ctx);
+      return ctx as unknown as RenderingContext;
+    });
+    const view = render();
+    await join(view);
+    pc.send({ type: 'note', page: sharedPage([stroke(1000)]), background: null });
+    await vi.waitFor(() => expect(view.canvas()).not.toBeNull());
+    // Asked again when the stream opened.
+    await vi.waitFor(() => expect(contexts.some((c) => c.count('fill') > 0)).toBe(true));
+    expect(vi.mocked(loadInk).mock.calls.length - calls).toBe(2);
+  });
+
   describe('the paper of a live page', () => {
     const PICTURE = 'blob:the-picture';
 
@@ -768,6 +788,32 @@ describe("viewer page: this screen's own view", () => {
     await click(view, 'zoom-out');
     expect(data(view)).toMatchObject({ fit: 'page', zoom: 1 });
     expect(data(view).scale).toBeCloseTo(whole, 6);
+  });
+
+  it('takes the size of the window again when the page comes back, even the nominal 1280 × 720', async () => {
+    // jsdom has no layout: the box of the canvas measures what the test says.
+    let box = { width: 1600, height: 900 };
+    const measured = (side: 'width' | 'height') =>
+      function (this: Element) {
+        return this.classList.contains('viewer-canvas-box') ? box[side] : 0;
+      };
+    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(measured('width'));
+    vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(measured('height'));
+    const view = render();
+    await join(view);
+    pc.send({ type: 'note', page: sharedPage([stroke(1000)]), background: null });
+    await vi.waitFor(() => expect(view.canvas()).not.toBeNull());
+    await click(view, 'fit-width');
+    expect(data(view).scale * A4.width).toBeCloseTo(1600, 0);
+
+    // The sheet goes away; meanwhile the window becomes exactly the size the canvas starts from.
+    pc.send({ type: 'waiting' });
+    await vi.waitFor(() => expect(view.canvas()).toBeNull());
+    box = { width: 1280, height: 720 };
+    pc.send({ type: 'note', page: sharedPage([stroke(1000)]), background: null });
+    await vi.waitFor(() => expect(view.canvas()).not.toBeNull());
+    await click(view, 'fit-width');
+    expect(data(view).scale * A4.width).toBeCloseTo(1280, 0);
   });
 
   it('has no « Suivre le PC » for a note: the whole page by default, and the buttons still work', async () => {

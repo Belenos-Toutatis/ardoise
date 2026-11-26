@@ -16,7 +16,8 @@ use crate::{AudioClip, MediaError};
 /// How often the worker wakes up to look at the stop flag when no audio arrives.
 const POLL: Duration = Duration::from_millis(50);
 
-/// A stream that has delivered nothing for this long is reported as [`CaptureStatus::NoData`].
+/// A stream that has delivered nothing for this long (since its start, or since its last frame)
+/// is reported as [`CaptureStatus::NoData`]. A silence is no such thing: it delivers frames.
 const NO_DATA_AFTER: Duration = Duration::from_secs(3);
 
 /// What the `cpal` callbacks send to the worker.
@@ -39,7 +40,8 @@ pub(crate) struct CaptureFormat {
 pub enum CaptureStatus {
     /// The stream was started and no audio has arrived yet.
     Waiting,
-    /// No audio for several seconds after the start: the device is stuck.
+    /// No audio for several seconds, after the start or since the last audio: the device is
+    /// stuck.
     NoData,
     /// Audio is arriving.
     Receiving,
@@ -51,6 +53,10 @@ pub enum CaptureStatus {
     Silent,
     /// The stream failed (device unplugged...); the message is for the log.
     Failed(String),
+    /// The recording reached the longest narration
+    /// ([`MAX_RECORDING_FRAMES`](super::MAX_RECORDING_FRAMES)): the capture stopped by itself and
+    /// [`Recorder::stop`] returns what it recorded, as after any stop.
+    Full,
 }
 
 #[derive(Default)]
@@ -58,8 +64,44 @@ struct State {
     level: Level,
     elapsed: Duration,
     frames: u64,
+    /// When the last frame arrived.
+    last_frame: Option<Instant>,
     silent: bool,
+    full: bool,
     failure: Option<String>,
+}
+
+impl State {
+    /// See [`CaptureStatus`]: what a capture started at `started` is doing at `now`.
+    fn status(&self, started: Instant, now: Instant) -> CaptureStatus {
+        if let Some(failure) = &self.failure {
+            CaptureStatus::Failed(failure.clone())
+        } else if self.full {
+            CaptureStatus::Full
+        } else if self.stalled(started, now) {
+            CaptureStatus::NoData
+        } else if self.frames == 0 {
+            CaptureStatus::Waiting
+        } else if self.silent {
+            CaptureStatus::Silent
+        } else {
+            CaptureStatus::Receiving
+        }
+    }
+
+    /// The level shown: zero once nothing arrives any more.
+    fn level(&self, started: Instant, now: Instant) -> Level {
+        if self.stalled(started, now) {
+            Level::default()
+        } else {
+            self.level
+        }
+    }
+
+    /// Nothing arrived for [`NO_DATA_AFTER`], since the start or since the last frame.
+    fn stalled(&self, started: Instant, now: Instant) -> bool {
+        now.saturating_duration_since(self.last_frame.unwrap_or(started)) > NO_DATA_AFTER
+    }
 }
 
 /// State shared between the worker and the [`Recorder`] handle.
@@ -75,14 +117,26 @@ impl Shared {
 
     fn update(&self, pipeline: &Pipeline) {
         let mut state = self.lock();
-        state.level = pipeline.level();
+        let frames = pipeline.frames_received();
+        if frames != state.frames {
+            state.last_frame = Some(Instant::now());
+        }
+        state.full = pipeline.is_full();
+        // The meter falls to zero with a capture that ended.
+        state.level = if state.full {
+            Level::default()
+        } else {
+            pipeline.level()
+        };
         state.elapsed = pipeline.elapsed();
-        state.frames = pipeline.frames_received();
+        state.frames = frames;
         state.silent = pipeline.is_silent_now();
     }
 
     fn fail(&self, message: String) {
-        self.lock().failure = Some(message);
+        let mut state = self.lock();
+        state.failure = Some(message);
+        state.level = Level::default();
     }
 }
 
@@ -96,7 +150,7 @@ pub(crate) struct CaptureOutcome {
 }
 
 /// The consuming loop: reads events until `stop` is set (then drains what is already queued),
-/// the channel closes, or the stream fails.
+/// the channel closes, the stream fails, or a recording reaches its limit.
 pub(crate) fn run_capture(
     rx: &Receiver<CaptureEvent>,
     format: CaptureFormat,
@@ -104,7 +158,17 @@ pub(crate) fn run_capture(
     stop: &AtomicBool,
     shared: &Shared,
 ) -> Result<CaptureOutcome, MediaError> {
-    let mut pipeline = Pipeline::new(format.sample_rate, format.channels, record)?;
+    let pipeline = Pipeline::new(format.sample_rate, format.channels, record)?;
+    consume(rx, pipeline, stop, shared)
+}
+
+/// [`run_capture`] into `pipeline`.
+fn consume(
+    rx: &Receiver<CaptureEvent>,
+    mut pipeline: Pipeline,
+    stop: &AtomicBool,
+    shared: &Shared,
+) -> Result<CaptureOutcome, MediaError> {
     let mut failure = None;
     loop {
         let event = if stop.load(Ordering::Acquire) {
@@ -126,6 +190,11 @@ pub(crate) fn run_capture(
                     return Err(e);
                 }
                 shared.update(&pipeline);
+                // The longest narration: the capture ends (the device closes) and keeps what
+                // it has, as at a stop.
+                if pipeline.is_full() {
+                    break;
+                }
             }
             Some(CaptureEvent::Failed(message)) => {
                 shared.fail(message.clone());
@@ -151,7 +220,8 @@ pub(crate) fn run_capture(
 /// (a voice does not need stereo, and a stereo microphone is averaged to one channel).
 /// Dropping the recorder stops the capture and discards the audio.
 ///
-/// Memory: 48 kHz mono 16-bit is 96 kB per second, so an hour is about 350 MB.
+/// Memory: 48 kHz mono 16-bit is 96 kB per second, so an hour is about 350 MB. A recording stops
+/// by itself at [`MAX_RECORDING_FRAMES`](super::MAX_RECORDING_FRAMES) (just under 4 hours).
 pub struct Recorder {
     shared: Arc<Shared>,
     stop: Arc<AtomicBool>,
@@ -240,9 +310,10 @@ impl Recorder {
         &self.device_name
     }
 
-    /// Loudness over the last completed 50 ms window (see [`Level`]); zero until the first.
+    /// Loudness over the last completed 50 ms window (see [`Level`]); zero until the first, and
+    /// once the capture failed, ended at its limit or no longer receives anything.
     pub fn level(&self) -> Level {
-        self.shared.lock().level
+        self.shared.lock().level(self.started, Instant::now())
     }
 
     /// Audio time received so far (counted in samples, not wall-clock).
@@ -252,20 +323,7 @@ impl Recorder {
 
     /// See [`CaptureStatus`].
     pub fn status(&self) -> CaptureStatus {
-        let state = self.shared.lock();
-        if let Some(failure) = &state.failure {
-            CaptureStatus::Failed(failure.clone())
-        } else if state.silent {
-            CaptureStatus::Silent
-        } else if state.frames == 0 {
-            if self.started.elapsed() > NO_DATA_AFTER {
-                CaptureStatus::NoData
-            } else {
-                CaptureStatus::Waiting
-            }
-        } else {
-            CaptureStatus::Receiving
-        }
+        self.shared.lock().status(self.started, Instant::now())
     }
 
     /// Stops the capture and returns the narration (48 kHz, mono).
@@ -276,6 +334,7 @@ impl Recorder {
     /// - If the device failed in the middle (unplugged), what was recorded before is returned;
     ///   the interface saw [`CaptureStatus::Failed`] meanwhile. With nothing recorded, the
     ///   failure is returned as [`MediaError::Microphone`].
+    /// - A recording that reached its limit ([`CaptureStatus::Full`]) returns what it recorded.
     pub fn stop(mut self) -> Result<AudioClip, MediaError> {
         self.stop.store(true, Ordering::Release);
         let Some(worker) = self.worker.take() else {
@@ -400,7 +459,75 @@ mod tests {
         let outcome = outcome.expect("outcome");
         assert_eq!(outcome.failure.as_deref(), Some("device unplugged"));
         assert_eq!(outcome.clip.samples.len(), 4_800);
-        assert_eq!(shared.lock().failure.as_deref(), Some("device unplugged"));
+        let state = shared.lock();
+        assert_eq!(state.failure.as_deref(), Some("device unplugged"));
+        // The meter falls with the microphone instead of staying at the last tone.
+        assert_eq!(state.level, Level::default());
+    }
+
+    #[test]
+    fn a_recording_stops_by_itself_at_its_limit_and_keeps_what_came_before() {
+        let (tx, rx) = mpsc::channel();
+        let shared = Arc::new(Shared::default());
+        // 0.1 s at 48 kHz is 4410 frames at 44.1 kHz.
+        let pipeline = Pipeline::with_limit(44_100, 1, true, 4_800).expect("pipeline");
+        let (done, outcome) = mpsc::channel();
+        let worker = {
+            let shared = Arc::clone(&shared);
+            std::thread::spawn(move || {
+                // Neither the stop flag nor a closed channel ends this loop.
+                let stop = AtomicBool::new(false);
+                let _ = done.send(consume(&rx, pipeline, &stop, &shared));
+            })
+        };
+        for _ in 0..3 {
+            tx.send(CaptureEvent::Samples(tone(44_100, 1, 2_205))).ok();
+        }
+        let outcome = outcome
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the capture ended by itself")
+            .expect("outcome");
+        worker.join().expect("no panic");
+        assert_eq!(outcome.clip.samples.len(), 4_800);
+        assert!(outcome.failure.is_none());
+        let state = shared.lock();
+        let now = Instant::now();
+        assert_eq!(state.status(now, now), CaptureStatus::Full);
+        assert_eq!(state.frames, 4_410);
+        assert_eq!(state.level, Level::default());
+        drop(tx);
+    }
+
+    #[test]
+    fn a_monitor_has_no_limit() {
+        // It keeps nothing, whatever its length.
+        let mut monitor = Pipeline::with_limit(48_000, 1, false, 480).expect("pipeline");
+        monitor.push(&tone(48_000, 1, 4_800)).expect("push");
+        assert!(!monitor.is_full());
+    }
+
+    #[test]
+    fn a_stream_that_stops_delivering_is_reported_and_its_level_falls() {
+        let started = Instant::now();
+        let at = |ms: u64| started + Duration::from_millis(ms);
+        let mut state = State::default();
+        assert_eq!(state.status(started, at(1_000)), CaptureStatus::Waiting);
+        assert_eq!(state.status(started, at(3_500)), CaptureStatus::NoData);
+        // Audio arrived at 4 s, then nothing more.
+        state.frames = 4_410;
+        state.last_frame = Some(at(4_000));
+        state.level = Level {
+            peak: 0.3,
+            rms: 0.2,
+        };
+        assert_eq!(state.status(started, at(6_000)), CaptureStatus::Receiving);
+        assert_eq!(state.level(started, at(6_000)).peak, 0.3);
+        assert_eq!(state.status(started, at(7_500)), CaptureStatus::NoData);
+        assert_eq!(state.level(started, at(7_500)), Level::default());
+        // A silence delivers frames: it is reported as such, not as a stuck stream.
+        state.silent = true;
+        state.last_frame = Some(at(7_400));
+        assert_eq!(state.status(started, at(7_500)), CaptureStatus::Silent);
     }
 
     #[test]

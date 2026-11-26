@@ -438,7 +438,8 @@ again.
   sync, no question.
 - With that option off, Ardoise imports the Xiaomi tablet's pages **only on request**. The panel says "N pages are
   waiting on the Xiaomi tablet"; **Sync** first asks you to confirm that the pages will be deleted from the tablet
-  once imported (**Sync and delete**).
+  once imported (**Sync and delete**). A **Sync** clicked while it is not connected is for the Bamboo Slate: it waits
+  for the Slate, even if the Xiaomi tablet connects first, and does not import the Xiaomi's pages.
 - The progress counts the pages one by one, and the number of **pages in memory** goes down as it goes.
 - After a transfer that did not end cleanly (stopped or cancelled in the middle of a page), Ardoise closes the
   Bluetooth link and opens it again before using it for a page or for live mode again (at once during a sync,
@@ -490,7 +491,9 @@ it is in the trash or was deleted, or the new page does not contain it), a new n
 In **Settings**, **Automatic export after sync**: choose a **Format** (**Off**, **PDF** or **PNG (image)**) and a
 **Folder in the library** (for example `Exports`), then **Save**. Each page received is then also written as a PDF or a
 PNG in that folder: you can read your notes on your phone with the Nextcloud app. This folder is not shown in the list of
-binders.
+binders. If a file cannot be written (a read-only folder, a file held open by Nextcloud or a viewer), the note is imported
+all the same: at the end of the sync, the **Use** tab of the **Tablet** panel says so, under the result of the sync, with
+the number of notes, the file and why (the details are in `_ardoise\diagnostics\autoexport.log`, in the library).
 
 ## 6. Live mode and presenting in class
 
@@ -1011,7 +1014,8 @@ network. Ardoise never changes the firewall itself.
 
 **Privacy.** The share starts only when you click, and stops with **Stop sharing** or when Ardoise closes (the port is
 then closed again). The code changes at each share. After 5 wrong codes in 5 minutes, the computer concerned has to
-wait (the page says how long), without bothering the others. The exchanges are *not encrypted* (it is plain `http` on
+wait (the page says how long), without bothering the others (except sometimes behind a school's web filter, see
+below). The exchanges are *not encrypted* (it is plain `http` on
 the local network): use this sharing only on a network you trust, and not for confidential notes on an open network.
 The writing and the image of the shared notes can be seen by anyone who has the address *and* the code.
 
@@ -1022,6 +1026,10 @@ The writing and the image of the shared notes can be seen by anyone who has the 
   the port may have changed if another program held 8765.
 - Has the firewall been allowed for this type of network (see above)? This is the most frequent cause.
 - The page says the code is wrong: read the panel's code again (there is no `0`, `O`, `1`, `I` or `L`).
+- The page asks to wait although this computer typed no wrong code: at school, computers often go through the web
+  filter, and the share tells them apart only if the filter says which computer the page comes from. Otherwise, or
+  after many wrong codes in a short time (40 in 5 minutes), all those going through it wait together. Wait for the
+  time shown.
 - The page says there are too many screens: the share accepts 32 screens at a time (4 per computer). It tries again
   by itself every 5 seconds.
 - The browser only shows "Misdirected Request": type the address in figures that the panel shows. For safety, the
@@ -1811,6 +1819,10 @@ Microphone* and turn on *Let desktop apps access your microphone* (a microphone 
 same result).
 
 In live mode, **Record the narration** records the sound during the session, cut page by page.
+
+A recording lasts 4 hours at most (a recording left running at the end of a lesson, for instance): it then stops by
+itself and is saved as with **Stop and save**, and Ardoise says so ("The recording stopped by itself: it reached its
+longest length (4 hours).").
 
 ### Exporting as video
 

@@ -20,9 +20,10 @@ use ardoise_core::library::{Library, LibraryError};
 use ardoise_core::note::Note;
 use ardoise_media::replay::{MAX_SPEED, MIN_SPEED, ReplayOptions};
 use ardoise_media::{
-    AnimationExport, AnimationFormat, ExportProgress, FormatOptions, GifOptions, MediaError,
-    Mp4Options, Narration, OpenH264Codec, WebmOptions, WebpOptions, decode_narration,
-    estimate_export_time, export_animation, page_frame_size, plan_export,
+    AnimationExport, AnimationFormat, CodecStatus, ExportProgress, FormatOptions, GifOptions,
+    MediaError, Mp4Backend, Mp4Options, Narration, OpenH264Codec, WebmOptions, WebpOptions,
+    decode_narration, estimate_export_time, export_animation, narration_header, page_frame_size,
+    plan_export_from_header,
 };
 use ardoise_render::{Backdrop, NoteView, Picture};
 use serde::{Deserialize, Serialize};
@@ -43,6 +44,9 @@ pub const INVALID_VIDEO_SETTINGS: &str = "invalidVideoSettings";
 /// Error code of an MP4 export without any H.264 encoder (no Media Foundation, and the OpenH264
 /// fallback not installed or not allowed).
 pub const CODEC_UNAVAILABLE: &str = "codecUnavailable";
+/// Error code of an MP4 export where Media Foundation (the H.264 encoder of Windows, often a
+/// hardware one) failed after the writer was created, while encoding or finishing the file.
+pub const VIDEO_ENCODER_FAILED: &str = "videoEncoderFailed";
 
 /// Frame rates offered by the interface (`FRAME_RATES` in `video.ts`).
 pub const FRAME_RATES: [u32; 5] = [10, 15, 24, 30, 60];
@@ -198,6 +202,40 @@ pub fn duration_ms(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
+/// Whether a Media Foundation failure comes from the place the file is written (it cannot be
+/// created, the disk is full, the folder is read-only or gone) rather than from the encoder.
+/// Media Foundation passes file errors on as Win32 codes wrapped in an HRESULT; a code it does
+/// not translate that way counts as the encoder's, and its sentence still mentions the space.
+fn place_failure(step: &str, code: u32) -> bool {
+    // The sink writer creates the file there: whatever fails is about the file.
+    if step == "MFCreateSinkWriterFromURL" {
+        return true;
+    }
+    // HRESULT_FROM_WIN32 (0x8007_xxxx), HRESULT_FROM_NT (0xD000_xxxx) or a bare Win32 code.
+    let win32 = match code >> 16 {
+        0x8007 => code & 0xFFFF,
+        0 => code,
+        _ => return code == 0xD000_007F, // STATUS_DISK_FULL
+    };
+    matches!(
+        win32,
+        2 // ERROR_FILE_NOT_FOUND
+            | 3 // ERROR_PATH_NOT_FOUND
+            | 5 // ERROR_ACCESS_DENIED
+            | 19 // ERROR_WRITE_PROTECT
+            | 21 // ERROR_NOT_READY
+            | 32 // ERROR_SHARING_VIOLATION
+            | 33 // ERROR_LOCK_VIOLATION
+            | 39 // ERROR_HANDLE_DISK_FULL
+            | 53 // ERROR_BAD_NETPATH
+            | 64 // ERROR_NETNAME_DELETED
+            | 112 // ERROR_DISK_FULL
+            | 123 // ERROR_INVALID_NAME
+            | 206 // ERROR_FILENAME_EXCED_RANGE
+            | 1117 // ERROR_IO_DEVICE
+    )
+}
+
 /// Error for the interface from the media pipeline, for an export to `format`.
 pub(crate) fn video_error(error: MediaError, format: AnimationFormat) -> CommandError {
     let mp4 = format == AnimationFormat::Mp4;
@@ -211,6 +249,9 @@ pub(crate) fn video_error(error: MediaError, format: AnimationFormat) -> Command
             if mp4 =>
         {
             CODEC_UNAVAILABLE
+        }
+        MediaError::MediaFoundation { step, code, .. } if mp4 && !place_failure(step, *code) => {
+            VIDEO_ENCODER_FAILED
         }
         MediaError::MicrophoneNotFound(_) => crate::narration::MICROPHONE_NOT_FOUND,
         MediaError::MicrophoneSilent => crate::narration::MICROPHONE_SILENT,
@@ -332,6 +373,39 @@ pub fn load_video_source(
     source: ExportSource,
     narration: bool,
 ) -> CommandResult<VideoSource> {
+    let files = load_source_files(library, source, narration)?;
+    let narration = files
+        .audio
+        .map(|bytes| decode_narration(&bytes).map_err(unreadable_narration))
+        .transpose()?;
+    Ok(VideoSource {
+        note: files.note,
+        picture: files.picture,
+        narration,
+    })
+}
+
+/// What [`load_source_files`] reads: the narration as stored (its `audio.opus`, when wanted).
+struct SourceFiles {
+    note: Note,
+    picture: Option<Arc<Picture>>,
+    audio: Option<Vec<u8>>,
+}
+
+/// `videoExportFailed` for a stored narration that cannot be read.
+fn unreadable_narration(error: MediaError) -> CommandError {
+    CommandError::new(
+        VIDEO_EXPORT_FAILED,
+        format!("the narration stored in the note cannot be read: {error}"),
+    )
+}
+
+/// What [`load_video_source`] reads, before the narration is decoded.
+fn load_source_files(
+    library: Option<&Library>,
+    source: ExportSource,
+    narration: bool,
+) -> CommandResult<SourceFiles> {
     let path = Path::new(&source.path);
     let wants_file =
         source.note.is_none() || (narration && !source.path.is_empty()) || image_from_file(&source);
@@ -355,23 +429,15 @@ pub fn load_video_source(
         }
     };
     let picture = background::source_picture(&note, key.as_deref(), member.as_ref())?;
-    let narration = match audio {
-        Some(bytes) if narration => Some(decode_narration(&bytes).map_err(|error| {
-            CommandError::new(
-                VIDEO_EXPORT_FAILED,
-                format!("the narration stored in the note cannot be read: {error}"),
-            )
-        })?),
-        _ => None,
-    };
-    Ok(VideoSource {
+    Ok(SourceFiles {
         note,
         picture,
-        narration,
+        audio: audio.filter(|_| narration),
     })
 }
 
-/// What the export of `source` with `options` would be (nothing is written).
+/// What the export of `source` with `options` would be (nothing is written). The narration is
+/// read from its headers, not decoded: the dialog asks again after each change of its settings.
 pub fn estimate_in(
     library: Option<&Library>,
     source: ExportSource,
@@ -379,14 +445,18 @@ pub fn estimate_in(
 ) -> CommandResult<VideoEstimate> {
     check_options(options)?;
     let format = options.format.animation();
-    let source = load_video_source(library, source, wants_narration(options))?;
-    let export = animation_export(&source.note, options)?;
-    let plan = plan_export(&source.note, &export, source.narration.as_ref())
+    let SourceFiles { note, audio, .. } =
+        load_source_files(library, source, wants_narration(options))?;
+    let narration = audio
+        .map(|bytes| narration_header(&bytes).map_err(unreadable_narration))
+        .transpose()?;
+    let export = animation_export(&note, options)?;
+    let plan = plan_export_from_header(&note, &export, narration.as_ref())
         .map_err(|error| video_error(error, format))?;
     let narration_ms = plan
         .audio_start
-        .and(source.narration.as_ref())
-        .map(|narration| duration_ms(narration.duration()));
+        .and(narration)
+        .map(|narration| duration_ms(narration.duration));
     Ok(VideoEstimate {
         width: export.width,
         height: export.height,
@@ -439,6 +509,30 @@ impl Throttle {
     }
 }
 
+/// Set once the video encoder of Windows failed during an MP4 export of this run of the
+/// application (`videoEncoderFailed`); never cleared, a new run starts afresh.
+static WINDOWS_ENCODER_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// Raises `flag` when `error` is `videoEncoderFailed`; gives `error` back as it is.
+fn remember_encoder_failure(flag: &AtomicBool, error: CommandError) -> CommandError {
+    if error.is_code(VIDEO_ENCODER_FAILED) {
+        flag.store(true, Ordering::Relaxed);
+    }
+    error
+}
+
+/// Back end of an MP4 export. `Auto` tries Media Foundation first and OpenH264 only when no
+/// Media Foundation writer can be created, so once Media Foundation failed while encoding, the
+/// next exports use OpenH264 directly when it is installed and allowed; they stay on Media
+/// Foundation otherwise. OpenH264 failing in turn is reported as it is, nothing is retried.
+fn mp4_backend(windows_encoder_failed: bool, openh264_installed: bool) -> Mp4Backend {
+    if windows_encoder_failed && openh264_installed {
+        Mp4Backend::OpenH264
+    } else {
+        Mp4Backend::Auto
+    }
+}
+
 /// Exports `source` with `options` to `destination` (replaced only once complete); `progress`
 /// gets at most 10 reports a second plus the last one; `cancel` stops it (`cancelled`, nothing
 /// written). `openh264`: the fallback library for MP4, when the user allows it.
@@ -466,7 +560,12 @@ pub fn export_video_in(
     }
     let format = options.format.animation();
     let source = load_video_source(library, source, wants_narration(options))?;
-    let export = animation_export(&source.note, options)?;
+    let mut export = animation_export(&source.note, options)?;
+    if let FormatOptions::Mp4(mp4) = &mut export.format {
+        let installed =
+            openh264.is_some_and(|codec| matches!(codec.status(), CodecStatus::Installed { .. }));
+        mp4.backend = mp4_backend(WINDOWS_ENCODER_FAILED.load(Ordering::Relaxed), installed);
+    }
     let started = Instant::now();
     let mut throttle = Throttle::new(PROGRESS_INTERVAL);
     let elapsed = |started: Instant| duration_ms(started.elapsed());
@@ -488,7 +587,9 @@ pub fn export_video_in(
         &mut report,
         cancel,
     )
-    .map_err(|error| video_error(error, format))?;
+    .map_err(|error| {
+        remember_encoder_failure(&WINDOWS_ENCODER_FAILED, video_error(error, format))
+    })?;
     if !throttle.finished() {
         progress(VideoProgress {
             frames_done: summary.frames,
@@ -863,6 +964,77 @@ mod tests {
     }
 
     #[test]
+    fn after_a_windows_encoder_failure_mp4_goes_through_openh264_when_it_is_there() {
+        // Nothing failed, or OpenH264 is not installed (or not allowed): as before.
+        assert_eq!(mp4_backend(false, true), Mp4Backend::Auto);
+        assert_eq!(mp4_backend(false, false), Mp4Backend::Auto);
+        assert_eq!(mp4_backend(true, false), Mp4Backend::Auto);
+        assert_eq!(mp4_backend(true, true), Mp4Backend::OpenH264);
+
+        // Only `videoEncoderFailed` raises the flag; the error itself is not changed.
+        let flag = AtomicBool::new(false);
+        for code in [VIDEO_EXPORT_FAILED, CODEC_UNAVAILABLE, CANCELLED] {
+            remember_encoder_failure(&flag, CommandError::new(code, "x"));
+            assert!(!flag.load(Ordering::Relaxed), "{code}");
+        }
+        let error = remember_encoder_failure(&flag, CommandError::new(VIDEO_ENCODER_FAILED, "x"));
+        assert_eq!(error.code(), VIDEO_ENCODER_FAILED);
+        assert!(flag.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_media_foundation_failure_while_encoding_is_not_told_as_a_place_problem() {
+        let mp4 = AnimationFormat::Mp4;
+        let failure = |step: &'static str, code: u32| MediaError::MediaFoundation {
+            step,
+            code,
+            message: "x".into(),
+        };
+        let code_of = |error: MediaError, format| video_error(error, format).code();
+        // The encoder gives up while samples are written, the file is finished or it starts:
+        // E_FAIL, MF_E_TRANSFORM_STREAM_CHANGE, MF_E_HW_MFT_FAILED_START_STREAMING.
+        for (step, code) in [
+            ("IMFSinkWriter::WriteSample", 0x8000_4005),
+            ("IMFSinkWriter::Finalize", 0xC00D_6D61),
+            ("IMFSinkWriter::BeginWriting", 0xC00D_3EA2),
+            ("IMFSinkWriter::AddStream (H.264)", 0x8000_4005),
+        ] {
+            assert_eq!(
+                code_of(failure(step, code), mp4),
+                VIDEO_ENCODER_FAILED,
+                "{step} {code:#x}"
+            );
+        }
+        // The place is at fault: the file cannot be created, the disk is full (ERROR_DISK_FULL,
+        // ERROR_HANDLE_DISK_FULL, STATUS_DISK_FULL), the folder is read-only or gone.
+        for (step, code) in [
+            ("MFCreateSinkWriterFromURL", 0x8000_4005),
+            ("MFCreateSinkWriterFromURL", 0x8007_0003),
+            ("IMFSinkWriter::WriteSample", 0x8007_0070),
+            ("IMFSinkWriter::WriteSample", 0x8007_0027),
+            ("IMFSinkWriter::Finalize", 0xD000_007F),
+            ("IMFSinkWriter::Finalize", 0x8007_0005),
+            ("IMFSinkWriter::Finalize", 0x8007_0013),
+            ("IMFSinkWriter::Finalize", 0x8007_0070),
+            ("IMFSinkWriter::WriteSample", 0x70),
+        ] {
+            assert_eq!(
+                code_of(failure(step, code), mp4),
+                VIDEO_EXPORT_FAILED,
+                "{step} {code:#x}"
+            );
+        }
+        // Only an MP4 goes through Media Foundation.
+        assert_eq!(
+            code_of(
+                failure("IMFSinkWriter::WriteSample", 0x8000_4005),
+                AnimationFormat::Gif
+            ),
+            VIDEO_EXPORT_FAILED
+        );
+    }
+
+    #[test]
     fn progress_is_throttled_but_the_end_always_goes_out() {
         let mut throttle = Throttle::new(Duration::from_millis(100));
         let t0 = Instant::now();
@@ -1145,5 +1317,98 @@ mod tests {
         .unwrap();
         assert_eq!(gif.narration_ms, None);
         assert_eq!(gif.speed, 1.0);
+    }
+
+    /// The Ogg CRC (RFC 3533: polynomial 0x04c11db7, not reflected, initial value 0).
+    fn ogg_crc(bytes: &[u8]) -> u32 {
+        let mut crc = 0u32;
+        for &byte in bytes {
+            crc ^= u32::from(byte) << 24;
+            for _ in 0..8 {
+                crc = if crc & 0x8000_0000 != 0 {
+                    (crc << 1) ^ 0x04c1_1db7
+                } else {
+                    crc << 1
+                };
+            }
+        }
+        crc
+    }
+
+    /// `audio`, an Ogg stream, with the granule position of its last page moved by `delta`: its
+    /// headers then give another length, while its packets decode to the same sound.
+    fn with_last_granule_moved(mut audio: Vec<u8>, delta: i64) -> Vec<u8> {
+        let mut start = 0;
+        let last = loop {
+            let segments = usize::from(audio[start + 26]);
+            let body: usize = audio[start + 27..start + 27 + segments]
+                .iter()
+                .map(|&lacing| usize::from(lacing))
+                .sum();
+            let end = start + 27 + segments + body;
+            if end == audio.len() {
+                break start..end;
+            }
+            start = end;
+        };
+        let at = last.start + 6..last.start + 14;
+        let granule = u64::from_le_bytes(audio[at.clone()].try_into().unwrap());
+        let moved = granule.checked_add_signed(delta).unwrap();
+        audio[at].copy_from_slice(&moved.to_le_bytes());
+        audio[last.start + 22..last.start + 26].fill(0);
+        let crc = ogg_crc(&audio[last.clone()]);
+        audio[last.start + 22..last.start + 26].copy_from_slice(&crc.to_le_bytes());
+        audio
+    }
+
+    #[test]
+    fn the_estimate_reads_the_narration_without_decoding_it() {
+        // A narration whose headers give 20 ms while its packets hold 3 s: decoding it refuses it
+        // ("more sound than the file can hold"), its headers alone are read as `narration_info`
+        // reads them.
+        let (_dir, library) = library();
+        let saved = write_sample(&library, "", "Essai");
+        let narration = Narration {
+            clip: simulated_narration(Duration::from_secs(3), 1),
+            base: NarrationBase::Replay,
+            options: ReplayOptions {
+                speed: 2.0,
+                max_pause: None,
+            },
+            start_ms: 0,
+        };
+        let frames = i64::try_from(narration.clip.samples.len()).unwrap();
+        let audio = with_last_granule_moved(encode_narration(&narration).unwrap(), 960 - frames);
+        assert_eq!(
+            narration_header(&audio).unwrap().duration,
+            Duration::from_millis(20)
+        );
+        assert!(decode_narration(&audio).is_err());
+        let mut file = library.read(&saved.path).unwrap().file;
+        file.audio = Some(audio);
+        library.save(&saved.path, &file, &saved.stamp).unwrap();
+
+        let webm = estimate_in(
+            Some(&library),
+            from_library(&saved.path),
+            &options(VideoFormat::Webm),
+        )
+        .unwrap();
+        assert_eq!(webm.speed, 2.0);
+        assert_eq!(webm.narration_ms, Some(20));
+        // The export decodes the sound, and refuses it.
+        let out = tempfile::tempdir().unwrap();
+        let error = export_video_in(
+            Some(&library),
+            from_library(&saved.path),
+            &options(VideoFormat::Webm),
+            &out.path().join("essai.webm"),
+            None,
+            &mut |_| {},
+            &NOT_CANCELLED,
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), VIDEO_EXPORT_FAILED);
+        assert_eq!(fs::read_dir(out.path()).unwrap().count(), 0);
     }
 }

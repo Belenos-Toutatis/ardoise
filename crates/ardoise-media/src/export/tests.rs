@@ -354,6 +354,31 @@ fn a_narration_sets_the_time_base() {
 }
 
 #[test]
+fn the_headers_of_a_narration_give_the_plan_of_its_sound() {
+    // What `narration_header` reads of a stored narration plans as the narration decoded does.
+    let note = sample_note();
+    let mut early = narration(ms(3000), 1, -1500);
+    early.options.speed = 2.0;
+    for (stored, format) in [
+        (early, webm()),
+        (narration(ms(3000), 2, 500), mp4()),
+        (narration(ms(3000), 1, 500), gif()),
+    ] {
+        let header = crate::narration_header(&crate::encode_narration(&stored).unwrap()).unwrap();
+        let export = export(format);
+        assert_eq!(
+            plan_export_from_header(&note, &export, Some(&header)).unwrap(),
+            plan_export(&note, &export, Some(&stored)).unwrap(),
+            "{format:?}"
+        );
+    }
+    assert_eq!(
+        plan_export_from_header(&note, &export(webm()), None).unwrap(),
+        plan_export(&note, &export(webm()), None).unwrap()
+    );
+}
+
+#[test]
 fn invalid_settings_are_refused() {
     let note = sample_note();
     let plan = |export: AnimationExport| plan_export(&note, &export, None);

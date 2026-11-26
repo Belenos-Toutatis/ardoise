@@ -97,8 +97,10 @@ describe('the layers zone: structure', () => {
   it('frames the chosen row, with the data attribute, the class and aria-pressed on its name button', () => {
     const { zone, row, part } = render({ chosen: 1 });
     expect([...zone.querySelectorAll('li[data-chosen="true"]')].map((li) => (li as HTMLElement).dataset.layer)).toEqual(['1']);
-    expect(row(1).classList.contains('chosen')).toBe(true);
-    expect(row(0).classList.contains('chosen')).toBe(false);
+    expect(row(1).classList.contains('layer-chosen')).toBe(true);
+    expect(row(0).classList.contains('layer-chosen')).toBe(false);
+    // Never the wizard's `.chosen` of app.css (a top margin above the row).
+    expect(row(1).classList.contains('chosen')).toBe(false);
     expect(part(1, 'button.layer-name')!.getAttribute('aria-pressed')).toBe('true');
     expect(part(0, 'button.layer-name')!.getAttribute('aria-pressed')).toBe('false');
     expect(part(2, 'button.layer-name')!.getAttribute('aria-pressed')).toBe('false');

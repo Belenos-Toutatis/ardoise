@@ -10,9 +10,9 @@ use ardoise_core::note::{
 };
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
 use ardoise_render::{
-    Backdrop, Image, NoteView, PageCanvas, PdfOptions, Picture, RenderOptions, SvgOptions,
-    drawing_order, encode_jpeg, encode_png, note_to_svg, notes_to_pdf, paper_color, render_note,
-    scale_for_dpi,
+    Backdrop, Image, NoteView, OutlineEntry, PageCanvas, PdfOptions, Picture, RenderOptions,
+    Summary, SvgOptions, drawing_order, encode_jpeg, encode_png, note_to_svg, notes_to_pdf,
+    notes_to_pdf_page_by_page, notes_to_pdf_with_summary, paper_color, render_note, scale_for_dpi,
 };
 
 const PAGE: PageSize = PageSize {
@@ -558,4 +558,65 @@ fn the_pdf_embeds_the_image_with_its_transparency() {
     let page = document.get_dictionary(pages[2]).unwrap();
     let resources = page.get(b"Resources").unwrap().as_dict().unwrap();
     assert!(resources.get(b"XObject").is_err());
+}
+
+/// The PDF of notes whose pixels are decoded as each page is written: the same document as with every picture
+/// decoded beforehand, each page asking for its own once, in order, after the page before let go of its pixels
+/// (a PDF of many notes made from the pages of a PDF never holds more than one decoded image).
+#[test]
+fn a_pdf_can_take_the_pixels_of_one_page_at_a_time() {
+    use std::rc::{Rc, Weak};
+
+    let photo = Picture::decode(encode_jpeg(&quadrants(), 92).unwrap()).unwrap();
+    let clear = png_picture(&image(40, 20, |x, _| [20, 40, 220, (x * 6) as u8]));
+    let pictures = [Some(photo), None, Some(clear)];
+    let first = note(white(), Some(placed(RECT, 1, 0.6)), vec![]);
+    let second = note(
+        white(),
+        Some(placed(RECT, 0, 1.0)),
+        vec![line(Rgba::BLACK, (500.0, 500.0), (4500.0, 500.0))],
+    );
+    let notes = [&first, &second, &second];
+    let views: Vec<NoteView<'_>> = notes
+        .iter()
+        .zip(&pictures)
+        .map(|(note, picture)| NoteView::new(note, picture.as_ref()))
+        .collect();
+    let options = PdfOptions::default();
+    let outline = [OutlineEntry {
+        title: "fond".into(),
+        level: 0,
+        page: 1,
+        at: None,
+    }];
+    let summary = Summary {
+        title: "Classeur".into(),
+        entries: Vec::new(),
+    };
+    for front in [None, Some((&summary, "Sommaire"))] {
+        let mut asked = Vec::new();
+        let mut given: Vec<Weak<Picture>> = Vec::new();
+        let pdf = notes_to_pdf_page_by_page(
+            &notes,
+            |index| {
+                asked.push(index);
+                assert!(
+                    given.iter().all(|weak| weak.strong_count() == 0),
+                    "the pixels of a page before are still held"
+                );
+                let picture = Rc::new(pictures[index].clone()?);
+                given.push(Rc::downgrade(&picture));
+                Some(picture)
+            },
+            &options,
+            &outline,
+            front,
+        )
+        .unwrap();
+        assert_eq!(asked, [0, 1, 2]);
+        assert_eq!(
+            pdf,
+            notes_to_pdf_with_summary(&views, &options, &outline, front).unwrap()
+        );
+    }
 }

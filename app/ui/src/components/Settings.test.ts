@@ -524,3 +524,37 @@ describe('settings: pen and touch (M8)', () => {
     expect(section.textContent).toContain('Draw with a finger');
   });
 });
+
+describe('settings: a refused save', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Changes a select as the user does. */
+  const pick = async (select: HTMLSelectElement, value: string) => {
+    select.value = value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+  };
+
+  it('puts the theme field back to the saved theme and says why', async () => {
+    vi.spyOn(api, 'setTheme').mockRejectedValueOnce({ code: 'settingsReadOnly', message: 'read only' });
+    const { target, onchange } = await render('fr');
+    const theme = [...target.querySelectorAll<HTMLSelectElement>('label.field select')].find((s) => [...s.options].some((o) => o.value === 'dark'))!;
+    expect(theme.value).toBe('system');
+    await pick(theme, 'dark');
+    expect(onchange).not.toHaveBeenCalled();
+    expect(theme.value).toBe('system');
+    expect(target.querySelector('p.error[role="alert"]')).not.toBeNull();
+  });
+
+  it('puts the language field back to the saved language', async () => {
+    vi.spyOn(api, 'setLanguage').mockRejectedValueOnce({ code: 'settingsReadOnly', message: 'read only' });
+    const { target, onchange } = await render('fr');
+    const language = [...target.querySelectorAll<HTMLSelectElement>('label.field select')].find((s) => [...s.options].some((o) => o.value === 'en'))!;
+    expect(language.value).toBe('auto');
+    await pick(language, 'en');
+    expect(onchange).not.toHaveBeenCalled();
+    expect(language.value).toBe('auto');
+  });
+});

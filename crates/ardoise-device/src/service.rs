@@ -35,7 +35,7 @@ use ardoise_core::settings::{BoardPosition, LiveButton, Orientation, TabletSetti
 use ardoise_proto::live::LiveRecord;
 use serde::{Deserialize, Serialize};
 
-pub use crate::pages::{Stored, StoredPage};
+pub use crate::pages::{ExportFailure, Stored, StoredPage};
 use crate::session::{DeviceError, DownloadedPage, valid_name};
 use crate::transport::{Connector, TabletKind, TransportError};
 
@@ -80,6 +80,11 @@ pub enum RegisterStep {
 #[serde(rename_all = "camelCase")]
 pub enum Pending {
     Sync,
+    /// A sync that waits for the Bamboo Slate alone, both tablets known (`slateSync`): one that
+    /// may not delete the blackboard's pages (asked while the blackboard was not connected,
+    /// "delete after import" off: SPEC §4.1, `docs/questions.md` Q15). The blackboard connecting
+    /// first leaves it waiting (Q28); it runs when the Slate connects.
+    SlateSync,
     Live,
 }
 
@@ -190,6 +195,24 @@ pub struct LastSync {
     /// part only, `pageRescued`...); `None` when it read every page it meant to. Unlike
     /// [`TabletStatus::error`], it stays until the next sync, even across reconnections.
     pub error: Option<StatusError>,
+    /// The automatic export (PDF or PNG) of notes of this sync that could not be written
+    /// (`docs/questions.md` Q28): the notes are in the library and the sync did not fail for it,
+    /// so it is never `error`, and is said after it. `None` when every export was written, or
+    /// none was asked.
+    pub export_failed: Option<ExportFailed>,
+}
+
+/// The automatic exports a sync could not write ([`LastSync::export_failed`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportFailed {
+    /// Notes whose export could not be written.
+    pub notes: u16,
+    /// The first of them: the file it was to write, or the folder that cannot hold it, relative
+    /// to the library when it is inside it ([`ExportFailure::path`]).
+    pub path: String,
+    /// Why, as the system says it.
+    pub reason: String,
 }
 
 /// A failure shown to the user: `code` selects a translated sentence (`errorCodes.*`).
@@ -733,7 +756,9 @@ impl TabletService {
     /// are synced only by a request made with `confirm_blackboard_delete` while the blackboard
     /// is the connected tablet; such a request without it is refused
     /// ([`DeviceError::BlackboardConfirmDelete`], nothing done), and a request made while
-    /// nothing or the Slate is connected does nothing for the blackboard.
+    /// nothing or the Slate is connected does nothing for the blackboard: with the Slate known
+    /// too, it waits for the Slate, also past a blackboard that connects first
+    /// ([`Pending::SlateSync`]).
     pub fn sync_now(&self, confirm_blackboard_delete: bool) -> Result<(), DeviceError> {
         let status = self.status();
         let on_board = status.active == Some(TabletKind::Blackboard);

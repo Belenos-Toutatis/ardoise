@@ -70,12 +70,18 @@ pub struct Narration {
 /// Samples per channel in a millisecond.
 const FRAMES_PER_MS: i128 = NARRATION_SAMPLE_RATE as i128 / 1000;
 
-/// Longest track [`Narration::merge`] builds (4 hours): two narrations further apart keep only
-/// the later one, rather than allocating gigabytes of silence between them.
-const MAX_MERGED_FRAMES: i128 = 4 * 3600 * NARRATION_SAMPLE_RATE as i128;
+/// Longest narration (4 hours), in samples per channel: no longer `audio.opus` is read
+/// ([`decode_narration`], [`narration_header`]) nor built ([`Narration::merge`]), and a recording
+/// stops before it ([`MAX_RECORDING_FRAMES`](crate::microphone::MAX_RECORDING_FRAMES)), so that
+/// the app never writes a narration it refuses to read back.
+pub const MAX_NARRATION_FRAMES: u64 = 4 * 3600 * NARRATION_SAMPLE_RATE as u64;
 
-/// Longest `audio.opus` read (4 hours, like [`MAX_MERGED_FRAMES`]), in samples per channel.
-const MAX_STREAM_FRAMES: u64 = 4 * 3600 * NARRATION_SAMPLE_RATE as u64;
+/// Longest track [`Narration::merge`] builds: two narrations further apart keep only the later
+/// one, rather than allocating gigabytes of silence between them.
+const MAX_MERGED_FRAMES: i128 = MAX_NARRATION_FRAMES as i128;
+
+/// Longest `audio.opus` read, in samples per channel.
+const MAX_STREAM_FRAMES: u64 = MAX_NARRATION_FRAMES;
 
 impl Narration {
     /// Length of the clip.

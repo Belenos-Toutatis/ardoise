@@ -21,6 +21,7 @@
     editing = false,
     color,
     paper,
+    darkPaper = false,
     left,
     top,
     width,
@@ -36,6 +37,8 @@
     color: Rgba;
     /** The colour of the note's paper, under the preview. */
     paper: string;
+    /** The paper is dark (slate, a dark custom colour): the waiting text must be light to be read on it. */
+    darkPaper?: boolean;
     /** Where the panel goes in the canvas area, pixels. */
     left: number;
     top: number;
@@ -233,7 +236,7 @@
     oninput={schedule}
     {onkeydown}
   ></textarea>
-  <div class="preview" style:background={paper} data-slot="equation-preview">
+  <div class="preview" class:dark={darkPaper} style:background={paper} data-slot="equation-preview">
     {#if preview && drawing}
       <svg
         role="img"
@@ -249,7 +252,7 @@
       <span class="preview-empty">{t('editor.equation.previewEmpty')}</span>
     {/if}
   </div>
-  <p class="status" id="equation-panel-status" role="status" aria-live="polite" class:error={problem !== null} data-slot="equation-status">
+  <p class="equation-status" id="equation-panel-status" role="status" aria-live="polite" class:error={problem !== null} data-slot="equation-status">
     {#if problem}
       {describe(problem)}
     {:else if converting}
@@ -334,14 +337,18 @@
     font-size: 0.85rem;
   }
 
-  .status {
+  .preview.dark .preview-empty {
+    color: #d0d0d0;
+  }
+
+  .equation-status {
     min-height: 1.2em;
     margin: 0;
     font-size: 0.85rem;
     color: var(--muted);
   }
 
-  .status.error {
+  .equation-status.error {
     color: var(--danger);
   }
 

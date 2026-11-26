@@ -10,7 +10,7 @@
 //!   [`BoardSession::sync_page`]. A sync deletes the blackboard's pages only with a permission
 //!   ([`BoardPermission`]): "delete after import" on (checked again at each start), or a request
 //!   confirmed while the blackboard was the connected tablet (SPEC §4.1). Without one, a sync
-//!   does nothing for the blackboard.
+//!   does nothing for the blackboard, and keeps waiting for the Slate when one is known (Q28).
 //! - **Dirty stream**: a transfer that did not end cleanly leaves the session dirty; the link is
 //!   then closed and opened again before anything else ([`Worker::board_reopen`]), the sync or
 //!   live mode under way carrying on over the new link.
@@ -266,12 +266,15 @@ impl Worker {
         // Live mode waiting stopped, nothing left pending, unless the Slate holds the link: its
         // sync, live mode and what waits for it stay.
         if self.session.is_none() {
+            // A sync that waits for the Slate alone is not the blackboard's: it stays (Q28).
+            let slate_only = self.want_sync && !self.board_may_sync() && self.record.is_some();
             if let Some(run) = self.sync.take() {
                 self.finish_sync(run, None);
             }
             self.stop_live();
             self.close_session("the blackboard is forgotten");
             self.want_sync = false;
+            self.slate_sync |= slate_only;
         }
         self.board_permission = None;
         identity::forget_blackboard(&root).map_err(|e| DeviceError::Storage(e.to_string()))?;
@@ -375,11 +378,7 @@ impl Worker {
             self.board_permission = self.board_permission.max(Some(BoardPermission::Option));
         }
         if self.want_sync && self.board_permission.is_none() {
-            self.note(
-                "a sync was waiting without the permission to delete the blackboard's pages: \
-                 nothing for the blackboard (delete after import is off, no deletion confirmed)",
-            );
-            self.want_sync = false;
+            self.leave_sync_to_slate();
         }
         let details = self.board_details(info);
         let known = self.known_tablets();
@@ -574,10 +573,7 @@ impl Worker {
             None => false,
         };
         if !allowed {
-            self.note(
-                "the blackboard's pages are imported only with delete after import on, or when \
-                 the deletion is confirmed",
-            );
+            self.leave_sync_to_slate();
             let pending = self.pending();
             self.publisher.update(|status| status.pending = pending);
             return;
@@ -654,6 +650,7 @@ impl Worker {
             board: BoardSync::default(),
             deferred: None,
             partial: Vec::new(),
+            export_failures: Vec::new(),
         };
         let mut run = run;
         // Rescued pages first (docs/design/blackboard.md §9.2): one that cannot be imported
@@ -666,6 +663,24 @@ impl Worker {
             self.finish_sync(run, None);
         } else {
             self.sync = Some(run);
+        }
+    }
+
+    /// The sync that waits may not delete the blackboard's pages, which holds the link: nothing
+    /// for the blackboard (SPEC §4.1, Q15). It stays for the Slate when one is known, and runs at
+    /// the Slate's next connection (Q28); otherwise nothing waits any more.
+    fn leave_sync_to_slate(&mut self) {
+        self.want_sync = false;
+        self.board_permission = None;
+        let reason = "without the permission to delete the blackboard's pages (delete after \
+                      import is off, no deletion confirmed): nothing for the blackboard";
+        if self.record.is_some() {
+            self.slate_sync = true;
+            self.note(format!(
+                "a sync waits {reason}; it waits for the Bamboo Slate"
+            ));
+        } else {
+            self.note(format!("a sync was waiting {reason}"));
         }
     }
 

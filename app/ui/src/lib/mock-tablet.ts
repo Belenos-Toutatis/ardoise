@@ -65,6 +65,11 @@ export const mockTablet = {
   boardPages: 3,
   /** Beats until a search gives up (60 s in the service). */
   boardSearchBeats: 60,
+  /**
+   * The automatic export of every note synced fails (Q28): the file named and why, as the service says the first one
+   * (`lastSync.exportFailed`). Null: every export is written.
+   */
+  exportFailure: null as { path: string; reason: string } | null,
 };
 
 const FIRMWARE = 'B160805A-C170704A';
@@ -133,6 +138,7 @@ export function resetMockTablet(): void {
   mockTablet.boardBattery = 90;
   mockTablet.boardPages = 3;
   mockTablet.boardSearchBeats = 60;
+  mockTablet.exportFailure = null;
 }
 
 function registeredInfo(): TabletInfo | null {
@@ -280,10 +286,14 @@ function afterForget(s: Sim, kind: TabletKind): void {
   } else if (wasActive) {
     clearTimers(s);
     s.sync = null;
-    update(s, { connection: 'searching', device, sync: null, pending: null });
+    // A sync that waited for the Slate is not the blackboard's: it stays, the Slate now the only tablet known (Q28).
+    const pending = kind === 'blackboard' && s.status.pending === 'slateSync' ? 'sync' : null;
+    update(s, { connection: 'searching', device, sync: null, pending });
     comeIntoRange(s);
   } else {
-    update(s, { device });
+    // The sync that waited for the Slate goes with it; what waits otherwise stays.
+    const pending = kind === 'slate' && s.status.pending === 'slateSync' ? null : s.status.pending;
+    update(s, { device, pending });
   }
 }
 
@@ -334,9 +344,11 @@ function connected(s: Sim): void {
   update(s, { connection: 'connected', active: kind, device, error: null });
   // A live run that was waiting for the blackboard: refused when its pages may not be synced first, else they are synced.
   if (kind === 'blackboard') mockLiveBoardConnected();
-  const wanted = s.status.pending === 'sync';
+  // A sync that waits for the Slate alone is not the blackboard's (Q28).
+  const wanted = s.status.pending === 'sync' || (kind === 'slate' && s.status.pending === 'slateSync');
   // The blackboard is read without being asked only with deletion on (it always deletes what it reads): with the
-  // option off its pages wait for a sync confirmed by the user, and a sync that waited for it brings nothing.
+  // option off its pages wait for a sync confirmed by the user, and a sync that waited for it brings nothing to it: it
+  // keeps waiting for the Slate when one is known (Q28).
   const mayRun = kind === 'slate' || s.status.options.deleteAfterImport;
   const automatic = s.status.options.autoSync && mayRun;
   const waiting = (kind === 'blackboard' ? s.boardStored : s.stored).length;
@@ -345,7 +357,7 @@ function connected(s: Sim): void {
       if (s.status.connection === 'connected') startSync(s);
     });
   } else if (wanted) {
-    update(s, { pending: null });
+    update(s, { pending: kind === 'blackboard' && s.status.registered ? 'slateSync' : null });
   }
 }
 
@@ -460,17 +472,25 @@ function startSync(s: Sim): void {
   let deleted = 0;
   update(s, {
     connection: 'syncing',
-    pending: null,
+    // The blackboard's sync leaves the one that waits for the Slate (Q28).
+    pending: board && s.status.pending === 'slateSync' ? 'slateSync' : null,
     error: null,
     sync: { current: Math.min(1, pages.length), total: pages.length, saved: 0 },
   });
 
   const finish = () => {
     s.sync = null;
+    const failure = mockTablet.exportFailure;
     update(s, {
       connection: 'connected',
       sync: null,
-      lastSync: { at: Date.now(), saved, deleted, error: null },
+      lastSync: {
+        at: Date.now(),
+        saved,
+        deleted,
+        error: null,
+        exportFailed: failure && saved.length > 0 ? { notes: saved.length, ...failure } : null,
+      },
       device: deviceOf(s, kind) ?? s.status.device,
     });
   };
@@ -678,6 +698,9 @@ function cancel(s: Sim): void {
   } else if (s.sync) {
     // Between two pages: the page being written is finished.
     s.sync.cancelled = true;
+  } else if (s.status.pending === 'sync' || s.status.pending === 'slateSync') {
+    // Nothing under way: the sync that waits is dropped.
+    update(s, { pending: null });
   }
 }
 
@@ -735,7 +758,11 @@ export function mockTabletInvoke(command: string, args: Record<string, unknown>)
       if (c === 'connected') {
         startSync(s);
       } else {
-        update(s, { pending: 'sync' });
+        // As Rust: a sync that may not take the blackboard's pages is the Slate's alone when both are known (Q15, Q28).
+        const boardPart =
+          s.status.options.deleteAfterImport || (s.status.active === 'blackboard' && args.confirmBlackboardDelete === true);
+        const slateOnly = !boardPart && s.status.registered !== null && s.board !== null;
+        update(s, { pending: slateOnly ? 'slateSync' : 'sync' });
       }
       return undefined;
     }

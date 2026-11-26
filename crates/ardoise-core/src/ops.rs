@@ -173,7 +173,9 @@ pub fn split_at_time(note: &Note, at_ms: u32, new: NewNote) -> Result<Split, Ops
     let moved_objects = moved_objects
         .into_iter()
         .map(|o| PageObject {
-            t: o.t - first_moved,
+            // A bookmark between the cut and the first moved content is no content: 0, not
+            // an overflow.
+            t: o.t.saturating_sub(first_moved),
             ..o
         })
         .collect();

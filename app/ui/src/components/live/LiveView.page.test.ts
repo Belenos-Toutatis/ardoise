@@ -459,3 +459,34 @@ describe('the live window Fond tab', () => {
     await tick();
   });
 });
+
+describe('the live window toolbar', () => {
+  it('gives the focus back after a choice made with the mouse, so that the keys of live mode go on', async () => {
+    const view = render();
+    await live(view);
+    const tool = view.q<HTMLSelectElement>('.live-toolbar select')!;
+    choose(tool, 'fountainPen');
+    await vi.waitFor(() => expect(tool.value).toBe('fountainPen'));
+    expect(document.activeElement).not.toBe(tool);
+    // P is the computer's pen, not a search among the tools of the menu (« Plume », « Pinceau »).
+    const pen = view.q<HTMLButtonElement>('button[data-action="pen"]')!;
+    press(document.activeElement ?? document.body, 'p');
+    await vi.waitFor(() => expect(pen.getAttribute('aria-pressed')).toBe('true'));
+    expect(tool.value).toBe('fountainPen');
+    // The slider of the width as well.
+    const width = view.q<HTMLInputElement>('.live-toolbar input[type="range"]')!;
+    choose(width, '200');
+    expect(document.activeElement).not.toBe(width);
+  });
+
+  it('keeps the focus on a control used with the keyboard (Tab, then the arrows)', async () => {
+    const view = render();
+    await live(view);
+    const tool = view.q<HTMLSelectElement>('.live-toolbar select')!;
+    tool.focus();
+    press(tool, 'ArrowDown');
+    choose(tool, 'feltTip', false);
+    await vi.waitFor(() => expect(tool.value).toBe('feltTip'));
+    expect(document.activeElement).toBe(tool);
+  });
+});

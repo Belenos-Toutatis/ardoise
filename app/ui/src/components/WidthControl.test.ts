@@ -37,7 +37,7 @@ async function type(field: HTMLInputElement, text: string) {
 describe('width control', () => {
   it('shows the width in millimetres and names its controls', () => {
     const ui = render(60);
-    expect(ui.typed().value).toBe('0.60');
+    expect(ui.typed().value).toBe('0,60');
     expect(ui.typed().getAttribute('aria-label')).toBe('Épaisseur en millimètres');
     expect(ui.q('[data-step="down"]').getAttribute('aria-label')).toBe('Épaisseur : plus fin');
     expect(ui.q('[data-step="up"]').getAttribute('aria-label')).toBe('Épaisseur : plus épais');
@@ -78,7 +78,7 @@ describe('width control', () => {
     await type(ui.typed(), 'abc');
     await type(ui.typed(), '');
     expect(ui.kept).toEqual([]);
-    expect(ui.typed().value).toBe('0.60');
+    expect(ui.typed().value).toBe('0,60');
   });
 
   it('follows the slider while it moves and keeps the value when it is let go', () => {

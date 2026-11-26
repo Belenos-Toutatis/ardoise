@@ -3,10 +3,14 @@
 //! security headers. One request per connection (`Connection: close`); nothing pipelined is read.
 
 use std::fmt::Write as _;
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 /// Longest request head accepted (request line and headers).
 pub(crate) const MAX_HEAD: usize = 16 * 1024;
+/// Longest entry of `X-Forwarded-For` or value of `for=` read as the address of a PC: an IPv6
+/// address written in full with an IPv4 end (45 characters) in brackets with a port is 53.
+/// Anything longer is no address, and is not even parsed.
+pub(crate) const MAX_FORWARDED_ADDRESS: usize = 64;
 /// Most headers accepted in a request.
 pub(crate) const MAX_HEADERS: usize = 32;
 /// Longest body accepted (`POST /join` only).
@@ -42,6 +46,119 @@ pub(crate) struct Head {
     pub hosts: Vec<String>,
     /// A proxy forwarded it (`Via`, `Forwarded` or `X-Forwarded-For` given): for the journal.
     pub proxied: bool,
+    /// The PC that the proxy says it forwards the request for.
+    pub forwarded_for: ForwardedFor,
+}
+
+/// The PC that a proxy says it forwards a request for (`docs/design/lan-share.md`, "Behind a
+/// proxy"). Read from `X-Forwarded-For` when the request has one (squid adds it by default,
+/// e2guardian with `addforwardedfor`), else from `Forwarded: for=` (RFC 7239). In both, the nearest
+/// proxy, the one this share is connected to, writes its entry last: the entries before it come
+/// from the browser or from proxies further away, and only the last is read (MDN,
+/// "X-Forwarded-For"; RFC 7239 §4), save a loopback one (see [`nearest_pc`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ForwardedFor {
+    /// Neither header.
+    Absent,
+    /// The header read (its name) gives no address: empty, too long, not an address.
+    Unreadable(&'static str),
+    /// The address of the PC, and the header it was read from.
+    Address(IpAddr, &'static str),
+}
+
+impl ForwardedFor {
+    /// The address of the PC, if one was read.
+    pub fn address(self) -> Option<IpAddr> {
+        match self {
+            ForwardedFor::Address(address, _) => Some(address),
+            ForwardedFor::Absent | ForwardedFor::Unreadable(_) => None,
+        }
+    }
+}
+
+/// The PC that the nearest proxy names, from the addresses of a header's entries, last first:
+/// the last entry, or while it is a loopback address, the one before it. A loopback entry is
+/// written by a proxy whose client runs on its own machine: the classic filter is e2guardian
+/// handing each request to a squid on the same router (e2guardian adds its `X-Forwarded-For`
+/// only when it goes through that upstream proxy, and squid appends its own client's address,
+/// e2guardian's: `<PC>, 127.0.0.1`). A browser elsewhere never gets a loopback entry written for
+/// it, so it cannot use this to choose its name. That the school's filter is built that way is
+/// (supposé): without this step every PC behind such a pair is one client, `127.0.0.1`.
+fn nearest_pc(mut entries: impl Iterator<Item = Option<IpAddr>>) -> Option<IpAddr> {
+    let mut found = entries.next()??;
+    while found.is_loopback() {
+        match entries.next() {
+            Some(earlier) => found = earlier?,
+            None => break,
+        }
+    }
+    Some(found)
+}
+
+/// The entries of the values of a header given several times, last first: one list (RFC 9110
+/// §5.3; e2guardian adds a line of its own after the browser's rather than appending to it).
+fn entries_last_first<'a>(values: &'a [&'a [u8]]) -> impl Iterator<Item = &'a [u8]> + 'a {
+    values
+        .iter()
+        .rev()
+        .flat_map(|value| value.rsplit(|&b| b == b','))
+}
+
+/// The address of the PC in the `X-Forwarded-For` headers (see [`nearest_pc`]).
+fn forwarded_for_header(values: &[&[u8]]) -> ForwardedFor {
+    let entries = entries_last_first(values).map(forwarded_address);
+    match nearest_pc(entries) {
+        Some(address) => ForwardedFor::Address(address, "X-Forwarded-For"),
+        None => ForwardedFor::Unreadable("X-Forwarded-For"),
+    }
+}
+
+/// The address of the PC in the `Forwarded` headers: the `for=` of their last element
+/// (`for=192.0.2.60;proto=http, for="[2001:db8::17]:4711"`; see [`nearest_pc`]). A quoted value
+/// holding a comma is cut there, and then gives no address.
+fn forwarded_header(values: &[&[u8]]) -> ForwardedFor {
+    let entries = entries_last_first(values).map(|element| {
+        element
+            .split(|&b| b == b';')
+            .find_map(|pair| {
+                let mut parts = pair.splitn(2, |&b| b == b'=');
+                let name = parts.next()?;
+                let value = parts.next()?;
+                name.trim_ascii()
+                    .eq_ignore_ascii_case(b"for")
+                    .then_some(value)
+            })
+            .and_then(forwarded_address)
+    });
+    match nearest_pc(entries) {
+        Some(address) => ForwardedFor::Address(address, "Forwarded"),
+        None => ForwardedFor::Unreadable("Forwarded"),
+    }
+}
+
+/// One address as proxies write it: `192.0.2.60`, `192.0.2.60:4711`, `2001:db8::17`,
+/// `[2001:db8::17]`, `[2001:db8::17]:4711`, perhaps in quotes; the port is dropped and an IPv4
+/// address written as IPv6 (`::ffff:192.0.2.60`) is the IPv4 address. `None` for anything else
+/// (`unknown`, `_hidden`, a name, an empty or overlong value).
+fn forwarded_address(text: &[u8]) -> Option<IpAddr> {
+    let text = text.trim_ascii();
+    let text = text
+        .strip_prefix(b"\"")
+        .and_then(|inner| inner.strip_suffix(b"\""))
+        .unwrap_or(text);
+    if text.is_empty() || text.len() > MAX_FORWARDED_ADDRESS {
+        return None;
+    }
+    let text = std::str::from_utf8(text).ok()?;
+    let address = text
+        .parse::<IpAddr>()
+        .ok()
+        .or_else(|| text.parse::<SocketAddr>().ok().map(|socket| socket.ip()))
+        .or_else(|| {
+            let inner = text.strip_prefix('[')?.strip_suffix(']')?;
+            inner.parse::<Ipv6Addr>().ok().map(IpAddr::V6)
+        })?;
+    Some(address.to_canonical())
 }
 
 impl Head {
@@ -189,6 +306,9 @@ pub(crate) fn parse_head(buf: &[u8]) -> Result<Option<Head>, HeadError> {
     let mut origins = Vec::new();
     let mut hosts = Vec::new();
     let mut proxied = false;
+    // Their values, in order (at most `MAX_HEADERS`).
+    let mut x_forwarded_for: Vec<&[u8]> = Vec::new();
+    let mut forwarded: Vec<&[u8]> = Vec::new();
     // A value that is not UTF-8 is kept lossily: it then matches nothing expected.
     let text = |value: &[u8]| String::from_utf8_lossy(value).trim().to_owned();
     for header in request.headers.iter() {
@@ -207,13 +327,25 @@ pub(crate) fn parse_head(buf: &[u8]) -> Result<Option<Head>, HeadError> {
             origins.push(text(header.value));
         } else if name.eq_ignore_ascii_case("host") {
             hosts.push(text(header.value));
-        } else if ["via", "forwarded", "x-forwarded-for"]
-            .iter()
-            .any(|proxy| name.eq_ignore_ascii_case(proxy))
-        {
+        } else if name.eq_ignore_ascii_case("x-forwarded-for") {
+            proxied = true;
+            x_forwarded_for.push(header.value);
+        } else if name.eq_ignore_ascii_case("forwarded") {
+            proxied = true;
+            forwarded.push(header.value);
+        } else if name.eq_ignore_ascii_case("via") {
             proxied = true;
         }
     }
+    // `X-Forwarded-For` first: it is the header the usual proxies add, so a `Forwarded` header
+    // that a browser makes up beside it is never read.
+    let forwarded_for = if !x_forwarded_for.is_empty() {
+        forwarded_for_header(&x_forwarded_for)
+    } else if !forwarded.is_empty() {
+        forwarded_header(&forwarded)
+    } else {
+        ForwardedFor::Absent
+    };
     Ok(Some(Head {
         method: method.to_owned(),
         target: target.to_owned(),
@@ -225,6 +357,7 @@ pub(crate) fn parse_head(buf: &[u8]) -> Result<Option<Head>, HeadError> {
         origins,
         hosts,
         proxied,
+        forwarded_for,
     }))
 }
 
@@ -467,6 +600,178 @@ mod tests {
         assert_eq!(
             head.session_cookies,
             vec!["one".to_owned(), "two".to_owned()]
+        );
+    }
+
+    #[test]
+    fn the_pc_a_proxy_forwards_for() {
+        let read = |headers: &str| {
+            let head = parse(&format!("POST /join HTTP/1.1\r\n{headers}\r\n"))
+                .unwrap()
+                .unwrap();
+            (head.proxied, head.forwarded_for)
+        };
+        let v4 = |text: &str| IpAddr::V4(text.parse().unwrap());
+        let v6 = |text: &str| IpAddr::V6(text.parse().unwrap());
+        let xff = |address| (true, ForwardedFor::Address(address, "X-Forwarded-For"));
+        let standard = |address| (true, ForwardedFor::Address(address, "Forwarded"));
+        assert_eq!(read(""), (false, ForwardedFor::Absent));
+        assert_eq!(
+            read("Via: 1.1 e2guardian\r\n"),
+            (true, ForwardedFor::Absent)
+        );
+        // The last entry is the one the nearest proxy wrote; those before come from the browser.
+        for (headers, address) in [
+            ("X-Forwarded-For: 192.168.228.37\r\n", v4("192.168.228.37")),
+            (
+                "X-Forwarded-For: 10.9.9.9, 192.168.228.37\r\n",
+                v4("192.168.228.37"),
+            ),
+            (
+                "X-Forwarded-For: 10.9.9.9\r\nx-forwarded-for:  192.168.228.37 \r\n",
+                v4("192.168.228.37"),
+            ),
+            (
+                "X-Forwarded-For: 192.168.228.37:61050\r\n",
+                v4("192.168.228.37"),
+            ),
+            (
+                "X-Forwarded-For: \"192.168.228.37\"\r\n",
+                v4("192.168.228.37"),
+            ),
+            ("X-Forwarded-For: 2001:db8::17\r\n", v6("2001:db8::17")),
+            ("X-Forwarded-For: [2001:DB8::17]\r\n", v6("2001:db8::17")),
+            (
+                "X-Forwarded-For: [2001:db8::17]:4711\r\n",
+                v6("2001:db8::17"),
+            ),
+            // An IPv4 address written as IPv6 is that IPv4 address: one record, not two.
+            (
+                "X-Forwarded-For: ::ffff:192.168.228.37\r\n",
+                v4("192.168.228.37"),
+            ),
+            // Two proxies on one machine (e2guardian, then squid): the loopback entry is the
+            // first one's, the one before it is the PC.
+            (
+                "X-Forwarded-For: 192.168.228.37, 127.0.0.1\r\n",
+                v4("192.168.228.37"),
+            ),
+            (
+                "X-Forwarded-For: 10.9.9.9, 192.168.228.37, ::1, 127.0.0.1\r\n",
+                v4("192.168.228.37"),
+            ),
+            (
+                "X-Forwarded-For: 192.168.228.37\r\nX-Forwarded-For: 127.0.0.1\r\n",
+                v4("192.168.228.37"),
+            ),
+            // A browser on the proxy's own machine.
+            ("X-Forwarded-For: 127.0.0.1\r\n", v4("127.0.0.1")),
+            ("X-Forwarded-For: ::1, 127.0.0.1\r\n", v6("::1")),
+        ] {
+            assert_eq!(read(headers), xff(address), "{headers:?}");
+        }
+        // A loopback entry after one that is no address: no PC, never the loopback.
+        assert_eq!(
+            read("X-Forwarded-For: unknown, 127.0.0.1\r\n"),
+            (true, ForwardedFor::Unreadable("X-Forwarded-For"))
+        );
+        // A loopback address before the proxy's own entry is the browser's word: never read.
+        assert_eq!(
+            read("X-Forwarded-For: 127.0.0.1, 192.168.228.37\r\n"),
+            xff(v4("192.168.228.37"))
+        );
+        for (headers, address) in [
+            ("Forwarded: for=192.0.2.60\r\n", v4("192.0.2.60")),
+            (
+                "Forwarded: proto=http;For=192.0.2.60;by=203.0.113.43\r\n",
+                v4("192.0.2.60"),
+            ),
+            (
+                "Forwarded: for=10.9.9.9, for=\"[2001:db8:cafe::17]:4711\"\r\n",
+                v6("2001:db8:cafe::17"),
+            ),
+            (
+                "Forwarded: for=10.9.9.9\r\nForwarded: for = 192.0.2.60\r\n",
+                v4("192.0.2.60"),
+            ),
+            (
+                "Forwarded: for=192.0.2.60;proto=http, for=127.0.0.1\r\n",
+                v4("192.0.2.60"),
+            ),
+        ] {
+            assert_eq!(read(headers), standard(address), "{headers:?}");
+        }
+        // `X-Forwarded-For` first, whatever the order: a browser cannot add `Forwarded` to
+        // choose its own address beside the proxy's `X-Forwarded-For`.
+        assert_eq!(
+            read("Forwarded: for=10.9.9.9\r\nX-Forwarded-For: 192.168.228.37\r\n"),
+            xff(v4("192.168.228.37"))
+        );
+        // Nothing that is not an address is ever used.
+        let huge = "9".repeat(8 * 1024);
+        let many = format!("{}192.168.228.37", "10.0.0.1, ".repeat(1000));
+        assert_eq!(
+            read(&format!("X-Forwarded-For: {many}\r\n")),
+            xff(v4("192.168.228.37"))
+        );
+        let near_limit = format!("{}1", "0".repeat(MAX_FORWARDED_ADDRESS + 1));
+        for value in [
+            "",
+            " ",
+            ",",
+            "192.168.228.37,",
+            "192.168.228.37, ",
+            "unknown",
+            "pc-salle12",
+            "192.168.228.300",
+            "192.168.228",
+            "fe80::1%eth0",
+            "[2001:db8::17",
+            "\"\"",
+            "1.2.3.4 5.6.7.8",
+            &huge,
+            &near_limit,
+        ] {
+            assert_eq!(
+                read(&format!("X-Forwarded-For: {value}\r\n")),
+                (true, ForwardedFor::Unreadable("X-Forwarded-For")),
+                "{:.60}",
+                value
+            );
+        }
+        for value in [
+            "",
+            "for=",
+            "for=unknown",
+            "for=_hidden",
+            "for=\"_gazonk\"",
+            "proto=http;by=203.0.113.43",
+            "for=192.0.2.60, proto=http",
+            "for=\"[2001:db8::17],x\"",
+            "for",
+        ] {
+            assert_eq!(
+                read(&format!("Forwarded: {value}\r\n")),
+                (true, ForwardedFor::Unreadable("Forwarded")),
+                "{value:?}"
+            );
+        }
+        // Bytes that are not UTF-8 are no address either (earlier entries do not matter).
+        let mut raw =
+            b"GET / HTTP/1.1\r\nX-Forwarded-For: \xff\xfe, 192.168.228.37\r\n\r\n".to_vec();
+        let head = parse_head(&raw).unwrap().unwrap();
+        assert_eq!(head.forwarded_for, xff(v4("192.168.228.37")).1);
+        raw = b"GET / HTTP/1.1\r\nX-Forwarded-For: 192.168.228.37, \xff\r\n\r\n".to_vec();
+        let head = parse_head(&raw).unwrap().unwrap();
+        assert_eq!(
+            head.forwarded_for,
+            ForwardedFor::Unreadable("X-Forwarded-For")
+        );
+        assert_eq!(ForwardedFor::Unreadable("Forwarded").address(), None);
+        assert_eq!(ForwardedFor::Absent.address(), None);
+        assert_eq!(
+            xff(v4("192.168.228.37")).1.address(),
+            Some(v4("192.168.228.37"))
         );
     }
 

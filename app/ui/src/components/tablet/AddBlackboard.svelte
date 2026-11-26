@@ -18,6 +18,12 @@
   let { onclose }: { onclose: () => void } = $props();
 
   type Phase = 'intro' | 'running' | 'added' | 'error';
+  /**
+   * (supposé) How long the service takes, at most, to say something once asked: it takes a request at once when it is not
+   * busy. It says nothing when it refuses with the error its status holds already (Bluetooth still off): its status
+   * is published only when it changes (`Publisher::update`, crates/ardoise-device/src/service/worker.rs).
+   */
+  const NO_NEWS_MS = 1500;
 
   // A search already under way (started before the dialog was opened) is followed, not restarted.
   const underWay = untrack(() => tablet.status?.connection === 'adding');
@@ -32,6 +38,10 @@
   let leaving = false;
   /** The status held when the search was asked: any later one is news, even one that repeats the error shown before. */
   let askedAt: TabletStatus | null = null;
+  let noNews: ReturnType<typeof setTimeout> | undefined;
+  /** The status the dialog gave up on for want of news; a later search under way says it began after all. */
+  let quiet: TabletStatus | null = null;
+  $effect(() => () => clearTimeout(noNews));
 
   const status = $derived(tablet.status);
   const found = $derived(status?.boardSearch?.found ?? []);
@@ -43,7 +53,13 @@
 
   // Follows the service while the search is under way.
   $effect(() => {
-    if (phase !== 'running' || !status || leaving) return;
+    if (!status || leaving) return;
+    if (phase === 'error' && quiet !== null && status !== quiet && status.connection === 'adding') {
+      quiet = null;
+      failure = null;
+      phase = 'running';
+    }
+    if (phase !== 'running') return;
     if (status.connection === 'adding') {
       sawSearch = true;
     } else if (status.error && (sawSearch || (askedAt === null ? !sameError(status.error, startError) : status !== askedAt))) {
@@ -64,17 +80,29 @@
   });
 
   async function search() {
+    clearTimeout(noNews);
+    quiet = null;
     sawSearch = false;
     startError = status?.error ?? null;
     failure = null;
     askedAt = null;
     phase = 'running';
+    const asked = tablet.status;
     if (!(await tablet.findBlackboards())) {
       failure = tablet.actionError;
       phase = 'error';
-    } else {
-      askedAt = tablet.status;
+      return;
     }
+    askedAt = tablet.status;
+    // Nothing came since the request, and the status holds an error: that error is the service's answer.
+    noNews = setTimeout(() => {
+      const now = tablet.status;
+      if (phase === 'running' && !leaving && !sawSearch && now !== null && now === asked && now.error) {
+        failure = errorMessage(now.error);
+        quiet = now;
+        phase = 'error';
+      }
+    }, NO_NEWS_MS);
   }
 
   async function add(address: string) {

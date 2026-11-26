@@ -503,7 +503,8 @@
       "title": "Change the library",
       "hint": "Ardoise will show the notes of this folder at once, on this PC only ({machine}). The notes of the current library stay in their folder.",
       "confirm": "Use this folder",
-      "current": "This is already the library of this PC: nothing changes."
+      "current": "This is already the library of this PC: nothing changes.",
+      "working": "Work is under way on your notes: wait for it to finish (or stop it) before changing the library."
     },
     "tabletAdded": "Added on",
     "boardForgetConfirm": "Forget the Xiaomi tablet? Ardoise will no longer look for it and it will have to be added again, on every computer. It stays linked to Mi Home."
@@ -523,7 +524,8 @@
     "readOnlyHint": "The assistant can read and see your notes, but neither change them nor drive Ardoise. Recommended when it only needs to read.",
     "code": {
       "title": "Claude Code",
-      "hint": "Once, in PowerShell or the command prompt (Ardoise is then available in all your projects). Copy the command as it is, quotes around -- included:"
+      "hint": "Once, in PowerShell or the command prompt (Ardoise is then available in all your projects). Copy the command as it is, quotes around -- included:",
+      "pathWarning": "The path of Ardoise holds a character ($, backtick or %) that PowerShell or the command prompt change: this command would register a wrong path. Fix the path by hand in the command, or use the Claude Desktop JSON entry below instead, which is exact."
     },
     "desktop": {
       "title": "Claude Desktop",
@@ -631,6 +633,7 @@
     "hint": {
       "searching": "Press the tablet's button briefly to connect it, and keep it close to the computer.",
       "pendingSync": "Syncing will start as soon as the tablet is connected.",
+      "pendingSyncSlate": "The sync you asked for waits for the Bamboo Slate: it will start as soon as the Slate is connected (press its button briefly). It does not import the Xiaomi tablet's pages.",
       "pendingLive": "Live mode will start as soon as the tablet is connected.",
       "searchingBoard": "Switch on the Xiaomi tablet and keep it close to the computer. Close Mi Home (or turn off the phone's Bluetooth): it talks to one application at a time.",
       "searchingBoth": "Switch on the Xiaomi tablet, or press the Bamboo Slate's button briefly. Close Mi Home (or turn off the phone's Bluetooth): the Xiaomi tablet talks to one application at a time.",
@@ -678,7 +681,11 @@
       "boardConfirmYes": "Sync and delete",
       "boardWaitingOne": "1 page is waiting on the Xiaomi tablet: it is imported only on request, with \"Sync\", and will be deleted from the tablet once its note is written.",
       "boardWaitingMany": "{count} pages are waiting on the Xiaomi tablet: they are imported only on request, with \"Sync\", and will be deleted from the tablet once their notes are written.",
-      "boardOnRequest": "The Xiaomi tablet imports its pages only on request: switch it on, then click \"Sync\" once it is connected."
+      "boardOnRequest": "The Xiaomi tablet imports its pages only on request: switch it on, then click \"Sync\" once it is connected.",
+      "exportFailed": {
+        "one": "A note was imported, but its automatic export could not be written: \"{path}\" ({reason}). Check that this folder is not read-only and that the file is not open in another program (Nextcloud, a PDF or image viewer). The details are in _ardoise\\diagnostics\\autoexport.log, in the library.",
+        "other": "{count} notes were imported, but their automatic export could not be written (the first: \"{path}\", {reason}). Check that this folder is not read-only and that the files are not open in another program (Nextcloud, a PDF or image viewer). The details are in _ardoise\\diagnostics\\autoexport.log, in the library."
+      }
     },
     "live": {
       "open": "Live mode",
@@ -771,6 +778,7 @@
       "title": "Tablets",
       "notConnected": "Not connected",
       "add": "Add a tablet",
+      "addUnavailable": "No tablet can be added for now.",
       "forgetLabel": "Forget the tablet “{name}”"
     },
     "board": {
@@ -966,6 +974,7 @@
     "videoExportFailed": "the video could not be written ({detail}); choose another location and check that there is enough space left",
     "invalidVideoSettings": "these video settings are not valid ({detail}); check the image size, the duration and the background",
     "codecUnavailable": "Windows cannot write MP4 files on this PC (the H.264 encoder is missing): install the OpenH264 backup in the Settings, or choose WebM",
+    "videoEncoderFailed": "the Windows video encoder failed ({detail}); try again, and check that there is enough space left on the disk. If it happens again, install the OpenH264 backup encoder (Settings, \"Backup video encoder (OpenH264)\"), which Ardoise will use for the next export, or choose the WebM format",
     "microphoneNotFound": "the chosen microphone cannot be found: plug it in, or choose another one in the Settings",
     "microphoneSilent": "Windows may be blocking access to the microphone: Settings > Privacy & security > Microphone > \"Let desktop apps access your microphone\"",
     "microphoneFailed": "the microphone cannot be used ({detail}); check that no other program is using it",
@@ -1550,7 +1559,7 @@
     },
     "export": {
       "button": "Export…",
-      "hint": "Export the note as PNG, JPG, SVG or PDF"
+      "hint": "Export the note as PNG, JPG, WebP, SVG or PDF"
     },
     "print": {
       "button": "Print…",
@@ -1734,7 +1743,8 @@
       "noData": "The microphone sends nothing. Check that it is plugged in properly, or choose another one.",
       "failed": "The microphone failed: {detail}",
       "failedUnknown": "The microphone is not working.",
-      "silent": "Windows may be blocking access to the microphone: open Settings > Privacy & security > Microphone and turn on \"Let desktop apps access your microphone\". A microphone mute switch gives the same result."
+      "silent": "Windows may be blocking access to the microphone: open Settings > Privacy & security > Microphone and turn on \"Let desktop apps access your microphone\". A microphone mute switch gives the same result.",
+      "full": "Longest length reached (4 hours): the recording stops."
     },
     "record": {
       "open": "Record a narration",
@@ -1756,7 +1766,8 @@
       "unsavedWarning": "This note has unsaved changes. Save it first (Ctrl+S), otherwise they will not be kept with the narration.",
       "replaceQuestion": "This note already has a narration ({duration}). Replace it with this new recording?",
       "replaceYes": "Replace",
-      "replaceNo": "Keep the old one"
+      "replaceNo": "Keep the old one",
+      "limitReached": "The recording stopped by itself: it reached its longest length (4 hours)."
     },
     "pending": {
       "title": "Recording on hold",
@@ -2110,7 +2121,7 @@
       "damaged": "Damaged file: remove it, then download it again"
     },
     "download": "Download from Cisco",
-    "downloadHint": "The file comes from Cisco's server; its fingerprint is checked before it is installed. Its licence is shown below.",
+    "downloadHint": "The file comes from Cisco's server; its fingerprint is checked before it is installed. Its licence is shown above.",
     "downloading": "Downloading…",
     "downloadProgress": "{received} of {total} MB",
     "downloadReceived": "{received} MB received",

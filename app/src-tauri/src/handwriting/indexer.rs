@@ -670,7 +670,7 @@ fn run(shared: &Shared) {
     lock(&shared.cache).load_files(files);
     let mut seen = 0;
     loop {
-        let generation = {
+        let (generation, stopped) = {
             let mut inner = lock_for_wait(&shared.inner);
             while !inner.quit && inner.generation == seen {
                 inner = shared
@@ -682,28 +682,33 @@ fn run(shared: &Shared) {
                 return;
             }
             seen = inner.generation;
-            if inner.stopped {
-                continue;
-            }
-            seen
+            (seen, inner.stopped)
         };
+        if stopped {
+            list_only(shared, generation);
+            continue;
+        }
         pass(shared, generation);
         shared.flush();
     }
 }
 
-/// One pass over the library (see the module documentation).
-fn pass(shared: &Shared, generation: u64) {
-    // Not even the listing of the library while live mode runs.
-    if !shared.wait_while_busy(generation) {
-        return;
-    }
+/// The settings, the library they name (when it opens) and its notes, the most recently changed
+/// first.
+fn list_library(
+    shared: &Shared,
+) -> (
+    IndexConfig,
+    Option<Library>,
+    Vec<ardoise_core::library::NoteEntry>,
+) {
     unlocked("reading the settings");
     let config = (shared.services.config)();
-    // Listed even when nothing can be recognised here: the search still finds the corrected
-    // transcriptions (`set_note_text`) of the notes listed.
     unlocked("listing the library");
-    let library = config.library.and_then(|root| Library::open(root).ok());
+    let library = config
+        .library
+        .clone()
+        .and_then(|root| Library::open(root).ok());
     let mut notes = library
         .as_ref()
         .map(|library| library.list().notes)
@@ -713,6 +718,47 @@ fn pass(shared: &Shared, generation: u64) {
             .cmp(&a.modified)
             .then_with(|| a.path.cmp(&b.path))
     });
+    (config, library, notes)
+}
+
+/// What a stopped indexer does of a request: it recognises nothing, but still lists the library,
+/// so that the interface's search follows a note renamed, redated or moved, and a library
+/// changed, instead of giving the paths of an older listing. Live mode is waited for as in a
+/// pass (without touching the status, which says stopped).
+fn list_only(shared: &Shared, generation: u64) {
+    loop {
+        {
+            let inner = lock_for_wait(&shared.inner);
+            if inner.generation != generation || inner.quit {
+                return;
+            }
+        }
+        unlocked("asking whether live mode runs");
+        if !(shared.services.busy)() {
+            break;
+        }
+        let inner = lock_for_wait(&shared.inner);
+        if inner.generation == generation && !inner.quit {
+            let _ = shared.wake.wait_timeout(inner, shared.services.pause_poll);
+        }
+    }
+    let (_, _, notes) = list_library(shared);
+    let mut inner = lock(&shared.inner);
+    if inner.generation == generation && !inner.quit {
+        inner.listed = Arc::new(notes.iter().map(Listed::from).collect());
+        inner.ready = inner.ready.max(generation);
+    }
+}
+
+/// One pass over the library (see the module documentation).
+fn pass(shared: &Shared, generation: u64) {
+    // Not even the listing of the library while live mode runs.
+    if !shared.wait_while_busy(generation) {
+        return;
+    }
+    // Listed even when nothing can be recognised here: the search still finds the corrected
+    // transcriptions (`set_note_text`) of the notes listed.
+    let (config, library, notes) = list_library(shared);
     if !shared.still(generation) {
         return;
     }
@@ -1428,6 +1474,44 @@ mod tests {
         h.indexer.resume();
         h.idle(4);
         assert_eq!(h.indexer.search("energie").len(), 1);
+        h.indexer.shutdown();
+    }
+
+    #[test]
+    fn a_stopped_indexer_still_lists_the_library() {
+        let (dir, library) = library();
+        let cat = create(&library, "Chat", &[1]);
+        let fake = Fake::new(&[Language::Fr]);
+        let h = harness(dir.path(), fake.clone());
+        h.idle(1);
+        assert_eq!(h.indexer.search("chat").len(), 1);
+
+        // A note renamed while stopped: the search no longer gives its old path, and nothing
+        // is recognised.
+        h.indexer.stop();
+        let loaded = library.read(&cat).unwrap();
+        let renamed = library
+            .retitle(&cat, "Le chat", Some(&loaded.stamp))
+            .unwrap()
+            .path;
+        assert_ne!(renamed, cat);
+        let generation = h.indexer.refresh();
+        h.wait("the listing", |_| h.indexer.ready(generation));
+        let listed: Vec<PathBuf> = lock(&h.indexer.shared.inner)
+            .listed
+            .iter()
+            .map(|note| note.path.clone())
+            .collect();
+        assert_eq!(listed, [renamed]);
+        assert!(h.indexer.search("chat").is_empty());
+        assert_eq!(h.indexer.status().state, IndexState::Stopped);
+        assert_eq!(fake.calls.load(Ordering::SeqCst), 1);
+
+        // Resumed: the renamed note is found again, still without a new recognition.
+        h.indexer.resume();
+        h.idle(1);
+        assert_eq!(h.indexer.search("chat").len(), 1);
+        assert_eq!(fake.calls.load(Ordering::SeqCst), 1);
         h.indexer.shutdown();
     }
 

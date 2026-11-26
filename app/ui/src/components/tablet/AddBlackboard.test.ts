@@ -164,6 +164,23 @@ describe('adding the Xiaomi tablet', () => {
     expect(q('[data-step="error"]')!.textContent).toContain('Aucune tablette Xiaomi trouvée');
   });
 
+  it('takes the error the status holds for the answer when the service says nothing more (Bluetooth still off)', async () => {
+    const { q, step, click } = await render('fr', { forgetSlate: true });
+    // The service refuses with the error its status holds already, and publishes nothing (only changes are published).
+    mockTabletPatch({ connection: 'unavailable', error: { code: 'bluetoothOff', message: '' } });
+    await settle();
+    vi.spyOn(api, 'tabletFindBlackboards').mockResolvedValue(undefined);
+    await click('[data-action="search"]');
+    expect(step()).toBe('searching');
+    await beat(2);
+    expect(step()).toBe('error');
+    expect(q('[data-step="error"]')!.textContent).toContain('Le Bluetooth est désactivé');
+    // The search began after all (Bluetooth back, the request taken late): it is followed.
+    mockTabletPatch({ connection: 'adding', error: null, boardSearch: { found: [], until: Date.now() + 60_000 } });
+    await settle();
+    expect(step()).toBe('searching');
+  });
+
   it('can be cancelled at every step, and stops the search', async () => {
     const cancel = vi.spyOn(api, 'tabletCancel');
     const first = await render();

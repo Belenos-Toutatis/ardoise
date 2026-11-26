@@ -134,8 +134,17 @@ impl State {
         for name in names {
             let path = dir.join(name);
             let is_main = name.eq_ignore_ascii_case(ORDER_FILE);
-            match load::<OrderFile>(&path, MAX_FILE_BYTES) {
+            match load::<OrderFile>(&path, MAX_FILE_BYTES, VERSION) {
                 Loaded::Missing => {}
+                // A shape of a newer version: not understood, and no write while it is there.
+                Loaded::Newer(stamp) => {
+                    if state.newer.is_none() {
+                        state.newer = Some(path.clone());
+                    }
+                    if is_main {
+                        state.main = Main::Readable(stamp);
+                    }
+                }
                 // Held by something else for now: no order this time, and no write.
                 Loaded::Unreadable(source) if is_main => return Err(io_error(&path)(source)),
                 Loaded::Unreadable(_) => {}
@@ -593,6 +602,34 @@ mod tests {
         );
         assert_eq!(error.code(), "orderNewer");
         assert_eq!(fs::read(&path).unwrap(), bytes);
+    }
+
+    /// The version decides, not whether this version can parse the rest: a newer shape is never
+    /// overwritten (it used to be taken for damage and replaced).
+    #[test]
+    fn a_newer_version_in_another_shape_is_never_overwritten() {
+        let (dir, library) = new_library();
+        library.create_binder(Path::new("Classe")).unwrap();
+        let path = order_path(&library, "Classe");
+        let bytes = br#"{"version":2,"changed":"2026-11-26","notes":[{"id":"a"},{"id":"b"}]}"#;
+        fs::write(&path, bytes).unwrap();
+        assert!(library.binder_order(Path::new("Classe")).is_empty());
+        let error = library
+            .set_binder_order(Path::new("Classe"), &ids(&["b", "a"]))
+            .unwrap_err();
+        assert!(
+            matches!(error, LibraryError::OrderNewer { .. }),
+            "{error:?}"
+        );
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        assert_eq!(names(&dir.path().join("Classe")), [ORDER_FILE]);
+
+        // A file without any version is still damage, and is replaced.
+        fs::write(&path, br#"{"notes":[1]}"#).unwrap();
+        library
+            .set_binder_order(Path::new("Classe"), &ids(&["b", "a"]))
+            .unwrap();
+        assert_eq!(library.binder_order(Path::new("Classe")), ids(&["b", "a"]));
     }
 
     #[test]
