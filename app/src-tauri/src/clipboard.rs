@@ -37,8 +37,9 @@ pub fn clipboard_payload(
     let Some(source) = loaded.first() else {
         return Err(export_error("nothing to copy"));
     };
-    let image =
-        render_note(source.view(), &RenderOptions::at_dpi(dpi, true)).map_err(render_error)?;
+    let image = source
+        .with_view(|view| render_note(view, &RenderOptions::at_dpi(dpi, true)))
+        .map_err(render_error)?;
     clipboard_image_at(&image, Some(dpi)).map_err(render_error)
 }
 

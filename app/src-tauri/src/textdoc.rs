@@ -161,8 +161,9 @@ fn render_drawings(source: &LoadedSource, areas: &[&DrawingArea]) -> CommandResu
         0.299 * f32::from(paper.r) + 0.587 * f32::from(paper.g) + 0.114 * f32::from(paper.b);
     let dpi = drawing_dpi(note.page);
     let options = RenderOptions::at_dpi(dpi, luminance < 110.0);
-    let image = render_note(NoteView::new(&note, source.picture.as_deref()), &options)
-        .map_err(render_error)?;
+    let picture = source.decoded_picture();
+    let image =
+        render_note(NoteView::new(&note, picture.as_deref()), &options).map_err(render_error)?;
     let scale = scale_for_dpi(dpi);
     areas
         .iter()
@@ -880,6 +881,33 @@ mod tests {
                 .iter()
                 .any(|p| p[..3] == [255, 255, 255])
         );
+    }
+
+    /// The notes made from the pages of a PDF are all read before any drawing is cut out: each note's background
+    /// image is decoded as its drawings are, and let go before the next note's (one page is about 35 MB of pixels).
+    #[test]
+    fn the_drawings_of_many_notes_decode_one_background_image_at_a_time() {
+        let (_dir, library) = crate::library::tests::library();
+        let paths = crate::export::tests::notes_with_images(&library, 3);
+        let sources: Vec<ExportSource> = paths
+            .iter()
+            .map(|path| ExportSource {
+                path: crate::library::path_text(path),
+                note: None,
+                image_key: None,
+            })
+            .collect();
+        let fake = Fake::new(true);
+        let peak = crate::export::tests::peak_of(|| {
+            let mut loaded = load_sources(Some(&library), sources).unwrap();
+            for source in &mut loaded {
+                source.note.strokes = self::source().note.strokes;
+                let structure = structure_for(&source.note, &reading(None), &fake, None);
+                let document = document_of(source, &structure, true).unwrap();
+                assert_eq!(document.drawings().count(), 1);
+            }
+        });
+        assert_eq!(peak, 1);
     }
 
     #[test]

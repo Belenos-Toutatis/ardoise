@@ -46,8 +46,8 @@ pub use clipboard::{ClipboardImage, clipboard_image, clipboard_image_at};
 pub use labels::{LABEL_HEIGHT_PX, LabelSpot, draw_labels};
 pub use look::{Blend, Fill, Grain, Look};
 pub use pdf::{
-    OutlineEntry, PdfOptions, PdfPage, bookmark_outline, notes_to_pdf, notes_to_pdf_with_outline,
-    notes_to_pdf_with_summary,
+    OutlineEntry, PdfOptions, PdfPage, bookmark_outline, notes_to_pdf, notes_to_pdf_page_by_page,
+    notes_to_pdf_with_outline, notes_to_pdf_with_summary,
 };
 pub use picture::{NoteView, Picture, PictureError, PictureFormat, StoredImage};
 pub use summary::{Summary, SummaryEntry, SummaryKind};

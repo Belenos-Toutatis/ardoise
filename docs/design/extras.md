@@ -190,7 +190,10 @@ and the `mock-*.ts` stand-ins, `locales/fr.json` and `locales/en.json` (each par
 ### How it is built
 
 - **Pixels and the renderer.** `ardoise_render::picture` decodes a note file's `background.*` member once into a
-  `Picture` (the encoded bytes and the RGBA pixels). The renderer takes `NoteView { note, picture }` wherever it took
+  `Picture` (the encoded bytes and the RGBA pixels). An export, a print or a drag of several notes keeps only the
+  encoded bytes of each (`export::StoredPicture`) and decodes one image at a time, when its note is drawn
+  (`LoadedSource::with_view`, `notes_to_pdf_page_by_page`): a page of a PDF is about 36 MB once decoded, and the 80
+  notes of an 80-page PDF used to hold 2.9 GB at once (audit of 2026-11-26). The renderer takes `NoteView { note, picture }` wherever it took
   a note (`render_note`, `PageCanvas::new`, `note_to_svg`, `notes_to_pdf`, `FrameRenderer::with_picture`,
   `export_animation`); a plain `&Note` converts into a view without pixels, so callers that never have an image
   (golden images, Inkspace comparison, tablet pages, live notes) did not change. The image is part of the page

@@ -1470,14 +1470,26 @@ pub(crate) mod tests {
             pdf_page: crate::export::PdfPageSize::Actual,
             layers: None,
         };
-        let bytes = crate::export::image_bytes(
-            loaded[0].view(),
-            crate::export::ExportFormat::Png,
-            &options,
-        )
-        .unwrap();
-        let exported = ardoise_render::decode_png(&bytes).unwrap();
+        let png = |source: &crate::export::LoadedSource| {
+            let bytes = source
+                .with_view(|view| {
+                    crate::export::image_bytes(view, crate::export::ExportFormat::Png, &options)
+                })
+                .unwrap();
+            ardoise_render::decode_png(&bytes).unwrap()
+        };
+        let exported = png(&loaded[0]);
         assert!(close(rgb(&exported, 3, 20), [220, 30, 30]));
+        // No longer staged when the note is drawn (the editor closed meanwhile): the pixels the
+        // source kept are drawn.
+        let unstaged = crate::export::LoadedSource {
+            picture: Some(crate::export::StoredPicture::Staged {
+                key: "0-0".into(),
+                staged: staging.get(&staged.key).unwrap(),
+            }),
+            ..loaded[0].clone()
+        };
+        assert_eq!(png(&unstaged), exported);
         let missing = crate::export::ExportSource {
             image_key: Some("0-0".into()),
             ..source

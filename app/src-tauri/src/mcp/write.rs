@@ -28,9 +28,7 @@ use ardoise_mcp::write::{
     VideoResolution, VideoTiming, WriteServices, check_replay_plan,
 };
 use ardoise_media::OpenH264Codec;
-use ardoise_render::{
-    LayerMode, NoteView, PdfOptions, bookmark_outline, notes_to_pdf_with_outline,
-};
+use ardoise_render::{LayerMode, PdfOptions, bookmark_outline};
 use serde_json::json;
 
 use super::AppHandwriting;
@@ -262,24 +260,26 @@ impl AppWrite {
             }
             ExportTarget::File(target) => {
                 let bytes = if format == export::ExportFormat::Pdf {
-                    let views: Vec<NoteView<'_>> = sources.iter().map(LoadedSource::view).collect();
                     // One note: its bookmarks make the PDF's outline, as in the app's export.
                     let outline = match &sources[..] {
                         [single] => bookmark_outline(&single.note, 0, 0),
                         _ => Vec::new(),
                     };
-                    notes_to_pdf_with_outline(
-                        &views,
+                    export::sources_to_pdf(
+                        &sources,
                         &PdfOptions {
                             page: options.pdf_page.into(),
                             background: options.background,
                             layers: LayerMode::Merged,
                         },
                         &outline,
+                        None,
                     )
                     .map_err(|error| tool_error(export::render_error(error)))?
                 } else {
-                    export::image_bytes(sources[0].view(), format, &options).map_err(tool_error)?
+                    sources[0]
+                        .with_view(|view| export::image_bytes(view, format, &options))
+                        .map_err(tool_error)?
                 };
                 vec![write_target(target, &bytes)?]
             }

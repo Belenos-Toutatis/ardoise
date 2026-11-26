@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use ardoise_core::format::BackgroundFile;
 use ardoise_core::fsutil;
 use ardoise_core::library::{Library, LibraryError, note_file_stem};
 use ardoise_core::note::Note;
@@ -23,13 +24,13 @@ use ardoise_render::{
     LayerMode, MAX_DPI, MIN_DPI, NoteView, OutlineEntry, PdfOptions, PdfPage, Picture, RenderError,
     RenderOptions, Summary, SummaryEntry, SummaryKind, SvgOptions, bookmark_outline,
     encode_jpeg_at, encode_png_at, encode_webp, note_to_svg, notes_to_pdf,
-    notes_to_pdf_with_summary, render_note, render_note_transparent, scale_for_dpi,
+    notes_to_pdf_page_by_page, render_note, render_note_transparent, scale_for_dpi,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::AppContext;
-use crate::background;
+use crate::background::{self, Staged};
 use crate::commands::{CommandError, CommandResult};
 use crate::library::{library_error, library_of, path_text};
 
@@ -306,18 +307,115 @@ fn summary_of(request: &SummaryRequest, entries: &[(OutlineEntry, SummaryKind)])
 }
 
 /// A note ready to export, with the file name (without extension) its export takes and the
-/// pixels of its background image.
+/// pixels of its background image, still encoded.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoadedSource {
     pub note: Note,
     pub stem: String,
-    pub picture: Option<Arc<Picture>>,
+    pub picture: Option<StoredPicture>,
+}
+
+/// The pixels of a source's background image as they are stored (a PNG or JPEG file). They are decoded only as the
+/// note is drawn ([`LoadedSource::with_view`]) and let go once it is: an export, a print or a drag of many notes holds
+/// one decoded image at a time, not one per note (a page of a PDF stored at 300 dpi is about 35 MB of pixels).
+#[derive(Debug, Clone, PartialEq)]
+pub enum StoredPicture {
+    /// Staged for the editor under `key` (the staging area may keep it decoded).
+    Staged { key: String, staged: Arc<Staged> },
+    /// The `background.*` member of the note's file.
+    Member(BackgroundFile),
 }
 
 impl LoadedSource {
-    /// The note with its pixels, as the renderer takes it.
-    pub fn view(&self) -> NoteView<'_> {
-        NoteView::new(&self.note, self.picture.as_deref())
+    /// The pixels of the note's background image, decoded now for one drawing; `None` without an image, or when
+    /// they cannot be decoded (no image is drawn then).
+    pub fn decoded_picture(&self) -> Option<Arc<Picture>> {
+        let picture = match self.picture.as_ref()? {
+            StoredPicture::Staged { key, staged } => background::staging()
+                .picture(key)
+                // No longer staged (the editor closed meanwhile): the pixels kept here.
+                .or_else(|| {
+                    Picture::decode(staged.file.bytes.clone())
+                        .ok()
+                        .map(Arc::new)
+                }),
+            StoredPicture::Member(member) => {
+                background::picture_of(&self.note, Some(member)).map(Arc::new)
+            }
+        };
+        #[cfg(test)]
+        if let Some(picture) = &picture {
+            live_pictures::track(picture);
+        }
+        picture
+    }
+
+    /// `draw` given the note with the pixels of its background image, decoded for this call only.
+    pub fn with_view<T>(&self, draw: impl FnOnce(NoteView<'_>) -> T) -> T {
+        let picture = self.decoded_picture();
+        draw(NoteView::new(&self.note, picture.as_deref()))
+    }
+}
+
+/// What a source keeps of its background image's pixels: those staged under `key` (`backgroundMissing` when nothing
+/// is staged under it any more), or else (no key) the file's `member`; `None` for a note without an image.
+fn stored_picture(
+    note: &Note,
+    key: Option<&str>,
+    member: Option<BackgroundFile>,
+) -> CommandResult<Option<StoredPicture>> {
+    if note.background_image.is_none() {
+        return Ok(None);
+    }
+    Ok(match key {
+        Some(key) => Some(StoredPicture::Staged {
+            key: key.to_owned(),
+            staged: background::staged(background::staging(), key)?,
+        }),
+        None => member.map(StoredPicture::Member),
+    })
+}
+
+/// The background images decoded for the sources of an export on this thread that are still alive, and the most
+/// alive at once since [`reset`](live_pictures::reset): the tests' way to see that an export of many notes holds one
+/// at a time (a page of a PDF stored at 300 dpi is about 35 MB of pixels).
+#[cfg(test)]
+pub(crate) mod live_pictures {
+    use std::cell::RefCell;
+    use std::sync::{Arc, Weak};
+
+    use ardoise_render::Picture;
+
+    thread_local! {
+        static TRACKED: RefCell<(Vec<Weak<Picture>>, usize)> = const { RefCell::new((Vec::new(), 0)) };
+    }
+
+    /// Counts `picture`, just decoded, among those alive.
+    pub(crate) fn track(picture: &Arc<Picture>) {
+        TRACKED.with(|tracked| {
+            let (alive, peak) = &mut *tracked.borrow_mut();
+            alive.retain(|weak| weak.strong_count() > 0);
+            alive.push(Arc::downgrade(picture));
+            *peak = (*peak).max(alive.len());
+        });
+    }
+
+    /// Forgets the pictures decoded so far.
+    pub(crate) fn reset() {
+        TRACKED.with(|tracked| *tracked.borrow_mut() = (Vec::new(), 0));
+    }
+
+    /// The most pictures alive at once since the last [`reset`].
+    pub(crate) fn peak() -> usize {
+        TRACKED.with(|tracked| tracked.borrow().1)
+    }
+
+    /// How many decoded since the last [`reset`] are alive now.
+    pub(crate) fn alive() -> usize {
+        TRACKED.with(|tracked| {
+            let (alive, _) = &*tracked.borrow();
+            alive.iter().filter(|weak| weak.strong_count() > 0).count()
+        })
     }
 }
 
@@ -393,7 +491,7 @@ fn no_library() -> CommandError {
 /// The notes of `sources`: the note given with a source, or else the note at its path, which
 /// must be a note of `library` (`noLibrary` when a note must be read and there is none). The
 /// pixels of a note's background image are the staged ones of its key, or else the file's
-/// (an editor note not saved yet has none).
+/// (an editor note not saved yet has none), kept encoded: none is decoded here.
 pub fn load_sources(
     library: Option<&Library>,
     sources: Vec<ExportSource>,
@@ -415,7 +513,7 @@ pub fn load_sources(
                         }
                         _ => None,
                     };
-                    let picture = background::source_picture(&note, key, member.as_ref())?;
+                    let picture = stored_picture(&note, key, member)?;
                     (note, picture)
                 }
                 None => {
@@ -424,8 +522,7 @@ pub fn load_sources(
                         .read(path)
                         .map_err(library_error)?
                         .file;
-                    let picture =
-                        background::source_picture(&file.note, None, file.background.as_ref())?;
+                    let picture = stored_picture(&file.note, None, file.background)?;
                     (file.note, picture)
                 }
             };
@@ -493,6 +590,24 @@ pub fn image_bytes<'a>(
         .into_bytes()),
         ExportFormat::Pdf => notes_to_pdf(&[view], &pdf_options(options)).map_err(render_error),
     }
+}
+
+/// The PDF of `sources`, a page each, with `outline` and the `summary` pages in front: the pixels of each note's
+/// background image are decoded as its page is written, and let go before the next page's are.
+pub fn sources_to_pdf(
+    sources: &[LoadedSource],
+    options: &PdfOptions,
+    outline: &[OutlineEntry],
+    summary: Option<(&Summary, &str)>,
+) -> Result<Vec<u8>, RenderError> {
+    let notes: Vec<&Note> = sources.iter().map(|source| &source.note).collect();
+    notes_to_pdf_page_by_page(
+        &notes,
+        |index| sources.get(index).and_then(LoadedSource::decoded_picture),
+        options,
+        outline,
+        summary,
+    )
 }
 
 fn pdf_options(options: &ExportOptions) -> PdfOptions {
@@ -567,7 +682,6 @@ pub fn export_with_outline(
     match sources {
         [] => Err(nothing_to_export()),
         _ if format == ExportFormat::Pdf => {
-            let notes: Vec<NoteView<'_>> = sources.iter().map(LoadedSource::view).collect();
             // A binder's PDF: a bookmark per note with its own bookmarks under it. A PDF of one note
             // gets that note's bookmarks as its outline.
             let kinds = if binder.outline.len() == sources.len() {
@@ -587,8 +701,8 @@ pub fn export_with_outline(
                 .filter(|_| binder.outline.len() == sources.len())
                 .map(|request| (summary_of(request, &kinds), request.outline_title.as_str()));
             let entries: Vec<OutlineEntry> = kinds.into_iter().map(|(entry, _)| entry).collect();
-            let pdf = notes_to_pdf_with_summary(
-                &notes,
+            let pdf = sources_to_pdf(
+                sources,
                 &pdf_options(options),
                 &entries,
                 front.as_ref().map(|(summary, title)| (summary, *title)),
@@ -599,7 +713,7 @@ pub fn export_with_outline(
             Ok(vec![destination.to_path_buf()])
         }
         [single] => {
-            let bytes = image_bytes(single.view(), format, options)?;
+            let bytes = single.with_view(|view| image_bytes(view, format, options))?;
             check_cancelled(cancel)?;
             fsutil::write_atomic(destination, &bytes).map_err(write_error(destination))?;
             Ok(vec![destination.to_path_buf()])
@@ -610,7 +724,7 @@ pub fn export_with_outline(
                 .iter()
                 .map(|source| {
                     check_cancelled(cancel)?;
-                    let bytes = image_bytes(source.view(), format, options)?;
+                    let bytes = source.with_view(|view| image_bytes(view, format, options))?;
                     check_cancelled(cancel)?;
                     write_new_file(destination, &source.stem, format.extension(), &bytes)
                         .map_err(write_error(destination))
@@ -723,7 +837,7 @@ pub async fn export_notes(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::fs;
 
     use super::*;
@@ -1796,7 +1910,9 @@ mod tests {
             loaded[0].stem,
             saved.path.file_stem().unwrap().to_string_lossy()
         );
-        let svg = image_bytes(loaded[0].view(), ExportFormat::Svg, &options(150, true)).unwrap();
+        let svg = loaded[0]
+            .with_view(|view| image_bytes(view, ExportFormat::Svg, &options(150, true)))
+            .unwrap();
         let svg = String::from_utf8(svg).unwrap();
         assert_eq!(svg.matches("<path ").count(), 2);
         assert!(svg.contains("mix-blend-mode:multiply"));
@@ -2047,6 +2163,220 @@ mod tests {
         )
         .unwrap();
         assert_eq!(pdf_pages(&fs::read(&destination).unwrap()).len(), 2);
+    }
+
+    /// `count` notes of the library with a background image each (red and blue halves over the page), as the notes
+    /// made from the pages of a PDF are.
+    pub(crate) fn notes_with_images(library: &Library, count: usize) -> Vec<PathBuf> {
+        use ardoise_core::format::{BackgroundFile, NoteFile};
+        use ardoise_core::note::{BackgroundImage, ImageRect};
+
+        let member = BackgroundFile {
+            extension: "png".into(),
+            bytes: ardoise_render::encode_png(&crate::background::tests::halves(40, 20)).unwrap(),
+        };
+        (0..count)
+            .map(|index| {
+                let mut note = sample_note(&format!("Page {}", index + 1));
+                note.background_image = Some(BackgroundImage {
+                    name: "fiche.pdf".into(),
+                    pdf_page: Some(index as u32 + 1),
+                    rect: ImageRect {
+                        x: 0.0,
+                        y: 0.0,
+                        width: note.page.width as f32,
+                        height: note.page.height as f32,
+                    },
+                    quarter_turns: 0,
+                    opacity: 1.0,
+                });
+                let mut file = NoteFile::new(note);
+                file.background = Some(member.clone());
+                library.create(Path::new(""), &file).unwrap().path
+            })
+            .collect()
+    }
+
+    /// The most background images decoded for export sources alive at once while `run` runs.
+    pub(crate) fn peak_of(run: impl FnOnce()) -> usize {
+        live_pictures::reset();
+        run();
+        live_pictures::peak()
+    }
+
+    /// The notes at `paths` as read, and their background images decoded beforehand: what the files of an export
+    /// must show.
+    fn decoded(library: &Library, paths: &[PathBuf]) -> (Vec<Note>, Vec<Option<Picture>>) {
+        paths
+            .iter()
+            .map(|path| {
+                let file = library.read(path).unwrap().file;
+                let picture = crate::background::picture_of(&file.note, file.background.as_ref());
+                (file.note, picture)
+            })
+            .unzip()
+    }
+
+    /// Notes made from the pages of a PDF hold a page each, about 35 MB once decoded: an export, a print or a drag of
+    /// many of them decodes their images one at a time, as each note is drawn, never all of them first (80 pages made
+    /// 2.8 GB at once). The files are those of before: the same bytes as with every image decoded beforehand.
+    #[test]
+    fn the_images_of_many_notes_are_decoded_one_at_a_time() {
+        let (_dir, library) = library();
+        let paths = notes_with_images(&library, 4);
+        let sources = || {
+            paths
+                .iter()
+                .map(|path| from_library(path))
+                .collect::<Vec<_>>()
+        };
+        let (notes, pictures) = decoded(&library, &paths);
+        assert!(pictures.iter().all(Option::is_some));
+        let views: Vec<NoteView<'_>> = notes
+            .iter()
+            .zip(&pictures)
+            .map(|(note, picture)| NoteView::new(note, picture.as_ref()))
+            .collect();
+        let out = tempfile::tempdir().unwrap();
+        let mut peaks = Vec::new();
+
+        // Reading the notes decodes nothing: the print, the Markdown and Word exports and the text read them all
+        // before drawing any.
+        peaks.push((
+            "load",
+            peak_of(|| assert_eq!(load_sources(Some(&library), sources()).unwrap().len(), 4)),
+        ));
+
+        let options = options(72, true);
+        let pdf = out.path().join("classeur.pdf");
+        peaks.push((
+            "pdf",
+            peak_of(|| {
+                export_sources(
+                    Some(&library),
+                    sources(),
+                    ExportFormat::Pdf,
+                    &options,
+                    &pdf,
+                    &NOT_CANCELLED,
+                )
+                .unwrap();
+            }),
+        ));
+        let pdf = fs::read(&pdf).unwrap();
+        assert_eq!(pdf, notes_to_pdf(&views, &pdf_options(&options)).unwrap());
+        let without: Vec<&Note> = notes.iter().collect();
+        assert_ne!(pdf, notes_to_pdf(&without, &pdf_options(&options)).unwrap());
+
+        let folder = out.path().join("images");
+        let mut written = Vec::new();
+        peaks.push((
+            "png",
+            peak_of(|| {
+                written = export_sources(
+                    Some(&library),
+                    sources(),
+                    ExportFormat::Png,
+                    &options,
+                    &folder,
+                    &NOT_CANCELLED,
+                )
+                .unwrap();
+            }),
+        ));
+        for (file, view) in written.iter().zip(&views) {
+            let expected = image_bytes(*view, ExportFormat::Png, &options).unwrap();
+            assert_eq!(fs::read(file).unwrap(), expected);
+        }
+
+        let drag = out.path().join("drag");
+        let mut dragged = Vec::new();
+        peaks.push((
+            "drag",
+            peak_of(|| {
+                dragged = crate::drag::prepare_files(Some(&library), sources(), &drag).unwrap();
+            }),
+        ));
+        for (file, view) in dragged.iter().zip(&views) {
+            let expected =
+                image_bytes(*view, ExportFormat::Png, &self::options(150, true)).unwrap();
+            assert_eq!(fs::read(file).unwrap(), expected);
+        }
+
+        // A sheet of four notes: each drawn in its cell before the sheet goes to the printer.
+        let print = crate::print::PrintOptions {
+            background: true,
+            fit: crate::print::PrintFit::Fit,
+            per_sheet: 4,
+        };
+        let cell = crate::print::Placement {
+            x: 0,
+            y: 0,
+            width: 300,
+            height: 220,
+        };
+        let mut bitmaps = Vec::new();
+        peaks.push((
+            "print",
+            peak_of(|| {
+                let loaded = load_sources(Some(&library), sources()).unwrap();
+                for source in &loaded {
+                    bitmaps.push(crate::print::render_page(source, &cell, &print).unwrap());
+                }
+            }),
+        ));
+        for (bitmap, view) in bitmaps.iter().zip(&views) {
+            let render = RenderOptions {
+                scale: crate::print::render_scale(view.note.page, &cell),
+                background: true,
+            };
+            let expected = crate::print::bitmap_of(&render_note(*view, &render).unwrap());
+            assert_eq!(*bitmap, expected);
+        }
+
+        assert_eq!(
+            peaks,
+            [
+                ("load", 0),
+                ("pdf", 1),
+                ("png", 1),
+                ("drag", 1),
+                ("print", 1)
+            ]
+        );
+        assert_eq!(live_pictures::alive(), 0, "nothing kept once drawn");
+    }
+
+    /// A background member that cannot be decoded is still no error now that it is decoded as the note is drawn: the
+    /// note is exported without its image, as before.
+    #[test]
+    fn an_undecodable_background_image_is_left_out_without_an_error() {
+        let (_dir, library) = library();
+        let mut file = library
+            .read(&notes_with_images(&library, 1)[0])
+            .unwrap()
+            .file;
+        file.background = Some(ardoise_core::format::BackgroundFile {
+            extension: "png".into(),
+            bytes: b"\x89PNG\r\n\x1a\nno pixels".to_vec(),
+        });
+        let damaged = library.create(Path::new(""), &file).unwrap().path;
+        let out = tempfile::tempdir().unwrap();
+        let destination = out.path().join("page.png");
+        let peak = peak_of(|| {
+            export_sources(
+                Some(&library),
+                vec![from_library(&damaged)],
+                ExportFormat::Png,
+                &options(72, true),
+                &destination,
+                &NOT_CANCELLED,
+            )
+            .unwrap();
+        });
+        assert_eq!(peak, 0);
+        let without = image_bytes(&file.note, ExportFormat::Png, &options(72, true)).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), without);
     }
 
     #[test]

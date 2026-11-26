@@ -34,6 +34,7 @@
 //! are left out of that layer: they are drawn, not searchable.
 
 use std::collections::HashMap;
+use std::ops::Deref;
 
 use ardoise_core::note::Note;
 use ardoise_text::{FontFamily, TextStyle, layout};
@@ -42,7 +43,7 @@ use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str, TextStr};
 
 use crate::background::{Shape, VectorBackground};
 use crate::look::{Blend, UNITS_PER_INCH};
-use crate::picture::{DctColor, NoteView, PlacedPicture};
+use crate::picture::{DctColor, NoteView, Picture, PlacedPicture};
 use crate::summary::{self, Summary};
 use crate::svg::TEXTURE_QUALITY;
 use crate::text::TextFill;
@@ -173,20 +174,44 @@ pub fn notes_to_pdf_with_summary<'a, V>(
 where
     V: Into<NoteView<'a>> + Copy,
 {
+    let views: Vec<NoteView<'a>> = notes.iter().map(|&view| view.into()).collect();
+    let pages: Vec<&Note> = views.iter().map(|view| view.note).collect();
+    notes_to_pdf_page_by_page(
+        &pages,
+        |index| views.get(index).and_then(|view| view.picture),
+        options,
+        outline,
+        summary,
+    )
+}
+
+/// [`notes_to_pdf_with_summary`] for notes whose background images are decoded only as their page is written:
+/// `picture(i)` gives the pixels of `notes[i]` (`None`: no image is drawn) just before its page is written, once,
+/// in the order of the pages, and they are let go before the next page asks for its own. A PDF of many notes made
+/// from the pages of a PDF (about 35 MB of pixels each) then holds one decoded image at a time, not all of them;
+/// the document is the one [`notes_to_pdf_with_summary`] writes with the same pixels.
+pub fn notes_to_pdf_page_by_page<P>(
+    notes: &[&Note],
+    mut picture: impl FnMut(usize) -> Option<P>,
+    options: &PdfOptions,
+    outline: &[OutlineEntry],
+    summary: Option<(&Summary, &str)>,
+) -> Result<Vec<u8>, RenderError>
+where
+    P: Deref<Target = Picture>,
+{
     if notes.is_empty() {
         return Err(RenderError::Encode("no note to put in the PDF".into()));
     }
-    let views: Vec<NoteView<'a>> = notes.iter().map(|&view| view.into()).collect();
     let front = summary.map(|(summary, _)| {
-        let size = summary::page_size(options.page == PdfPage::A4, views[0].note.page);
+        let size = summary::page_size(options.page == PdfPage::A4, notes[0].page);
         summary::lay_out(summary, size)
     });
     let front_count = front.as_ref().map_or(0, |front| front.notes.len());
-    let all: Vec<NoteView<'_>> = front
+    let all: Vec<&Note> = front
         .iter()
         .flat_map(|front| front.notes.iter())
-        .map(|note| NoteView::new(note, None))
-        .chain(views.iter().copied())
+        .chain(notes.iter().copied())
         .collect();
     let count = i32::try_from(all.len())
         .map_err(|_| RenderError::Encode("too many notes for one PDF".into()))?;
@@ -215,8 +240,8 @@ where
     let bookmarks = Bookmarks::of(outline, all.len(), &mut next);
     let places: Vec<Placement> = all
         .iter()
-        .map(|view| {
-            let page = view.note.page;
+        .map(|note| {
+            let page = note.page;
             Placement::of(page.width as f32, page.height as f32, options.page)
         })
         .collect();
@@ -267,7 +292,13 @@ where
     pdf.pages(tree).kids(pages.iter().copied()).count(count);
     let mut groups = Groups::default();
     let mut fonts = TextFonts::default();
-    for (index, (&view, &page)) in all.iter().zip(&pages).enumerate() {
+    for (index, (&note, &page)) in all.iter().zip(&pages).enumerate() {
+        // The pixels of this page alone, let go once it is written (a summary page has none).
+        let pixels = match index.checked_sub(front_count) {
+            Some(index) => picture(index),
+            None => None,
+        };
+        let view = NoteView::new(note, pixels.as_deref());
         let groups = separate.then_some(&mut groups);
         let ids = Ids {
             tree,
@@ -311,8 +342,8 @@ where
     document.producer(TextStr("Ardoise"));
     if let (Some((summary, _)), true) = (summary, front_count > 0) {
         document.title(TextStr(summary.title.trim()));
-    } else if let [view] = &views[..] {
-        let title = view.note.title.trim();
+    } else if let [note] = notes {
+        let title = note.title.trim();
         if !title.is_empty() {
             document.title(TextStr(title));
         }
